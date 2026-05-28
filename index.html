@@ -185,6 +185,24 @@
     <!-- ── Functions ─────────────────────────────────────────── -->
     <category name="Functions" colour="#9b59b6" custom="PROCEDURE"></category>
 
+    <!-- [W1] Exceptions -->
+    <category name="Exceptions" colour="#d35400">
+      <block type="try_statement"></block>
+      <block type="try_statement">
+        <mutation else="0" finally="1"></mutation>
+      </block>
+      <block type="try_statement">
+        <mutation else="1" finally="1"></mutation>
+      </block>
+      <block type="raise_statement"></block>
+      <block type="assert_statement"></block>
+      <block type="with_statement">
+        <value name="CONTEXT">
+          <shadow type="text"><field name="TEXT">open("file.txt")</field></shadow>
+        </value>
+      </block>
+    </category>
+
     <!-- ── Motion & Pen ──────────────────────────────────────── -->
     <category name="Motion &amp; Pen" colour="#2b82c9">
       <block type="sprite_move">
