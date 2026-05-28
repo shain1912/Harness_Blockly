@@ -19,7 +19,9 @@ const TokenType = {
 const KEYWORDS = [
   'def', 'if', 'elif', 'else', 'while', 'for', 'in', 'and', 'or', 'not',
   'import', 'as', 'True', 'False', 'None', 'pass', 'return', 'class', 'lambda',
-  'break', 'continue'
+  'break', 'continue',
+  // [W2] scope, generator & import-family keywords
+  'del', 'global', 'nonlocal', 'yield', 'from'
 ];
 
 class Token {
@@ -446,6 +448,55 @@ class LambdaNode extends ASTNode {
   }
 }
 
+// [W2] del statement: del x, del d["k"], del a, b
+class DelNode extends ASTNode {
+  constructor(targets, line) {
+    super(line);
+    this.type = 'Del';
+    this.targets = targets || []; // array of expression nodes (Name / BinOp INDEX / Attribute)
+  }
+}
+
+// [W2] global declaration: global a, b
+class GlobalNode extends ASTNode {
+  constructor(names, line) {
+    super(line);
+    this.type = 'Global';
+    this.names = names || []; // array of identifier strings
+  }
+}
+
+// [W2] nonlocal declaration: nonlocal x, y
+class NonlocalNode extends ASTNode {
+  constructor(names, line) {
+    super(line);
+    this.type = 'Nonlocal';
+    this.names = names || []; // array of identifier strings
+  }
+}
+
+// [W2] yield / yield from: yield, yield x, yield from gen()
+class YieldNode extends ASTNode {
+  constructor(value, isFrom, line) {
+    super(line);
+    this.type = 'Yield';
+    this.value = value || null; // expression or null (bare yield)
+    this.isFrom = !!isFrom;     // true for "yield from"
+  }
+}
+
+// [W2] from-import: from <module> import <names>, level = number of leading dots
+class FromImportNode extends ASTNode {
+  constructor(module, level, names, isStar, line) {
+    super(line);
+    this.type = 'FromImport';
+    this.module = module || '';      // dotted module name (may be '' for "from . import x")
+    this.level = level || 0;         // number of leading dots (relative import depth)
+    this.names = names || [];        // array of { name, asName }
+    this.isStar = !!isStar;          // true for "from m import *"
+  }
+}
+
 // -------------------------------------------------------------
 // 3. Recursive Descent AST Parser
 // -------------------------------------------------------------
@@ -529,6 +580,18 @@ class Parser {
           return new ContinueNode(tok.line);
         case 'import':
           return this.parseImport();
+        // [W2] from ... import ...
+        case 'from':
+          return this.parseFromImport();
+        // [W2] del / global / nonlocal / yield statements
+        case 'del':
+          return this.parseDel();
+        case 'global':
+          return this.parseGlobal();
+        case 'nonlocal':
+          return this.parseNonlocal();
+        case 'yield':
+          return this.parseYield();
         case 'if':
           return this.parseIf();
         case 'while':
@@ -548,27 +611,131 @@ class Parser {
     return this.parseExpressionStatement();
   }
 
+  // [W2] Read a dotted module name (a.b.c) starting at the current identifier.
+  parseDottedName(errMsg) {
+    let name = this.expect(TokenType.IDENTIFIER, undefined, errMsg || 'Expected name').value;
+    while (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '.') {
+      this.next(); // consume '.'
+      const part = this.expect(TokenType.IDENTIFIER, undefined, 'Expected name after "."');
+      name += '.' + part.value;
+    }
+    return name;
+  }
+
   parseImport() {
     const tok = this.expect(TokenType.KEYWORD, 'import');
     const names = [];
-    
-    const nameId = this.expect(TokenType.IDENTIFIER, undefined, 'Expected library name after import');
+
+    // [W2] support dotted module names (import a.b.c)
+    const firstName = this.parseDottedName('Expected library name after import');
     let alias = null;
     if (this.match(TokenType.KEYWORD, 'as')) {
       alias = this.expect(TokenType.IDENTIFIER, undefined, 'Expected alias name after as').value;
     }
-    names.push({ name: nameId.value, as: alias });
+    names.push({ name: firstName, as: alias });
 
     while (this.match(TokenType.SYMBOL, ',')) {
-      const subName = this.expect(TokenType.IDENTIFIER, undefined, 'Expected library name after comma');
+      const subName = this.parseDottedName('Expected library name after comma');
       let subAlias = null;
       if (this.match(TokenType.KEYWORD, 'as')) {
         subAlias = this.expect(TokenType.IDENTIFIER, undefined, 'Expected alias name').value;
       }
-      names.push({ name: subName.value, as: subAlias });
+      names.push({ name: subName, as: subAlias });
     }
 
     return new ImportNode(names, tok.line);
+  }
+
+  // [W2] from <module> import <names> | from . import x | from .pkg import a, b as c | from m import *
+  parseFromImport() {
+    const tok = this.expect(TokenType.KEYWORD, 'from');
+
+    // Count leading dots for relative imports (each '.' token = one level).
+    let level = 0;
+    while (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '.') {
+      this.next();
+      level += 1;
+    }
+
+    // Module name is optional when relative (e.g. "from . import x").
+    let module = '';
+    if (this.peek() && this.peek().type === TokenType.IDENTIFIER) {
+      module = this.parseDottedName('Expected module name in from-import');
+    }
+
+    this.expect(TokenType.KEYWORD, 'import', 'Expected "import" in from-import statement');
+
+    // Star import: from m import *
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '*') {
+      this.next();
+      return new FromImportNode(module, level, [], true, tok.line);
+    }
+
+    const names = [];
+    const readName = () => {
+      const n = this.expect(TokenType.IDENTIFIER, undefined, 'Expected imported name');
+      let asName = null;
+      if (this.match(TokenType.KEYWORD, 'as')) {
+        asName = this.expect(TokenType.IDENTIFIER, undefined, 'Expected alias name after as').value;
+      }
+      names.push({ name: n.value, asName });
+    };
+    readName();
+    while (this.match(TokenType.SYMBOL, ',')) {
+      // allow trailing comma before newline (defensive)
+      const nxt = this.peek();
+      if (!nxt || nxt.type === TokenType.NEWLINE || nxt.type === TokenType.EOF) break;
+      readName();
+    }
+    return new FromImportNode(module, level, names, false, tok.line);
+  }
+
+  // [W2] del <target>, <target>, ...
+  parseDel() {
+    const tok = this.expect(TokenType.KEYWORD, 'del');
+    const targets = [this.parseExpression()];
+    while (this.match(TokenType.SYMBOL, ',')) {
+      const nxt = this.peek();
+      if (!nxt || nxt.type === TokenType.NEWLINE || nxt.type === TokenType.EOF) break;
+      targets.push(this.parseExpression());
+    }
+    return new DelNode(targets, tok.line);
+  }
+
+  // [W2] global a, b
+  parseGlobal() {
+    const tok = this.expect(TokenType.KEYWORD, 'global');
+    const names = [this.expect(TokenType.IDENTIFIER, undefined, 'Expected name after global').value];
+    while (this.match(TokenType.SYMBOL, ',')) {
+      names.push(this.expect(TokenType.IDENTIFIER, undefined, 'Expected name after comma in global').value);
+    }
+    return new GlobalNode(names, tok.line);
+  }
+
+  // [W2] nonlocal a, b
+  parseNonlocal() {
+    const tok = this.expect(TokenType.KEYWORD, 'nonlocal');
+    const names = [this.expect(TokenType.IDENTIFIER, undefined, 'Expected name after nonlocal').value];
+    while (this.match(TokenType.SYMBOL, ',')) {
+      names.push(this.expect(TokenType.IDENTIFIER, undefined, 'Expected name after comma in nonlocal').value);
+    }
+    return new NonlocalNode(names, tok.line);
+  }
+
+  // [W2] yield | yield x | yield from gen()
+  parseYield() {
+    const tok = this.expect(TokenType.KEYWORD, 'yield');
+    // yield from <expr>
+    if (this.match(TokenType.KEYWORD, 'from')) {
+      const val = this.parseExpression();
+      return new YieldNode(val, true, tok.line);
+    }
+    const next = this.peek();
+    if (!next || next.type === TokenType.NEWLINE || next.type === TokenType.EOF || next.type === TokenType.DEDENT) {
+      return new YieldNode(null, false, tok.line); // bare yield
+    }
+    const val = this.parseExpression();
+    return new YieldNode(val, false, tok.line);
   }
 
   parseIf() {
@@ -1127,7 +1294,40 @@ function astToPython(node, indentLevel = 0) {
     case 'Import':
       const namesStr = node.names.map(n => n.as ? `${n.name} as ${n.as}` : n.name).join(', ');
       return `${indent}import ${namesStr}`;
-      
+
+    // [W2] from <module> import <names>
+    case 'FromImport': {
+      const dots = '.'.repeat(node.level || 0);
+      const moduleRef = `${dots}${node.module || ''}`;
+      if (node.isStar) {
+        return `${indent}from ${moduleRef} import *`;
+      }
+      const importNames = node.names
+        .map(n => (n.asName ? `${n.name} as ${n.asName}` : n.name))
+        .join(', ');
+      return `${indent}from ${moduleRef} import ${importNames}`;
+    }
+
+    // [W2] del <targets>
+    case 'Del':
+      return `${indent}del ${node.targets.map(t => astToPython(t)).join(', ')}`;
+
+    // [W2] global <names>
+    case 'Global':
+      return `${indent}global ${node.names.join(', ')}`;
+
+    // [W2] nonlocal <names>
+    case 'Nonlocal':
+      return `${indent}nonlocal ${node.names.join(', ')}`;
+
+    // [W2] yield / yield x / yield from x
+    case 'Yield': {
+      if (node.isFrom) {
+        return `${indent}yield from ${astToPython(node.value)}`;
+      }
+      return node.value === null ? `${indent}yield` : `${indent}yield ${astToPython(node.value)}`;
+    }
+
     default:
       return '';
   }
@@ -1243,6 +1443,24 @@ function collectVariables(node, varsSet = new Set()) {
     case 'ClassDef':
       // Skip function/class bodies — local variables are not workspace-level
       break;
+    // [W2] scope / generator nodes
+    case 'Del':
+      if (node.targets && Array.isArray(node.targets)) {
+        for (const t of node.targets) collectVariables(t, varsSet);
+      }
+      break;
+    case 'Yield':
+      if (node.value) collectVariables(node.value, varsSet);
+      break;
+    case 'Global':
+    case 'Nonlocal':
+      if (node.names && Array.isArray(node.names)) {
+        for (const n of node.names) {
+          if (!['True', 'False', 'None'].includes(n)) varsSet.add(n);
+        }
+      }
+      break;
+    // FromImport / Import: imported names are not workspace variables
   }
   return varsSet;
 }
@@ -1652,6 +1870,81 @@ function convertStatementToBlock(node) {
         }
       };
       return importBlock;
+    }
+
+    // [W2] from <module> import <names>  ->  from_import_statement block
+    case 'FromImport': {
+      const dots = '.'.repeat(node.level || 0);
+      const moduleField = `${dots}${node.module || ''}`;
+      let namesField;
+      if (node.isStar) {
+        namesField = '*';
+      } else {
+        namesField = node.names
+          .map(n => (n.asName ? `${n.name} as ${n.asName}` : n.name))
+          .join(', ');
+      }
+      return {
+        "type": "from_import_statement",
+        "id": makeBlockId(),
+        "fields": {
+          "MODULE": moduleField,
+          "NAMES": namesField
+        }
+      };
+    }
+
+    // [W2] del <targets>  ->  del_statement block (TARGET value input)
+    case 'Del': {
+      const block = {
+        "type": "del_statement",
+        "id": makeBlockId(),
+        "inputs": {}
+      };
+      // The block models a single target via a value input; if del has multiple
+      // targets, join them into a raw expression so nothing is lost.
+      if (node.targets.length === 1) {
+        block.inputs["TARGET"] = { "block": convertExpressionToBlock(node.targets[0]) };
+      } else {
+        block.inputs["TARGET"] = {
+          "block": {
+            "type": "raw_expression",
+            "id": makeBlockId(),
+            "fields": { "EXPR": node.targets.map(t => astToPython(t)).join(', ') }
+          }
+        };
+      }
+      return block;
+    }
+
+    // [W2] global a, b  ->  global_statement block (NAMES text field)
+    case 'Global':
+      return {
+        "type": "global_statement",
+        "id": makeBlockId(),
+        "fields": { "NAMES": node.names.join(', ') }
+      };
+
+    // [W2] nonlocal a, b  ->  nonlocal_statement block (NAMES text field)
+    case 'Nonlocal':
+      return {
+        "type": "nonlocal_statement",
+        "id": makeBlockId(),
+        "fields": { "NAMES": node.names.join(', ') }
+      };
+
+    // [W2] yield / yield x / yield from x  ->  yield_statement block
+    case 'Yield': {
+      const block = {
+        "type": "yield_statement",
+        "id": makeBlockId(),
+        "fields": { "FROM": node.isFrom ? "TRUE" : "FALSE" },
+        "inputs": {}
+      };
+      if (node.value) {
+        block.inputs["VALUE"] = { "block": convertExpressionToBlock(node.value) };
+      }
+      return block;
     }
 
     default:
@@ -2572,6 +2865,126 @@ if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['attribute_access'] = Blockly.Python['attribute_access'];
 }
 
+// ── [W2] Scope, generator & import-family blocks ─────────────────────────────
+
+// [W2] from <module> import <names>  (NAMES may be "*", "a, b" or "a as b")
+Blockly.Blocks['from_import_statement'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField("from")
+        .appendField(new Blockly.FieldTextInput("math"), "MODULE")
+        .appendField("import")
+        .appendField(new Blockly.FieldTextInput("pi, sqrt"), "NAMES");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#b55bf7");
+    this.setTooltip("from <module> import <names>. Use '*' to import everything; leading dots (e.g. '.pkg') for relative imports.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['from_import_statement'] = function(block) {
+  const moduleName = (block.getFieldValue('MODULE') || '').trim();
+  const names = (block.getFieldValue('NAMES') || '').trim();
+  if (!names) return '';
+  return `from ${moduleName} import ${names}\n`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['from_import_statement'] = Blockly.Python['from_import_statement'];
+}
+
+// [W2] del <target>
+Blockly.Blocks['del_statement'] = {
+  init: function() {
+    this.appendValueInput("TARGET")
+        .setCheck(null)
+        .appendField("del");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#7f8c8d");
+    this.setTooltip("Deletes a name, item or attribute (Python 'del').");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['del_statement'] = function(block) {
+  const target = Blockly.Python.valueToCode(block, 'TARGET', Blockly.Python.ORDER_NONE) || 'x';
+  return `del ${target}\n`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['del_statement'] = Blockly.Python['del_statement'];
+}
+
+// [W2] global a, b
+Blockly.Blocks['global_statement'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField("global")
+        .appendField(new Blockly.FieldTextInput("x"), "NAMES");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#7f8c8d");
+    this.setTooltip("Declares names as global (comma-separated).");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['global_statement'] = function(block) {
+  const names = (block.getFieldValue('NAMES') || '').trim();
+  if (!names) return '';
+  return `global ${names}\n`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['global_statement'] = Blockly.Python['global_statement'];
+}
+
+// [W2] nonlocal a, b
+Blockly.Blocks['nonlocal_statement'] = {
+  init: function() {
+    this.appendDummyInput()
+        .appendField("nonlocal")
+        .appendField(new Blockly.FieldTextInput("x"), "NAMES");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#7f8c8d");
+    this.setTooltip("Declares names as nonlocal (comma-separated).");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['nonlocal_statement'] = function(block) {
+  const names = (block.getFieldValue('NAMES') || '').trim();
+  if (!names) return '';
+  return `nonlocal ${names}\n`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['nonlocal_statement'] = Blockly.Python['nonlocal_statement'];
+}
+
+// [W2] yield / yield x / yield from x
+Blockly.Blocks['yield_statement'] = {
+  init: function() {
+    this.appendValueInput("VALUE")
+        .setCheck(null)
+        .appendField("yield")
+        .appendField(new Blockly.FieldCheckbox("FALSE"), "FROM")
+        .appendField("from");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#7f8c8d");
+    this.setInputsInline(true);
+    this.setTooltip("Yields a value from a generator. Check 'from' for 'yield from'. Leave value empty for a bare yield.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['yield_statement'] = function(block) {
+  const value = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE);
+  const isFrom = block.getFieldValue('FROM') === 'TRUE';
+  if (isFrom) {
+    return `yield from ${value || 'None'}\n`;
+  }
+  return value ? `yield ${value}\n` : `yield\n`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['yield_statement'] = Blockly.Python['yield_statement'];
+}
+
 // logic_null & controls_flow_statements come from the Blockly CDN; only provide
 // a generator if the CDN default is missing (don't clobber a working default).
 if (!Blockly.Python['logic_null']) {
@@ -2661,7 +3074,13 @@ const BlockPyParser = {
   LambdaNode,
   PassNode,
   BreakNode,
-  ContinueNode
+  ContinueNode,
+  // [W2] scope, generator & import-family nodes
+  DelNode,
+  GlobalNode,
+  NonlocalNode,
+  YieldNode,
+  FromImportNode
 };
 
 // ── OpenCV Blocks ──────────────────────────────────────────────────────────────

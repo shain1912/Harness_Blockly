@@ -47,7 +47,17 @@
     <!-- ── Modules &amp; Attributes ───────────────────────────── -->
     <category name="Modules" colour="#b55bf7">
       <block type="import_statement"></block>
+      <!-- [W2] from <module> import <names> -->
+      <block type="from_import_statement"></block>
       <block type="attribute_access"></block>
+    </category>
+
+    <!-- [W2] ── Scope &amp; Generators ───────────────────────────── -->
+    <category name="Scope &amp; Generators" colour="#7f8c8d">
+      <block type="del_statement"></block>
+      <block type="global_statement"></block>
+      <block type="nonlocal_statement"></block>
+      <block type="yield_statement"></block>
     </category>
 
     <!-- ── Logic ─────────────────────────────────────────────── -->
