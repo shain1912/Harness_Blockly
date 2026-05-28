@@ -21,7 +21,8 @@ const KEYWORDS = [
   'import', 'as', 'True', 'False', 'None', 'pass', 'return', 'class', 'lambda',
   'break', 'continue',
   // [W2] scope, generator & import-family keywords
-  'del', 'global', 'nonlocal', 'yield', 'from'
+  'del', 'global', 'nonlocal', 'yield', 'from',
+  'is' // [W3] identity operator keyword (OP-09)
 ];
 
 class Token {
@@ -180,7 +181,23 @@ class Tokenizer {
       }
 
       // Handle Symbols & Multi-char operators
-      const twoCharOps = ['+=', '-=', '*=', '/=', '==', '!=', '<=', '>='];
+      // [W3] ORDER MATTERS — match longer operators first.
+      // [W3] 3-char augmented ops: **= //= <<= >>= (ASG-05)
+      const threeCharOps = ['**=', '//=', '<<=', '>>='];
+      const nextThree = this.source.slice(this.cursor, this.cursor + 3);
+      if (threeCharOps.includes(nextThree)) {
+        const sym = nextThree;
+        const startCol = this.col;
+        this.nextChar(); this.nextChar(); this.nextChar();
+        this.tokens.push(new Token(TokenType.SYMBOL, sym, this.line, startCol));
+        continue;
+      }
+
+      // [W3] 2-char ops — added: ** // << >> %= &= |= ^= (OP-02/04/11, ASG-05)
+      const twoCharOps = [
+        '+=', '-=', '*=', '/=', '==', '!=', '<=', '>=',
+        '**', '//', '<<', '>>', '%=', '&=', '|=', '^='
+      ];
       const nextTwo = this.source.slice(this.cursor, this.cursor + 2);
       if (twoCharOps.includes(nextTwo)) {
         const sym = nextTwo;
@@ -190,8 +207,8 @@ class Tokenizer {
         continue;
       }
 
-      // Single char symbols
-      if ('=+-*/<>():[],.'.includes(char)) {
+      // Single char symbols  ([W3] added: % & | ^ ~ for modulo/bitwise — OP-03/11)
+      if ('=+-*/<>():[],.%&|^~'.includes(char)) {
         const sym = this.nextChar();
         this.tokens.push(new Token(TokenType.SYMBOL, sym, this.line, this.col - 1));
         continue;
@@ -886,7 +903,8 @@ class Parser {
         return new AssignNode(expr, valExpr, expr.line);
       }
       
-      const augOps = ['+=', '-=', '*=', '/='];
+      // [W3] full augmented-assign set (ASG-05): added //= %= **= &= |= ^= >>= <<=
+      const augOps = ['+=', '-=', '*=', '/=', '//=', '%=', '**=', '&=', '|=', '^=', '>>=', '<<='];
       if (augOps.includes(tok.value)) {
         const op = tok.value;
         this.next(); // consume op
@@ -975,16 +993,102 @@ class Parser {
     return this.parseComparison();
   }
 
+  // [W3] Detect a comparison operator at the cursor (symbol or keyword form).
+  // Returns the canonical operator string and consumes its token(s), or null.
+  // Handles: == != < > <= >= and (OP-09/10) is / is not / in / not in.
+  matchComparisonOp() {
+    const tok = this.peek();
+    if (!tok) return null;
+    const compSymOps = ['==', '!=', '<', '>', '<=', '>='];
+    if (tok.type === TokenType.SYMBOL && compSymOps.includes(tok.value)) {
+      return this.next().value;
+    }
+    // [W3] identity: is / is not (OP-09)
+    if (tok.type === TokenType.KEYWORD && tok.value === 'is') {
+      this.next();
+      if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'not') {
+        this.next();
+        return 'is not';
+      }
+      return 'is';
+    }
+    // [W3] membership: in (OP-10)
+    if (tok.type === TokenType.KEYWORD && tok.value === 'in') {
+      this.next();
+      return 'in';
+    }
+    // [W3] membership: not in (OP-10) — 'not' followed by 'in'
+    if (tok.type === TokenType.KEYWORD && tok.value === 'not'
+        && this.tokens[this.cursor + 1] && this.tokens[this.cursor + 1].type === TokenType.KEYWORD
+        && this.tokens[this.cursor + 1].value === 'in') {
+      this.next(); this.next();
+      return 'not in';
+    }
+    return null;
+  }
+
   parseComparison() {
+    let expr = this.parseBitOr();
+
+    // [W3] Collect a chain of comparisons (OP-06/07/09/10).
+    // a OP1 b OP2 c ... is rewritten into (a OP1 b) and (b OP2 c) ... so it
+    // maps cleanly to existing logic blocks and is semantically correct.
+    let op = this.matchComparisonOp();
+    if (op === null) return expr;
+
+    let prevOperand = expr;
+    let chain = null; // accumulated 'and' tree of pairwise comparisons
+    while (op !== null) {
+      const right = this.parseBitOr();
+      const pair = new BinOpNode(prevOperand, op, right, expr.line);
+      chain = chain === null ? pair : new BinOpNode(chain, 'and', pair, expr.line);
+      prevOperand = right;
+      op = this.matchComparisonOp();
+    }
+    return chain;
+  }
+
+  // [W3] Bitwise OR `|` (OP-11) — lowest bitwise precedence.
+  parseBitOr() {
+    let expr = this.parseBitXor();
+    while (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '|') {
+      const op = this.next().value;
+      const right = this.parseBitXor();
+      expr = new BinOpNode(expr, op, right, expr.line);
+    }
+    return expr;
+  }
+
+  // [W3] Bitwise XOR `^` (OP-11).
+  parseBitXor() {
+    let expr = this.parseBitAnd();
+    while (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '^') {
+      const op = this.next().value;
+      const right = this.parseBitAnd();
+      expr = new BinOpNode(expr, op, right, expr.line);
+    }
+    return expr;
+  }
+
+  // [W3] Bitwise AND `&` (OP-11).
+  parseBitAnd() {
+    let expr = this.parseShift();
+    while (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '&') {
+      const op = this.next().value;
+      const right = this.parseShift();
+      expr = new BinOpNode(expr, op, right, expr.line);
+    }
+    return expr;
+  }
+
+  // [W3] Shift operators `<< >>` (OP-11).
+  parseShift() {
     let expr = this.parseAdditive();
-    const compOps = ['==', '!=', '<', '>', '<=', '>='];
-    
-    while (this.peek() && this.peek().type === TokenType.SYMBOL && compOps.includes(this.peek().value)) {
+    while (this.peek() && this.peek().type === TokenType.SYMBOL && (this.peek().value === '<<' || this.peek().value === '>>')) {
       const op = this.next().value;
       const right = this.parseAdditive();
       expr = new BinOpNode(expr, op, right, expr.line);
     }
-    
     return expr;
   }
 
@@ -1000,7 +1104,9 @@ class Parser {
 
   parseMultiplicative() {
     let expr = this.parseUnary();
-    while (this.peek() && this.peek().type === TokenType.SYMBOL && (this.peek().value === '*' || this.peek().value === '/')) {
+    // [W3] added floor-division `//` and modulo `%` (OP-02/03)
+    const mulOps = ['*', '/', '//', '%'];
+    while (this.peek() && this.peek().type === TokenType.SYMBOL && mulOps.includes(this.peek().value)) {
       const op = this.next().value;
       const right = this.parseUnary();
       expr = new BinOpNode(expr, op, right, expr.line);
@@ -1009,12 +1115,27 @@ class Parser {
   }
 
   parseUnary() {
-    if (this.peek() && this.peek().type === TokenType.SYMBOL && (this.peek().value === '-' || this.peek().value === '+')) {
+    // [W3] added bitwise NOT `~` as a unary prefix (OP-11), alongside - and +.
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && (this.peek().value === '-' || this.peek().value === '+' || this.peek().value === '~')) {
       const op = this.next().value;
       const operand = this.parseUnary();
       return new BinOpNode(null, op, operand, operand.line);
     }
-    return this.parsePrimary();
+    return this.parsePower();
+  }
+
+  // [W3] Power `**` (OP-04) — right-associative; binds tighter than unary on its
+  // right operand. Python: -2 ** 2 == -(2 ** 2); 2 ** -1 is valid; 2 ** 3 ** 2 == 2 ** 9.
+  parsePower() {
+    const base = this.parsePrimary();
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '**') {
+      const op = this.next().value;
+      // right operand may itself be unary (e.g. 2 ** -1) — parseUnary handles
+      // that and recurses back into parsePower for right-associativity.
+      const exponent = this.parseUnary();
+      return new BinOpNode(base, op, exponent, base.line);
+    }
+    return base;
   }
 
   parsePrimary() {
@@ -1239,14 +1360,17 @@ function astToPython(node, indentLevel = 0) {
       if (node.op === 'INDEX') {
         return `${astToPython(node.left)}[${astToPython(node.right)}]`;
       }
-      // Unary operators (-x, +x, not x) have a null left operand
+      // Unary operators (-x, +x, ~x, not x) have a null left operand
       if (!node.left) {
-        if (node.op === '-' || node.op === '+') {
+        // [W3] bitwise NOT `~` prints with no space, like - and + (OP-11)
+        if (node.op === '-' || node.op === '+' || node.op === '~') {
           return `${node.op}${astToPython(node.right)}`;
         }
         // logical 'not' (keyword operator) needs a trailing space
         return `${node.op} ${astToPython(node.right)}`;
       }
+      // [W3] All binary ops (incl. // % ** & | ^ << >> is/is not in/not in)
+      // print with surrounding spaces, matching Python style.
       return `${astToPython(node.left)} ${node.op} ${astToPython(node.right)}`;
       
     case 'Range':
@@ -1559,14 +1683,19 @@ function convertStatementToBlock(node) {
     }
 
     case 'AugAssign': {
-      // Handle augmented variables assignments like x += 5
-      // Maps to general arithmetic block: set x to (x + 5)
+      // Handle augmented assignments like x += 5 by expanding to set x = x OP v.
+      // [W3] Build the value as a synthesized BinOp and route it through
+      // convertExpressionToBlock so EVERY operator (incl. // % ** & | ^ << >>)
+      // maps to its proper block (math_arithmetic, math_modulo, math_int_divide,
+      // bitwise_operation, …) instead of a hard-coded math_arithmetic table.
       const varName = node.target.type === 'Name' ? node.target.id : 'x';
-      let mathOp = 'ADD';
-      if (node.op === '-=') mathOp = 'MINUS';
-      if (node.op === '*=') mathOp = 'MULTIPLY';
-      if (node.op === '/=') mathOp = 'DIVIDE';
-
+      const baseOp = node.op.slice(0, -1); // strip trailing '=' → '+','-','//','%','**','&','|','^','<<','>>'
+      const synthBinOp = new BinOpNode(
+        new NameNode(varName, node.line),
+        baseOp,
+        node.value,
+        node.line
+      );
       return {
         "type": "variables_set",
         "id": makeBlockId(),
@@ -1577,29 +1706,7 @@ function convertStatementToBlock(node) {
         },
         "inputs": {
           "VALUE": {
-            "block": {
-              "type": "math_arithmetic",
-              "id": makeBlockId(),
-              "fields": {
-                "OP": mathOp
-              },
-              "inputs": {
-                "A": {
-                  "block": {
-                    "type": "variables_get",
-                    "id": makeBlockId(),
-                    "fields": {
-                      "VAR": {
-                        "id": varName
-                      }
-                    }
-                  }
-                },
-                "B": {
-                  "block": convertExpressionToBlock(node.value)
-                }
-              }
-            }
+            "block": convertExpressionToBlock(synthBinOp)
           }
         }
       };
@@ -2289,7 +2396,7 @@ function convertExpressionToBlock(node) {
     }
 
     case 'BinOp': {
-      // Unary minus/plus: parseUnary produces a BinOp with a null left operand.
+      // Unary minus/plus/not: parseUnary produces a BinOp with a null left operand.
       if (!node.left && (node.op === '-' || node.op === '+')) {
         // Unary plus is a no-op in Python — emit the operand directly.
         if (node.op === '+') {
@@ -2308,6 +2415,19 @@ function convertExpressionToBlock(node) {
         };
       }
 
+      // [W3] Unary bitwise NOT `~x` → custom bitwise_not block (OP-11)
+      if (!node.left && node.op === '~') {
+        return {
+          "type": "bitwise_not",
+          "id": makeBlockId(),
+          "inputs": {
+            "VALUE": {
+              "block": convertExpressionToBlock(node.right)
+            }
+          }
+        };
+      }
+
       // Standard mathematical operations
       const mathOps = { '+': 'ADD', '-': 'MINUS', '*': 'MULTIPLY', '/': 'DIVIDE' };
       if (mathOps[node.op]) {
@@ -2317,6 +2437,109 @@ function convertExpressionToBlock(node) {
           "fields": {
             "OP": mathOps[node.op]
           },
+          "inputs": {
+            "A": {
+              "block": convertExpressionToBlock(node.left)
+            },
+            "B": {
+              "block": convertExpressionToBlock(node.right)
+            }
+          }
+        };
+      }
+
+      // [W3] Modulo `%` → standard math_modulo block (OP-03)
+      if (node.op === '%') {
+        return {
+          "type": "math_modulo",
+          "id": makeBlockId(),
+          "inputs": {
+            "DIVIDEND": {
+              "block": convertExpressionToBlock(node.left)
+            },
+            "DIVISOR": {
+              "block": convertExpressionToBlock(node.right)
+            }
+          }
+        };
+      }
+
+      // [W3] Power `**` → standard math_arithmetic block with OP=POWER (OP-04)
+      if (node.op === '**') {
+        return {
+          "type": "math_arithmetic",
+          "id": makeBlockId(),
+          "fields": { "OP": "POWER" },
+          "inputs": {
+            "A": {
+              "block": convertExpressionToBlock(node.left)
+            },
+            "B": {
+              "block": convertExpressionToBlock(node.right)
+            }
+          }
+        };
+      }
+
+      // [W3] Floor division `//` → custom math_int_divide block (OP-02)
+      if (node.op === '//') {
+        return {
+          "type": "math_int_divide",
+          "id": makeBlockId(),
+          "inputs": {
+            "A": {
+              "block": convertExpressionToBlock(node.left)
+            },
+            "B": {
+              "block": convertExpressionToBlock(node.right)
+            }
+          }
+        };
+      }
+
+      // [W3] Binary bitwise ops `& | ^ << >>` → custom bitwise_operation block (OP-11)
+      const bitwiseOps = { '&': 'AND', '|': 'OR', '^': 'XOR', '<<': 'LSHIFT', '>>': 'RSHIFT' };
+      if (bitwiseOps[node.op]) {
+        return {
+          "type": "bitwise_operation",
+          "id": makeBlockId(),
+          "fields": { "OP": bitwiseOps[node.op] },
+          "inputs": {
+            "A": {
+              "block": convertExpressionToBlock(node.left)
+            },
+            "B": {
+              "block": convertExpressionToBlock(node.right)
+            }
+          }
+        };
+      }
+
+      // [W3] Identity `is` / `is not` → custom identity_test block (OP-09)
+      const identityOps = { 'is': 'IS', 'is not': 'IS_NOT' };
+      if (identityOps[node.op]) {
+        return {
+          "type": "identity_test",
+          "id": makeBlockId(),
+          "fields": { "OP": identityOps[node.op] },
+          "inputs": {
+            "A": {
+              "block": convertExpressionToBlock(node.left)
+            },
+            "B": {
+              "block": convertExpressionToBlock(node.right)
+            }
+          }
+        };
+      }
+
+      // [W3] Membership `in` / `not in` → custom membership_test block (OP-10)
+      const membershipOps = { 'in': 'IN', 'not in': 'NOT_IN' };
+      if (membershipOps[node.op]) {
+        return {
+          "type": "membership_test",
+          "id": makeBlockId(),
+          "fields": { "OP": membershipOps[node.op] },
           "inputs": {
             "A": {
               "block": convertExpressionToBlock(node.left)
@@ -2983,6 +3206,151 @@ Blockly.Python['yield_statement'] = function(block) {
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['yield_statement'] = Blockly.Python['yield_statement'];
+}
+
+// ── [W3] Operator custom blocks (floor-div, bitwise, identity, membership) ──
+
+// [W3] Floor division: A // B (OP-02)
+Blockly.Blocks['math_int_divide'] = {
+  init: function() {
+    this.appendValueInput("A").setCheck("Number");
+    this.appendValueInput("B").setCheck("Number").appendField("//");
+    this.setInputsInline(true);
+    this.setOutput(true, "Number");
+    this.setColour("#5b67a5");
+    this.setTooltip("Integer (floor) division: A // B");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['math_int_divide'] = function(block) {
+  const a = Blockly.Python.valueToCode(block, 'A', Blockly.Python.ORDER_MULTIPLICATIVE) || '0';
+  const b = Blockly.Python.valueToCode(block, 'B', Blockly.Python.ORDER_MULTIPLICATIVE) || '1';
+  return [`${a} // ${b}`, Blockly.Python.ORDER_MULTIPLICATIVE];
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['math_int_divide'] = Blockly.Python['math_int_divide'];
+}
+
+// [W3] Binary bitwise operations: A & | ^ << >> B (OP-11)
+Blockly.Blocks['bitwise_operation'] = {
+  init: function() {
+    this.appendValueInput("A").setCheck("Number");
+    this.appendValueInput("B").setCheck("Number")
+        .appendField(new Blockly.FieldDropdown([
+          ["&", "AND"], ["|", "OR"], ["^", "XOR"], ["<<", "LSHIFT"], [">>", "RSHIFT"]
+        ]), "OP");
+    this.setInputsInline(true);
+    this.setOutput(true, "Number");
+    this.setColour("#5b67a5");
+    this.setTooltip("Bitwise operation: AND (&), OR (|), XOR (^), left shift (<<), right shift (>>).");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['bitwise_operation'] = function(block) {
+  const opMap = { 'AND': ['&', Blockly.Python.ORDER_BITWISE_AND],
+                  'OR': ['|', Blockly.Python.ORDER_BITWISE_OR],
+                  'XOR': ['^', Blockly.Python.ORDER_BITWISE_XOR],
+                  'LSHIFT': ['<<', Blockly.Python.ORDER_BITWISE_SHIFT],
+                  'RSHIFT': ['>>', Blockly.Python.ORDER_BITWISE_SHIFT] };
+  const opKey = block.getFieldValue('OP');
+  const entry = opMap[opKey] || ['&', Blockly.Python.ORDER_BITWISE_AND];
+  const order = (typeof entry[1] === 'number') ? entry[1] : Blockly.Python.ORDER_NONE;
+  const a = Blockly.Python.valueToCode(block, 'A', order) || '0';
+  const b = Blockly.Python.valueToCode(block, 'B', order) || '0';
+  return [`${a} ${entry[0]} ${b}`, order];
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['bitwise_operation'] = Blockly.Python['bitwise_operation'];
+}
+
+// [W3] Unary bitwise NOT: ~A (OP-11)
+Blockly.Blocks['bitwise_not'] = {
+  init: function() {
+    this.appendValueInput("VALUE").setCheck("Number").appendField("~");
+    this.setInputsInline(true);
+    this.setOutput(true, "Number");
+    this.setColour("#5b67a5");
+    this.setTooltip("Bitwise NOT (one's complement): ~value");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['bitwise_not'] = function(block) {
+  const order = (typeof Blockly.Python.ORDER_BITWISE_NOT === 'number')
+    ? Blockly.Python.ORDER_BITWISE_NOT
+    : (typeof Blockly.Python.ORDER_UNARY_SIGN === 'number' ? Blockly.Python.ORDER_UNARY_SIGN : Blockly.Python.ORDER_NONE);
+  const val = Blockly.Python.valueToCode(block, 'VALUE', order) || '0';
+  return [`~${val}`, order];
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['bitwise_not'] = Blockly.Python['bitwise_not'];
+}
+
+// [W3] Identity test: A is B / A is not B (OP-09)
+Blockly.Blocks['identity_test'] = {
+  init: function() {
+    this.appendValueInput("A").setCheck(null);
+    this.appendValueInput("B").setCheck(null)
+        .appendField(new Blockly.FieldDropdown([
+          ["is", "IS"], ["is not", "IS_NOT"]
+        ]), "OP");
+    this.setInputsInline(true);
+    this.setOutput(true, "Boolean");
+    this.setColour("#5b80a5");
+    this.setTooltip("Identity test: checks whether two values are the same object.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['identity_test'] = function(block) {
+  const opKey = block.getFieldValue('OP');
+  const opStr = opKey === 'IS_NOT' ? 'is not' : 'is';
+  const order = (typeof Blockly.Python.ORDER_RELATIONAL === 'number') ? Blockly.Python.ORDER_RELATIONAL : Blockly.Python.ORDER_NONE;
+  const a = Blockly.Python.valueToCode(block, 'A', order) || 'None';
+  const b = Blockly.Python.valueToCode(block, 'B', order) || 'None';
+  return [`${a} ${opStr} ${b}`, order];
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['identity_test'] = Blockly.Python['identity_test'];
+}
+
+// [W3] Membership test: A in B / A not in B (OP-10)
+Blockly.Blocks['membership_test'] = {
+  init: function() {
+    this.appendValueInput("A").setCheck(null);
+    this.appendValueInput("B").setCheck(null)
+        .appendField(new Blockly.FieldDropdown([
+          ["in", "IN"], ["not in", "NOT_IN"]
+        ]), "OP");
+    this.setInputsInline(true);
+    this.setOutput(true, "Boolean");
+    this.setColour("#5b80a5");
+    this.setTooltip("Membership test: checks whether a value is contained in a collection.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['membership_test'] = function(block) {
+  const opKey = block.getFieldValue('OP');
+  const opStr = opKey === 'NOT_IN' ? 'not in' : 'in';
+  const order = (typeof Blockly.Python.ORDER_RELATIONAL === 'number') ? Blockly.Python.ORDER_RELATIONAL : Blockly.Python.ORDER_NONE;
+  const a = Blockly.Python.valueToCode(block, 'A', order) || 'None';
+  const b = Blockly.Python.valueToCode(block, 'B', order) || '[]';
+  return [`${a} ${opStr} ${b}`, order];
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['membership_test'] = Blockly.Python['membership_test'];
+}
+
+// [W3] math_modulo & math_arithmetic come from the Blockly CDN; only provide a
+// generator if the CDN default is missing (don't clobber a working default).
+if (!Blockly.Python['math_modulo']) {
+  Blockly.Python['math_modulo'] = function(block) {
+    const order = (typeof Blockly.Python.ORDER_MULTIPLICATIVE === 'number') ? Blockly.Python.ORDER_MULTIPLICATIVE : Blockly.Python.ORDER_NONE;
+    const dividend = Blockly.Python.valueToCode(block, 'DIVIDEND', order) || '0';
+    const divisor = Blockly.Python.valueToCode(block, 'DIVISOR', order) || '1';
+    return [`${dividend} % ${divisor}`, order];
+  };
+}
+if (Blockly.Python.forBlock && !Blockly.Python.forBlock['math_modulo']) {
+  Blockly.Python.forBlock['math_modulo'] = Blockly.Python['math_modulo'];
 }
 
 // logic_null & controls_flow_statements come from the Blockly CDN; only provide
