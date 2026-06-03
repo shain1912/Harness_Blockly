@@ -8,6 +8,7 @@ import './utils/parser.js';
 import './utils/desugarer.js';
 import './utils/interpreter.js';
 import './utils/libraryAbstraction.js';
+import './examples/snippets.js';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
