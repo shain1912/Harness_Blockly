@@ -707,6 +707,19 @@ body {
   font-size: 0.7rem;
   color: var(--text-muted);
 }
+/* Demo example picker in the Python editor header */
+.example-picker {
+  background: var(--bg-elevated, #1b2333);
+  color: var(--text-primary, #e6edf3);
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.example-picker:hover { border-color: var(--neon-blue, #58a6ff); }
+
 .syntax-status {
   font-weight: 600;
 }

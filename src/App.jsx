@@ -759,6 +759,7 @@ for i in range(4):
                   onSyncToBlocks={handleSyncToBlocksClick}
                   syntaxStatus={syntaxStatus}
                   highlightedLine={highlightedLine}
+                  onLoadExample={(sn) => { setCode(sn.code); setShouldDesugar(sn.desugar); }}
                 />
               </div>
               <div style={{ display: activeEditorTab === 'desugar' ? 'block' : 'none', height: '100%' }}>

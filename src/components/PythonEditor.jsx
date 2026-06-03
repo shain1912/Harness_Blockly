@@ -11,8 +11,15 @@ export default function PythonEditor({
   onCodeChange,
   onSyncToBlocks,
   syntaxStatus,
-  highlightedLine
+  highlightedLine,
+  onLoadExample
 }) {
+  // Demo snippets grouped by category (single source of truth: window.BlockPyExamples)
+  const examples = (typeof window !== 'undefined' && window.BlockPyExamples) || [];
+  const examplesByCategory = examples.reduce((groups, snippet) => {
+    (groups[snippet.category] = groups[snippet.category] || []).push(snippet);
+    return groups;
+  }, {});
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const textareaRef = useRef(null);
   const preRef = useRef(null);
@@ -66,6 +73,27 @@ export default function PythonEditor({
           <h3>Python Source Editor</h3>
         </div>
         <div className="panel-actions">
+          {examples.length > 0 && (
+            <select
+              id="example-picker"
+              className="example-picker"
+              defaultValue=""
+              title="데모 예제 불러오기"
+              onChange={(e) => {
+                const sn = examples.find((s) => s.id === e.target.value);
+                if (sn && onLoadExample) onLoadExample(sn);
+              }}
+            >
+              <option value="" disabled>예제 선택…</option>
+              {Object.entries(examplesByCategory).map(([category, items]) => (
+                <optgroup key={category} label={category}>
+                  {items.map((s) => (
+                    <option key={s.id} value={s.id}>{s.title}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          )}
           <div
             id="syntax-status-text"
             className={`syntax-status ${syntaxStatus.valid ? 'valid' : 'invalid'}`}
