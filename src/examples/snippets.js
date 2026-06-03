@@ -95,6 +95,26 @@ const DEMO_SNIPPETS = [
     code: 'class Dog:\n    def __init__(self, name):\n        self.name = name\n    def bark(self):\n        return self.name + " says woof"\nd = Dog("Rex")\nprint(d.bark())',
     expectedStdout: ['Rex says woof'],
   },
+
+  // ── OpenCV ───────────────────────────────────────────────────────────────────
+  // Uses only the cv2 calls the Pyodide mock implements (imread/cvtColor/imshow/
+  // VideoCapture/read/resize), so each runs without error; output is on the canvas,
+  // not stdout, so expectedStdout is empty (the test asserts render + no error).
+  {
+    id: 'cv-gray', title: 'OpenCV: 그레이스케일', category: 'OpenCV', desugar: true, execute: true,
+    code: 'import cv2\nimg = cv2.imread("test.jpg")\ngray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)\ncv2.imshow("gray", gray)',
+    expectedStdout: [],
+  },
+  {
+    id: 'cv-capture', title: 'OpenCV: 카메라 캡처', category: 'OpenCV', desugar: true, execute: true,
+    code: 'import cv2\ncap = cv2.VideoCapture(0)\nret, frame = cap.read()\ncv2.imshow("frame", frame)',
+    expectedStdout: [],
+  },
+  {
+    id: 'cv-resize', title: 'OpenCV: 리사이즈', category: 'OpenCV', desugar: true, execute: true,
+    code: 'import cv2\nimg = cv2.imread("photo.png")\nsmall = cv2.resize(img, (320, 240))\ncv2.imshow("resized", small)',
+    expectedStdout: [],
+  },
 ];
 
 if (typeof window !== 'undefined') window.BlockPyExamples = DEMO_SNIPPETS;
