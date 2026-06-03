@@ -2361,16 +2361,15 @@ function convertStatementToBlock(node) {
     case 'Assign': {
       const tgt = node.target;
 
-      // [W4] Subscript assignment d[k] = v  ->  standard lists_setIndex block
+      // [Demo] Subscript assignment d[k] = v  ->  dedicated subscript_set block (lossless)
       if (tgt && tgt.type === 'Subscript') {
         return {
-          "type": "lists_setIndex",
+          "type": "subscript_set",
           "id": makeBlockId(),
-          "fields": { "MODE": "SET", "WHERE": "FROM_START" },
           "inputs": {
-            "LIST": { "block": convertExpressionToBlock(tgt.value) },
-            "AT": { "block": convertExpressionToBlock(tgt.index) },
-            "TO": { "block": convertExpressionToBlock(node.value) }
+            "OBJECT": { "block": convertExpressionToBlock(tgt.value) },
+            "KEY": { "block": convertExpressionToBlock(tgt.index) },
+            "VALUE": { "block": convertExpressionToBlock(node.value) }
           }
         };
       }
@@ -3516,22 +3515,14 @@ function convertExpressionToBlock(node) {
         };
       }
 
-      // List indexing extraction: arr[i] -> represented using Blockly lists_getIndex block
+      // [Demo] Subscript extraction obj[key] -> dedicated subscript_get block (lossless, any key)
       if (node.op === 'INDEX') {
         return {
-          "type": "lists_getIndex",
+          "type": "subscript_get",
           "id": makeBlockId(),
-          "fields": {
-            "MODE": "GET",
-            "WHERE": "FROM_START"
-          },
           "inputs": {
-            "VALUE": {
-              "block": convertExpressionToBlock(node.left)
-            },
-            "AT": {
-              "block": convertExpressionToBlock(node.right)
-            }
+            "OBJECT": { "block": convertExpressionToBlock(node.left) },
+            "KEY": { "block": convertExpressionToBlock(node.right) }
           }
         };
       }
@@ -3713,15 +3704,14 @@ function convertExpressionToBlock(node) {
       return block;
     }
 
-    // [W4] Subscript access in expression context (e.g. RHS d[k]) -> lists_getIndex
+    // [Demo] Subscript access obj[key] -> dedicated subscript_get block (lossless, any key)
     case 'Subscript':
       return {
-        "type": "lists_getIndex",
+        "type": "subscript_get",
         "id": makeBlockId(),
-        "fields": { "MODE": "GET", "WHERE": "FROM_START" },
         "inputs": {
-          "VALUE": { "block": convertExpressionToBlock(node.value) },
-          "AT": { "block": convertExpressionToBlock(node.index) }
+          "OBJECT": { "block": convertExpressionToBlock(node.value) },
+          "KEY": { "block": convertExpressionToBlock(node.index) }
         }
       };
 
@@ -4839,6 +4829,52 @@ Blockly.Python['gen_expression'] = function(block) {
   const extra = block.getFieldValue('CLAUSES') || '';
   return [`(${expr} for ${varName} in ${iter}${filterStr}${extra})`, Blockly.Python.ORDER_ATOMIC];
 };
+
+// [Demo] Dedicated subscript read: obj[key]  (list/dict/tuple/str; 0-based, any key type)
+Blockly.Blocks['subscript_get'] = {
+  init: function() {
+    this.appendValueInput("OBJECT").setCheck(null);
+    this.appendValueInput("KEY").appendField("[");
+    this.appendDummyInput().appendField("]");
+    this.setInputsInline(true);
+    this.setOutput(true, null);
+    this.setColour("#16a085");
+    this.setTooltip("Subscript access obj[key] for lists, dicts, tuples, strings.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['subscript_get'] = function(block) {
+  const obj = Blockly.Python.valueToCode(block, 'OBJECT', Blockly.Python.ORDER_MEMBER) || 'obj';
+  const key = Blockly.Python.valueToCode(block, 'KEY', Blockly.Python.ORDER_NONE) || '0';
+  return [`${obj}[${key}]`, Blockly.Python.ORDER_MEMBER];
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['subscript_get'] = Blockly.Python['subscript_get'];
+}
+
+// [Demo] Dedicated subscript assignment: obj[key] = value
+Blockly.Blocks['subscript_set'] = {
+  init: function() {
+    this.appendValueInput("OBJECT").appendField("set");
+    this.appendValueInput("KEY").appendField("[");
+    this.appendValueInput("VALUE").appendField("] =");
+    this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#16a085");
+    this.setTooltip("Subscript assignment obj[key] = value.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['subscript_set'] = function(block) {
+  const obj = Blockly.Python.valueToCode(block, 'OBJECT', Blockly.Python.ORDER_MEMBER) || 'obj';
+  const key = Blockly.Python.valueToCode(block, 'KEY', Blockly.Python.ORDER_NONE) || '0';
+  const val = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || 'None';
+  return `${obj}[${key}] = ${val}\n`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['subscript_set'] = Blockly.Python['subscript_set'];
+}
 
 // [W4] attribute assignment: obj.attr = value  (set_attribute statement block)
 Blockly.Blocks['set_attribute'] = {
