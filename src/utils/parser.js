@@ -188,8 +188,8 @@ class Tokenizer {
         continue;
       }
 
-      // Single char symbols
-      if ('=+-*/<>():[],.'.includes(char)) {
+      // Single char symbols ([W4] added '{' and '}' for dict/set literals)
+      if ('=+-*/<>():[],.{}'.includes(char)) {
         const sym = this.nextChar();
         this.tokens.push(new Token(TokenType.SYMBOL, sym, this.line, this.col - 1));
         continue;
@@ -296,6 +296,9 @@ class ListCompNode extends ASTNode {
     this.target = target;
     this.iter = iter;
     this.ifs = ifs || null;
+    // [W4] generators: array of ComprehensionNode for nested/multi-if comprehensions.
+    // Legacy single-clause fields (target/iter/ifs) remain populated for backward compat.
+    this.generators = null;
   }
 }
 
@@ -443,6 +446,105 @@ class LambdaNode extends ASTNode {
     this.type = 'Lambda';
     this.params = params || [];
     this.body = body;
+  }
+}
+
+// [W4] Tuple literal: (1, 2), 1, 2, ()
+class TupleNode extends ASTNode {
+  constructor(elts, line) {
+    super(line);
+    this.type = 'Tuple';
+    this.elts = elts || [];
+  }
+}
+
+// [W4] Dict literal: {"a": 1, "b": 2}, {}
+class DictNode extends ASTNode {
+  constructor(keys, values, line) {
+    super(line);
+    this.type = 'Dict';
+    this.keys = keys || [];     // array of ExpressionNodes
+    this.values = values || []; // array of ExpressionNodes (parallel to keys)
+  }
+}
+
+// [W4] Set literal: {1, 2, 3}
+class SetNode extends ASTNode {
+  constructor(elts, line) {
+    super(line);
+    this.type = 'Set';
+    this.elts = elts || [];
+  }
+}
+
+// [W4] A single comprehension clause: "for <target> in <iter> (if <cond>)*"
+class ComprehensionNode extends ASTNode {
+  constructor(target, iter, ifs, line) {
+    super(line);
+    this.type = 'Comprehension';
+    this.target = target;       // NameNode or TupleNode (unpacking)
+    this.iter = iter;           // ExpressionNode
+    this.ifs = ifs || [];       // array of condition ExpressionNodes
+  }
+}
+
+// [W4] Dict comprehension: {k: v for ... }
+class DictCompNode extends ASTNode {
+  constructor(key, value, generators, line) {
+    super(line);
+    this.type = 'DictComp';
+    this.key = key;
+    this.value = value;
+    this.generators = generators || []; // array of ComprehensionNode
+  }
+}
+
+// [W4] Set comprehension: {x for ...}
+class SetCompNode extends ASTNode {
+  constructor(elt, generators, line) {
+    super(line);
+    this.type = 'SetComp';
+    this.elt = elt;
+    this.generators = generators || []; // array of ComprehensionNode
+  }
+}
+
+// [W4] Generator expression: (x for x in xs)
+class GenExpNode extends ASTNode {
+  constructor(elt, generators, line) {
+    super(line);
+    this.type = 'GenExp';
+    this.elt = elt;
+    this.generators = generators || []; // array of ComprehensionNode
+  }
+}
+
+// [W4] Starred target/expr: *rest
+class StarredNode extends ASTNode {
+  constructor(value, line) {
+    super(line);
+    this.type = 'Starred';
+    this.value = value; // NameNode (or expression)
+  }
+}
+
+// [W4] Subscript assignment target / access: d[k]
+class SubscriptNode extends ASTNode {
+  constructor(value, index, line) {
+    super(line);
+    this.type = 'Subscript';
+    this.value = value; // object expression
+    this.index = index; // index expression
+  }
+}
+
+// [W4] Multiple-target assignment: a = b = 0  (targets is an array)
+class MultiAssignNode extends ASTNode {
+  constructor(targets, value, line) {
+    super(line);
+    this.type = 'MultiAssign';
+    this.targets = targets || []; // array of target expressions
+    this.value = value;
   }
 }
 
@@ -619,9 +721,9 @@ class Parser {
 
   parseFor() {
     const tok = this.expect(TokenType.KEYWORD, 'for');
-    const targetId = this.expect(TokenType.IDENTIFIER, undefined, 'Expected loop variable name');
-    const target = new NameNode(targetId.value, targetId.line);
-    
+    // [W4] allow tuple targets: for i, x in enumerate(xs):  /  for k, v in d.items():
+    const target = this.parseCompTarget();
+
     this.expect(TokenType.KEYWORD, 'in', 'Expected "in" keyword in for-loop');
     const iter = this.parseExpression();
     
@@ -709,16 +811,52 @@ class Parser {
   }
 
   parseExpressionStatement() {
-    const expr = this.parseExpression();
-    const tok = this.peek();
-    
+    // [W4] parse the first expression; allow a leading '*' starred target
+    // (only meaningful in an unpacking-assignment LHS).
+    const expr = this.parseStarOrExpression();
+    let tok = this.peek();
+
+    // [W4] Tuple/list unpacking LHS without parens: a, b = ... | a, *rest = ...
+    if (tok && tok.type === TokenType.SYMBOL && tok.value === ',') {
+      const elts = [expr];
+      while (this.match(TokenType.SYMBOL, ',')) {
+        const nt = this.peek();
+        // stop on trailing comma before '=' or end-of-statement
+        if (!nt || nt.type === TokenType.NEWLINE || nt.type === TokenType.EOF ||
+            nt.type === TokenType.DEDENT || (nt.type === TokenType.SYMBOL && nt.value === '=')) {
+          break;
+        }
+        elts.push(this.parseStarOrExpression());
+      }
+      const tupleTarget = new TupleNode(elts.map(e => this.toAssignTarget(e)), expr.line);
+      tok = this.peek();
+      if (tok && tok.type === TokenType.SYMBOL && tok.value === '=') {
+        this.next(); // consume '='
+        const valExpr = this.parseAssignValue();
+        return new AssignNode(tupleTarget, valExpr, expr.line);
+      }
+      // Bare tuple expression statement (e.g. return-less `a, b`): return as Tuple
+      return new TupleNode(elts, expr.line);
+    }
+
     if (tok && tok.type === TokenType.SYMBOL) {
       if (tok.value === '=') {
-        this.next(); // consume '='
-        const valExpr = this.parseExpression();
-        return new AssignNode(expr, valExpr, expr.line);
+        // [W4] support chained multiple targets: a = b = 0
+        const targets = [this.toAssignTarget(expr)];
+        let valExpr = null;
+        while (this.match(TokenType.SYMBOL, '=')) {
+          valExpr = this.parseAssignValue();
+          // Look ahead: another '=' means the parsed value was actually a target
+          if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '=') {
+            targets.push(this.toAssignTarget(valExpr));
+          }
+        }
+        if (targets.length === 1) {
+          return new AssignNode(targets[0], valExpr, expr.line);
+        }
+        return new MultiAssignNode(targets, valExpr, expr.line);
       }
-      
+
       const augOps = ['+=', '-=', '*=', '/='];
       if (augOps.includes(tok.value)) {
         const op = tok.value;
@@ -727,8 +865,52 @@ class Parser {
         return new AugAssignNode(expr, op, valExpr, expr.line);
       }
     }
-    
+
     return expr;
+  }
+
+  // [W4] Parse the RHS of an assignment, allowing a bare tuple (a = 1, 2).
+  parseAssignValue() {
+    const first = this.parseExpression();
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ',') {
+      const elts = [first];
+      while (this.match(TokenType.SYMBOL, ',')) {
+        const nt = this.peek();
+        if (!nt || nt.type === TokenType.NEWLINE || nt.type === TokenType.EOF ||
+            nt.type === TokenType.DEDENT || (nt.type === TokenType.SYMBOL && nt.value === '=')) {
+          break;
+        }
+        elts.push(this.parseExpression());
+      }
+      return new TupleNode(elts, first.line);
+    }
+    return first;
+  }
+
+  // [W4] Parse an expression that may begin with '*' (starred unpacking target).
+  parseStarOrExpression() {
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '*') {
+      const star = this.next();
+      const inner = this.parseExpression();
+      return new StarredNode(inner, star.line);
+    }
+    return this.parseExpression();
+  }
+
+  // [W4] Normalize a parsed expression into a valid assignment target.
+  // Converts subscript BinOp(INDEX) into a SubscriptNode; leaves Name/Attribute/
+  // Tuple/Starred as-is.
+  toAssignTarget(node) {
+    if (node && node.type === 'BinOp' && node.op === 'INDEX') {
+      return new SubscriptNode(node.left, node.right, node.line);
+    }
+    if (node && node.type === 'Tuple') {
+      return new TupleNode(node.elts.map(e => this.toAssignTarget(e)), node.line);
+    }
+    if (node && node.type === 'Starred') {
+      return new StarredNode(this.toAssignTarget(node.value), node.line);
+    }
+    return node;
   }
 
   parseExpression() {
@@ -942,21 +1124,114 @@ class Parser {
       return new NameNode(tok.value, tok.line);
     }
     if (tok.type === TokenType.SYMBOL && tok.value === '(') {
-      this.next();
-      const expr = this.parseExpression();
-      this.expect(TokenType.SYMBOL, ')', 'Expected closing parenthesis');
-      return expr;
+      // [W4] handle (), (expr), (1, 2) tuple, and (x for x in xs) generator expr
+      return this.parseParenOrTupleOrGenExp();
     }
     if (tok.type === TokenType.SYMBOL && tok.value === '[') {
       return this.parseListOrComprehension();
+    }
+    if (tok.type === TokenType.SYMBOL && tok.value === '{') {
+      // [W4] handle {} dict, {k: v} dict, {x} set, and dict/set comprehensions
+      return this.parseDictOrSet();
     }
 
     throw new SyntaxError(`Unexpected token "${tok.value}" in expression at line ${tok.line}`);
   }
 
+  // [W4] Parse "(" ... ")": empty tuple (), parenthesized expr (e), tuple (a, b),
+  // or generator expression (x for x in xs).
+  parseParenOrTupleOrGenExp() {
+    const startTok = this.expect(TokenType.SYMBOL, '(');
+
+    // Empty tuple ()
+    if (this.match(TokenType.SYMBOL, ')')) {
+      return new TupleNode([], startTok.line);
+    }
+
+    const first = this.parseExpression();
+
+    // Generator expression: (elt for target in iter ...)
+    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+      const generators = this.parseComprehensionClauses();
+      this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing generator expression');
+      return new GenExpNode(first, generators, startTok.line);
+    }
+
+    // Tuple: (a, b, ...) — at least one top-level comma
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ',') {
+      const elts = [first];
+      while (this.match(TokenType.SYMBOL, ',')) {
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ')') break; // trailing comma
+        elts.push(this.parseExpression());
+      }
+      this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing tuple');
+      return new TupleNode(elts, startTok.line);
+    }
+
+    // Plain parenthesized expression
+    this.expect(TokenType.SYMBOL, ')', 'Expected closing parenthesis');
+    return first;
+  }
+
+  // [W4] Parse "{" ... "}": empty dict {}, dict {k: v, ...}, set {a, ...},
+  // dict comprehension {k: v for ...}, or set comprehension {x for ...}.
+  parseDictOrSet() {
+    const startTok = this.expect(TokenType.SYMBOL, '{');
+
+    // Empty braces are an empty dict in Python
+    if (this.match(TokenType.SYMBOL, '}')) {
+      return new DictNode([], [], startTok.line);
+    }
+
+    const first = this.parseExpression();
+
+    // Dict (has a ':' after the first key)
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ':') {
+      this.next(); // consume ':'
+      const firstVal = this.parseExpression();
+
+      // Dict comprehension: {k: v for ...}
+      if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+        const generators = this.parseComprehensionClauses();
+        this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing dict comprehension');
+        return new DictCompNode(first, firstVal, generators, startTok.line);
+      }
+
+      // Plain dict
+      const keys = [first];
+      const values = [firstVal];
+      while (this.match(TokenType.SYMBOL, ',')) {
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '}') break; // trailing comma
+        const k = this.parseExpression();
+        this.expect(TokenType.SYMBOL, ':', 'Expected ":" between dict key and value');
+        const v = this.parseExpression();
+        keys.push(k);
+        values.push(v);
+      }
+      this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing dict literal');
+      return new DictNode(keys, values, startTok.line);
+    }
+
+    // Set comprehension: {x for ...}
+    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+      const generators = this.parseComprehensionClauses();
+      this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing set comprehension');
+      return new SetCompNode(first, generators, startTok.line);
+    }
+
+    // Plain set: {a, b, ...}
+    const elts = [first];
+    while (this.match(TokenType.SYMBOL, ',')) {
+      if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '}') break; // trailing comma
+      elts.push(this.parseExpression());
+    }
+    this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing set literal');
+    return new SetNode(elts, startTok.line);
+  }
+
   parseListOrComprehension() {
     const startTok = this.expect(TokenType.SYMBOL, '[');
-    
+
     // Check for empty list
     if (this.match(TokenType.SYMBOL, ']')) {
       return new ListNode([], startTok.line);
@@ -964,24 +1239,22 @@ class Parser {
 
     const first = this.parseExpression();
 
-    // Check for List Comprehension: [elt for target in iter]
+    // Check for List Comprehension: [elt for target in iter ...]
     if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
-      this.next(); // consume 'for'
-      const targetId = this.expect(TokenType.IDENTIFIER, undefined, 'Expected identifier in list comprehension loop');
-      const target = new NameNode(targetId.value, targetId.line);
-      
-      this.expect(TokenType.KEYWORD, 'in', 'Expected "in" keyword in list comprehension');
-      const iter = this.parseExpression();
-      
-      let ifs = null;
-      if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'if') {
-        this.next(); // consume 'if'
-        ifs = this.parseExpression();
-      }
-      
+      // [W4] support multiple "for" clauses (nested) and multiple "if" filters
+      const generators = this.parseComprehensionClauses();
       this.expect(TokenType.SYMBOL, ']', 'Expected closing bracket "]" in list comprehension');
-      
-      return new ListCompNode(first, target, iter, ifs, startTok.line);
+
+      const firstGen = generators[0];
+      const node = new ListCompNode(
+        first,
+        firstGen.target,
+        firstGen.iter,
+        firstGen.ifs.length ? firstGen.ifs[0] : null,
+        startTok.line
+      );
+      node.generators = generators;
+      return node;
     }
 
     // Standard list: [elt1, elt2, ...]
@@ -990,15 +1263,89 @@ class Parser {
       if (this.peek().type === TokenType.SYMBOL && this.peek().value === ']') break; // handle trailing comma
       elts.push(this.parseExpression());
     }
-    
+
     this.expect(TokenType.SYMBOL, ']', 'Expected closing bracket "]" at the end of list');
     return new ListNode(elts, startTok.line);
+  }
+
+  // [W4] Parse one or more comprehension clauses: ("for" <target> "in" <iter> ("if" <cond>)* )+
+  // Assumes the cursor is positioned on the first "for" keyword.
+  parseComprehensionClauses() {
+    const generators = [];
+    while (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+      const forTok = this.next(); // consume 'for'
+      const target = this.parseCompTarget();
+      this.expect(TokenType.KEYWORD, 'in', 'Expected "in" keyword in comprehension');
+      // Use parseLogicalOr so a following ternary "if" or comprehension "if" is not swallowed
+      const iter = this.parseLogicalOr();
+      const ifs = [];
+      while (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'if') {
+        this.next(); // consume 'if'
+        ifs.push(this.parseLogicalOr());
+      }
+      generators.push(new ComprehensionNode(target, iter, ifs, forTok.line));
+    }
+    return generators;
+  }
+
+  // [W4] Parse a comprehension/for target: a single name or a tuple of names (k, v).
+  parseCompTarget() {
+    const firstId = this.expect(TokenType.IDENTIFIER, undefined, 'Expected identifier in comprehension/for target');
+    const first = new NameNode(firstId.value, firstId.line);
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ',') {
+      const elts = [first];
+      while (this.match(TokenType.SYMBOL, ',')) {
+        // stop on a trailing comma followed by 'in'
+        if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'in') break;
+        const nid = this.expect(TokenType.IDENTIFIER, undefined, 'Expected identifier in tuple target');
+        elts.push(new NameNode(nid.value, nid.line));
+      }
+      return new TupleNode(elts, first.line);
+    }
+    return first;
   }
 }
 
 // -------------------------------------------------------------
 // 4. AST to Python Code Generator (For Roundtrip Validation)
 // -------------------------------------------------------------
+// [W4] Render a for/comprehension target. Tuple targets are unparenthesized
+// (e.g. "k, v" not "(k, v)") as is idiomatic in Python loop/comp headers.
+function targetToPython(node) {
+  if (node && node.type === 'Tuple') {
+    return node.elts.map(e => targetToPython(e)).join(', ');
+  }
+  return astToPython(node);
+}
+
+// [W4] For comprehension blocks: produce a text fragment for clauses that the
+// simple block UI (single VAR/ITER/COND) cannot represent. That is: the first
+// generator's extra "if" filters (beyond the first), plus every additional
+// "for ... in ... (if ...)*" generator. Returns '' when nothing extra.
+function comprehensionExtraClauses(generators, primary) {
+  let out = '';
+  const firstIfs = (primary.ifs || []);
+  for (let i = 1; i < firstIfs.length; i++) {
+    out += ` if ${astToPython(firstIfs[i])}`;
+  }
+  for (let g = 1; g < generators.length; g++) {
+    const gen = generators[g];
+    const ifsStr = (gen.ifs || []).map(c => ` if ${astToPython(c)}`).join('');
+    out += ` for ${targetToPython(gen.target)} in ${astToPython(gen.iter)}${ifsStr}`;
+  }
+  return out;
+}
+
+// [W4] Render an array of ComprehensionNode clauses to Python:
+//   " for <t> in <iter> if <c1> if <c2> for <t2> in <iter2> ..."
+function comprehensionClausesToPython(generators) {
+  if (!generators || generators.length === 0) return '';
+  return generators.map(g => {
+    const ifsStr = (g.ifs || []).map(c => ` if ${astToPython(c)}`).join('');
+    return ` for ${targetToPython(g.target)} in ${astToPython(g.iter)}${ifsStr}`;
+  }).join('');
+}
+
 function astToPython(node, indentLevel = 0) {
   if (!node) return '';
   const indent = '    '.repeat(indentLevel);
@@ -1007,14 +1354,21 @@ function astToPython(node, indentLevel = 0) {
     case 'Program':
       return node.body.map(stmt => astToPython(stmt, indentLevel)).join('\n');
       
-    case 'Assign':
-      return `${indent}${astToPython(node.target)} = ${astToPython(node.value)}`;
+    case 'Assign': {
+      // [W4] tuple/list unpacking targets and values render unparenthesized
+      const tgtStr = targetToPython(node.target);
+      const valStr = (node.target && node.target.type === 'Tuple' && node.value && node.value.type === 'Tuple')
+        ? node.value.elts.map(e => astToPython(e)).join(', ')
+        : astToPython(node.value);
+      return `${indent}${tgtStr} = ${valStr}`;
+    }
       
     case 'AugAssign':
       return `${indent}${astToPython(node.target)} ${node.op} ${astToPython(node.value)}`;
       
     case 'For':
-      const forHead = `${indent}for ${astToPython(node.target)} in ${astToPython(node.iter)}:`;
+      // [W4] targetToPython renders tuple targets unparenthesized (for k, v in ...)
+      const forHead = `${indent}for ${targetToPython(node.target)} in ${astToPython(node.iter)}:`;
       const forBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
       return `${forHead}\n${forBody || (indent + '    pass')}`;
       
@@ -1045,8 +1399,51 @@ function astToPython(node, indentLevel = 0) {
       return indentLevel > 0 ? `${indent}${callCode}` : callCode;
       
     case 'ListComp':
-      return `[${astToPython(node.elt)} for ${astToPython(node.target)} in ${astToPython(node.iter)}${node.ifs ? ' if ' + astToPython(node.ifs) : ''}]`;
-      
+      // [W4] prefer multi-clause generators when present, else legacy single-clause fields
+      if (node.generators && node.generators.length > 0) {
+        return `[${astToPython(node.elt)}${comprehensionClausesToPython(node.generators)}]`;
+      }
+      return `[${astToPython(node.elt)} for ${targetToPython(node.target)} in ${astToPython(node.iter)}${node.ifs ? ' if ' + astToPython(node.ifs) : ''}]`;
+
+    // [W4] Tuple literal
+    case 'Tuple':
+      if (node.elts.length === 0) return '()';
+      if (node.elts.length === 1) return `(${astToPython(node.elts[0])},)`;
+      return `(${node.elts.map(e => astToPython(e)).join(', ')})`;
+
+    // [W4] Dict literal
+    case 'Dict':
+      if (node.keys.length === 0) return '{}';
+      return `{${node.keys.map((k, i) => `${astToPython(k)}: ${astToPython(node.values[i])}`).join(', ')}}`;
+
+    // [W4] Set literal
+    case 'Set':
+      return `{${node.elts.map(e => astToPython(e)).join(', ')}}`;
+
+    // [W4] Dict comprehension
+    case 'DictComp':
+      return `{${astToPython(node.key)}: ${astToPython(node.value)}${comprehensionClausesToPython(node.generators)}}`;
+
+    // [W4] Set comprehension
+    case 'SetComp':
+      return `{${astToPython(node.elt)}${comprehensionClausesToPython(node.generators)}}`;
+
+    // [W4] Generator expression
+    case 'GenExp':
+      return `(${astToPython(node.elt)}${comprehensionClausesToPython(node.generators)})`;
+
+    // [W4] Starred target/expr
+    case 'Starred':
+      return `*${astToPython(node.value)}`;
+
+    // [W4] Subscript assignment target / access
+    case 'Subscript':
+      return `${astToPython(node.value)}[${astToPython(node.index)}]`;
+
+    // [W4] Multiple-target assignment: a = b = value
+    case 'MultiAssign':
+      return `${indent}${node.targets.map(t => astToPython(t)).join(' = ')} = ${astToPython(node.value)}`;
+
     case 'Ternary':
       return `${astToPython(node.body)} if ${astToPython(node.test)} else ${astToPython(node.orelse)}`;
       
@@ -1204,9 +1601,50 @@ function collectVariables(node, varsSet = new Set()) {
       break;
     case 'ListComp':
       collectVariables(node.elt, varsSet);
+      if (node.generators && node.generators.length > 0) {
+        for (const g of node.generators) collectVariables(g, varsSet);
+      } else {
+        collectVariables(node.target, varsSet);
+        collectVariables(node.iter, varsSet);
+        if (node.ifs) collectVariables(node.ifs, varsSet);
+      }
+      break;
+    // [W4] new comprehension / collection node types
+    case 'Comprehension':
       collectVariables(node.target, varsSet);
       collectVariables(node.iter, varsSet);
-      if (node.ifs) collectVariables(node.ifs, varsSet);
+      if (node.ifs) for (const c of node.ifs) collectVariables(c, varsSet);
+      break;
+    case 'DictComp':
+      collectVariables(node.key, varsSet);
+      collectVariables(node.value, varsSet);
+      if (node.generators) for (const g of node.generators) collectVariables(g, varsSet);
+      break;
+    case 'SetComp':
+    case 'GenExp':
+      collectVariables(node.elt, varsSet);
+      if (node.generators) for (const g of node.generators) collectVariables(g, varsSet);
+      break;
+    case 'Tuple':
+    case 'Set':
+      if (node.elts && Array.isArray(node.elts)) {
+        for (const elt of node.elts) collectVariables(elt, varsSet);
+      }
+      break;
+    case 'Dict':
+      if (node.keys) for (const k of node.keys) collectVariables(k, varsSet);
+      if (node.values) for (const v of node.values) collectVariables(v, varsSet);
+      break;
+    case 'Starred':
+      collectVariables(node.value, varsSet);
+      break;
+    case 'Subscript':
+      collectVariables(node.value, varsSet);
+      collectVariables(node.index, varsSet);
+      break;
+    case 'MultiAssign':
+      if (node.targets) for (const t of node.targets) collectVariables(t, varsSet);
+      collectVariables(node.value, varsSet);
       break;
     case 'Ternary':
       collectVariables(node.test, varsSet);
@@ -1322,6 +1760,48 @@ function convertStatementToBlock(node) {
     }
     
     case 'Assign': {
+      const tgt = node.target;
+
+      // [W4] Subscript assignment d[k] = v  ->  standard lists_setIndex block
+      if (tgt && tgt.type === 'Subscript') {
+        return {
+          "type": "lists_setIndex",
+          "id": makeBlockId(),
+          "fields": { "MODE": "SET", "WHERE": "FROM_START" },
+          "inputs": {
+            "LIST": { "block": convertExpressionToBlock(tgt.value) },
+            "AT": { "block": convertExpressionToBlock(tgt.index) },
+            "TO": { "block": convertExpressionToBlock(node.value) }
+          }
+        };
+      }
+
+      // [W4] Attribute assignment obj.attr = v  ->  custom set_attribute block
+      if (tgt && tgt.type === 'Attribute') {
+        return {
+          "type": "set_attribute",
+          "id": makeBlockId(),
+          "fields": { "ATTR": tgt.attr },
+          "inputs": {
+            "OBJECT": { "block": convertExpressionToBlock(tgt.value) },
+            "VALUE": { "block": convertExpressionToBlock(node.value) }
+          }
+        };
+      }
+
+      // [W4] Tuple/list unpacking a, b = ... | a, *rest = ...  ->  custom unpack_assign block
+      if (tgt && tgt.type === 'Tuple') {
+        const targetStr = tgt.elts.map(e => astToPython(e)).join(', ');
+        return {
+          "type": "unpack_assign",
+          "id": makeBlockId(),
+          "fields": { "TARGETS": targetStr },
+          "inputs": {
+            "VALUE": { "block": convertExpressionToBlock(node.value) }
+          }
+        };
+      }
+
       // Handle variable assignment: e.g. x = 10
       const targetName = node.target.type === 'Name' ? node.target.id : 'x';
       return {
@@ -1336,6 +1816,19 @@ function convertStatementToBlock(node) {
           "VALUE": {
             "block": convertExpressionToBlock(node.value)
           }
+        }
+      };
+    }
+
+    // [W4] Multiple-target assignment a = b = 0  ->  custom multiple_assign block
+    case 'MultiAssign': {
+      const targetStr = node.targets.map(t => astToPython(t)).join(' = ');
+      return {
+        "type": "multiple_assign",
+        "id": makeBlockId(),
+        "fields": { "TARGETS": targetStr },
+        "inputs": {
+          "VALUE": { "block": convertExpressionToBlock(node.value) }
         }
       };
     }
@@ -1388,9 +1881,23 @@ function convertStatementToBlock(node) {
     }
 
     case 'For': {
+      // [W4] Tuple target (for k, v in ...) -> custom for_unpack block.
+      if (node.target && node.target.type === 'Tuple') {
+        const targetStr = node.target.elts.map(e => astToPython(e)).join(', ');
+        return {
+          "type": "for_unpack",
+          "id": makeBlockId(),
+          "fields": { "TARGETS": targetStr },
+          "inputs": {
+            "LIST": { "block": convertExpressionToBlock(node.iter) },
+            "DO": { "block": convertStatementListToBlock(node.body) }
+          }
+        };
+      }
+
       // Handle simple loops
       const varName = node.target.type === 'Name' ? node.target.id : 'i';
-      
+
       // If iterating range(10): map to repeating loops
       if (node.iter.type === 'Range') {
         const range = node.iter;
@@ -1855,7 +2362,8 @@ function convertCallExpression(node, isStatement = false) {
     const blockType = `lib_${libName}_${funcName}`;
     
     // On-the-fly static block registration!
-    if (!Blockly.Blocks[blockType] && window.appOrchestrator && window.appOrchestrator.abstractionEngine) {
+    // [W4] guard window access so this works under Node (non-browser) too.
+    if (!Blockly.Blocks[blockType] && typeof window !== 'undefined' && window.appOrchestrator && window.appOrchestrator.abstractionEngine) {
       const args = node.args.map((_, idx) => `param_${idx}`);
       const hasOutput = !isStatement;
       const colour = libName === 'cv2' ? '#06b6d4' : (libName === 'global' ? '#b55bf7' : '#009688');
@@ -2149,33 +2657,161 @@ function convertExpressionToBlock(node) {
       };
 
     case 'ListComp': {
-      // [expr for var in iter (if cond)?]  ->  custom list_comprehension block
-      const targetName = node.target && node.target.type === 'Name' ? node.target.id : 'x';
+      // [expr for var in iter (if cond)?]  ->  custom list_comprehension block.
+      // [W4] Use the multi-clause generators when present; the block carries the
+      // primary clause in VAR/ITER/COND and any extra for/if clauses as text.
+      const gens = (node.generators && node.generators.length > 0)
+        ? node.generators
+        : [{ target: node.target, iter: node.iter, ifs: node.ifs ? [node.ifs] : [] }];
+      const primary = gens[0];
+      const targetName = primary.target && primary.target.type === 'Name'
+        ? primary.target.id : astToPython(primary.target);
+      const firstCond = primary.ifs && primary.ifs.length ? primary.ifs[0] : null;
+      const extra = comprehensionExtraClauses(gens, primary);
       const compBlock = {
         "type": "list_comprehension",
         "id": makeBlockId(),
         "extraState": {
-          "hasFilter": node.ifs ? true : undefined
+          "hasFilter": firstCond ? true : undefined
         },
         "fields": {
-          "VAR": targetName
+          "VAR": targetName,
+          "CLAUSES": extra || undefined
         },
         "inputs": {
-          "EXPR": {
-            "block": convertExpressionToBlock(node.elt)
-          },
-          "ITER": {
-            "block": convertExpressionToBlock(node.iter)
-          }
+          "EXPR": { "block": convertExpressionToBlock(node.elt) },
+          "ITER": { "block": convertExpressionToBlock(primary.iter) }
         }
       };
-      if (node.ifs) {
-        compBlock.inputs["COND"] = {
-          "block": convertExpressionToBlock(node.ifs)
-        };
+      if (firstCond) {
+        compBlock.inputs["COND"] = { "block": convertExpressionToBlock(firstCond) };
       }
       return compBlock;
     }
+
+    // [W4] Dict comprehension {k: v for ...} -> custom dict_comprehension block
+    case 'DictComp': {
+      const primary = node.generators[0];
+      const targetName = primary.target && primary.target.type === 'Name'
+        ? primary.target.id : astToPython(primary.target);
+      const firstCond = primary.ifs && primary.ifs.length ? primary.ifs[0] : null;
+      const extra = comprehensionExtraClauses(node.generators, primary);
+      const block = {
+        "type": "dict_comprehension",
+        "id": makeBlockId(),
+        "fields": { "VAR": targetName, "CLAUSES": extra || undefined },
+        "inputs": {
+          "KEY": { "block": convertExpressionToBlock(node.key) },
+          "VAL": { "block": convertExpressionToBlock(node.value) },
+          "ITER": { "block": convertExpressionToBlock(primary.iter) }
+        }
+      };
+      if (firstCond) block.inputs["COND"] = { "block": convertExpressionToBlock(firstCond) };
+      return block;
+    }
+
+    // [W4] Set comprehension {x for ...} -> custom set_comprehension block
+    case 'SetComp': {
+      const primary = node.generators[0];
+      const targetName = primary.target && primary.target.type === 'Name'
+        ? primary.target.id : astToPython(primary.target);
+      const firstCond = primary.ifs && primary.ifs.length ? primary.ifs[0] : null;
+      const extra = comprehensionExtraClauses(node.generators, primary);
+      const block = {
+        "type": "set_comprehension",
+        "id": makeBlockId(),
+        "fields": { "VAR": targetName, "CLAUSES": extra || undefined },
+        "inputs": {
+          "EXPR": { "block": convertExpressionToBlock(node.elt) },
+          "ITER": { "block": convertExpressionToBlock(primary.iter) }
+        }
+      };
+      if (firstCond) block.inputs["COND"] = { "block": convertExpressionToBlock(firstCond) };
+      return block;
+    }
+
+    // [W4] Generator expression (x for x in xs) -> custom gen_expression block
+    case 'GenExp': {
+      const primary = node.generators[0];
+      const targetName = primary.target && primary.target.type === 'Name'
+        ? primary.target.id : astToPython(primary.target);
+      const firstCond = primary.ifs && primary.ifs.length ? primary.ifs[0] : null;
+      const extra = comprehensionExtraClauses(node.generators, primary);
+      const block = {
+        "type": "gen_expression",
+        "id": makeBlockId(),
+        "fields": { "VAR": targetName, "CLAUSES": extra || undefined },
+        "inputs": {
+          "EXPR": { "block": convertExpressionToBlock(node.elt) },
+          "ITER": { "block": convertExpressionToBlock(primary.iter) }
+        }
+      };
+      if (firstCond) block.inputs["COND"] = { "block": convertExpressionToBlock(firstCond) };
+      return block;
+    }
+
+    // [W4] Tuple literal (1, 2) / () -> custom tuple_create block
+    case 'Tuple': {
+      const block = {
+        "type": "tuple_create",
+        "id": makeBlockId(),
+        "extraState": { "itemCount": node.elts.length },
+        "inputs": {}
+      };
+      node.elts.forEach((elt, idx) => {
+        block.inputs[`ADD${idx}`] = { "block": convertExpressionToBlock(elt) };
+      });
+      return block;
+    }
+
+    // [W4] Dict literal {"a": 1} / {} -> custom dict_create block (N key/value pairs)
+    case 'Dict': {
+      const block = {
+        "type": "dict_create",
+        "id": makeBlockId(),
+        "extraState": { "itemCount": node.keys.length },
+        "inputs": {}
+      };
+      node.keys.forEach((k, idx) => {
+        block.inputs[`KEY${idx}`] = { "block": convertExpressionToBlock(k) };
+        block.inputs[`VAL${idx}`] = { "block": convertExpressionToBlock(node.values[idx]) };
+      });
+      return block;
+    }
+
+    // [W4] Set literal {1, 2, 3} -> custom set_create block
+    case 'Set': {
+      const block = {
+        "type": "set_create",
+        "id": makeBlockId(),
+        "extraState": { "itemCount": node.elts.length },
+        "inputs": {}
+      };
+      node.elts.forEach((elt, idx) => {
+        block.inputs[`ADD${idx}`] = { "block": convertExpressionToBlock(elt) };
+      });
+      return block;
+    }
+
+    // [W4] Subscript access in expression context (e.g. RHS d[k]) -> lists_getIndex
+    case 'Subscript':
+      return {
+        "type": "lists_getIndex",
+        "id": makeBlockId(),
+        "fields": { "MODE": "GET", "WHERE": "FROM_START" },
+        "inputs": {
+          "VALUE": { "block": convertExpressionToBlock(node.value) },
+          "AT": { "block": convertExpressionToBlock(node.index) }
+        }
+      };
+
+    // [W4] Starred expression -> faithful raw expression
+    case 'Starred':
+      return {
+        "type": "raw_expression",
+        "id": makeBlockId(),
+        "fields": { "EXPR": astToPython(node) }
+      };
 
     case 'Attribute':
       // obj.attr  ->  custom attribute_access block (OBJECT value + NAME field)
@@ -2483,6 +3119,9 @@ Blockly.Blocks['list_comprehension'] = {
     this.appendValueInput("COND")
         .setCheck("Boolean")
         .appendField("if");
+    // [W4] extra clauses (additional for/if for nested or multi-condition comps)
+    this.appendDummyInput()
+        .appendField(new Blockly.FieldTextInput(""), "CLAUSES");
     this.appendDummyInput()
         .appendField("]");
     this.setOutput(true, "Array");
@@ -2498,7 +3137,8 @@ Blockly.Python['list_comprehension'] = function(block) {
   const iter = Blockly.Python.valueToCode(block, 'ITER', Blockly.Python.ORDER_NONE) || '[]';
   const cond = Blockly.Python.valueToCode(block, 'COND', Blockly.Python.ORDER_NONE);
   const filterStr = cond ? ` if ${cond}` : '';
-  const code = `[${expr} for ${varName} in ${iter}${filterStr}]`;
+  const extra = (block.getFieldValue('CLAUSES') || ''); // [W4]
+  const code = `[${expr} for ${varName} in ${iter}${filterStr}${extra}]`;
   return [code, Blockly.Python.ORDER_ATOMIC];
 };
 if (Blockly.Python.forBlock) {
@@ -2627,6 +3267,335 @@ if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['procedures_ifreturn'] = Blockly.Python['procedures_ifreturn'];
 }
 
+// ── [W4] Collections & literals custom blocks ───────────────────────────────
+
+// [W4] Shared mutator factory for N-item collection blocks (tuple/set).
+// Produces ADD0..ADD(n-1) value inputs based on extraState.itemCount.
+function makeCollectionBlock(opts) {
+  // opts: { open, close, defaultCount, colour, tooltip, output }
+  return {
+    itemCount_: opts.defaultCount,
+    init: function() {
+      this.itemCount_ = opts.defaultCount;
+      this.updateShape_();
+      this.setOutput(true, opts.output || null);
+      this.setInputsInline(true);
+      this.setColour(opts.colour);
+      this.setTooltip(opts.tooltip);
+      this.setHelpUrl("");
+    },
+    saveExtraState: function() {
+      return { itemCount: this.itemCount_ };
+    },
+    loadExtraState: function(state) {
+      this.itemCount_ = (state && typeof state.itemCount === 'number') ? state.itemCount : 0;
+      this.updateShape_();
+    },
+    updateShape_: function() {
+      // Remove existing item inputs / dummies
+      let i = 0;
+      while (this.getInput('ADD' + i)) { this.removeInput('ADD' + i); i++; }
+      if (this.getInput('EMPTY')) this.removeInput('EMPTY');
+      if (this.getInput('CLOSE')) this.removeInput('CLOSE');
+
+      if (this.itemCount_ === 0) {
+        this.appendDummyInput('EMPTY').appendField(opts.open + opts.close);
+        return;
+      }
+      for (let j = 0; j < this.itemCount_; j++) {
+        const input = this.appendValueInput('ADD' + j).setCheck(null);
+        if (j === 0) input.appendField(opts.open);
+      }
+      this.appendDummyInput('CLOSE').appendField(opts.close);
+    }
+  };
+}
+
+// [W4] tuple literal: (a, b, ...)
+Blockly.Blocks['tuple_create'] = makeCollectionBlock({
+  open: "(", close: ")", defaultCount: 2, colour: "#16a085",
+  tooltip: "Creates a tuple."
+});
+Blockly.Python['tuple_create'] = function(block) {
+  const n = block.itemCount_ || 0;
+  const items = [];
+  for (let i = 0; i < n; i++) {
+    items.push(Blockly.Python.valueToCode(block, 'ADD' + i, Blockly.Python.ORDER_NONE) || 'None');
+  }
+  let code;
+  if (items.length === 0) code = '()';
+  else if (items.length === 1) code = `(${items[0]},)`;
+  else code = `(${items.join(', ')})`;
+  return [code, Blockly.Python.ORDER_ATOMIC];
+};
+
+// [W4] set literal: {a, b, ...}
+Blockly.Blocks['set_create'] = makeCollectionBlock({
+  open: "{", close: "}", defaultCount: 3, colour: "#16a085",
+  tooltip: "Creates a set."
+});
+Blockly.Python['set_create'] = function(block) {
+  const n = block.itemCount_ || 0;
+  const items = [];
+  for (let i = 0; i < n; i++) {
+    items.push(Blockly.Python.valueToCode(block, 'ADD' + i, Blockly.Python.ORDER_NONE) || 'None');
+  }
+  // {} is a dict, so an empty set must be set()
+  const code = items.length === 0 ? 'set()' : `{${items.join(', ')}}`;
+  return [code, Blockly.Python.ORDER_ATOMIC];
+};
+
+// [W4] dict literal: {k0: v0, k1: v1, ...} — N key/value pairs (KEYn/VALn inputs)
+Blockly.Blocks['dict_create'] = {
+  itemCount_: 1,
+  init: function() {
+    this.itemCount_ = 1;
+    this.updateShape_();
+    this.setOutput(true, null);
+    this.setInputsInline(true);
+    this.setColour("#16a085");
+    this.setTooltip("Creates a dictionary of key: value pairs.");
+    this.setHelpUrl("");
+  },
+  saveExtraState: function() { return { itemCount: this.itemCount_ }; },
+  loadExtraState: function(state) {
+    this.itemCount_ = (state && typeof state.itemCount === 'number') ? state.itemCount : 0;
+    this.updateShape_();
+  },
+  updateShape_: function() {
+    let i = 0;
+    while (this.getInput('KEY' + i) || this.getInput('VAL' + i)) {
+      if (this.getInput('KEY' + i)) this.removeInput('KEY' + i);
+      if (this.getInput('VAL' + i)) this.removeInput('VAL' + i);
+      i++;
+    }
+    if (this.getInput('EMPTY')) this.removeInput('EMPTY');
+    if (this.getInput('CLOSE')) this.removeInput('CLOSE');
+
+    if (this.itemCount_ === 0) {
+      this.appendDummyInput('EMPTY').appendField("{}");
+      return;
+    }
+    for (let j = 0; j < this.itemCount_; j++) {
+      this.appendValueInput('KEY' + j).setCheck(null).appendField(j === 0 ? "{" : ",");
+      this.appendValueInput('VAL' + j).setCheck(null).appendField(":");
+    }
+    this.appendDummyInput('CLOSE').appendField("}");
+  }
+};
+Blockly.Python['dict_create'] = function(block) {
+  const n = block.itemCount_ || 0;
+  const pairs = [];
+  for (let i = 0; i < n; i++) {
+    const k = Blockly.Python.valueToCode(block, 'KEY' + i, Blockly.Python.ORDER_NONE) || '""';
+    const v = Blockly.Python.valueToCode(block, 'VAL' + i, Blockly.Python.ORDER_NONE) || 'None';
+    pairs.push(`${k}: ${v}`);
+  }
+  const code = pairs.length === 0 ? '{}' : `{${pairs.join(', ')}}`;
+  return [code, Blockly.Python.ORDER_ATOMIC];
+};
+
+// [W4] dict comprehension: {KEY: VAL for VAR in ITER (if COND)? CLAUSES}
+Blockly.Blocks['dict_comprehension'] = {
+  init: function() {
+    this.appendValueInput("KEY").setCheck(null).appendField("{");
+    this.appendValueInput("VAL").setCheck(null).appendField(":");
+    this.appendDummyInput()
+        .appendField("for")
+        .appendField(new Blockly.FieldTextInput("k"), "VAR")
+        .appendField("in");
+    this.appendValueInput("ITER").setCheck(null);
+    this.appendValueInput("COND").setCheck("Boolean").appendField("if");
+    this.appendDummyInput().appendField(new Blockly.FieldTextInput(""), "CLAUSES");
+    this.appendDummyInput().appendField("}");
+    this.setOutput(true, null);
+    this.setInputsInline(true);
+    this.setColour("#16a085");
+    this.setTooltip("Dict comprehension. Leave 'if' empty for no filter.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['dict_comprehension'] = function(block) {
+  const key = Blockly.Python.valueToCode(block, 'KEY', Blockly.Python.ORDER_NONE) || 'k';
+  const val = Blockly.Python.valueToCode(block, 'VAL', Blockly.Python.ORDER_NONE) || 'v';
+  const varName = block.getFieldValue('VAR') || 'k';
+  const iter = Blockly.Python.valueToCode(block, 'ITER', Blockly.Python.ORDER_NONE) || '[]';
+  const cond = Blockly.Python.valueToCode(block, 'COND', Blockly.Python.ORDER_NONE);
+  const filterStr = cond ? ` if ${cond}` : '';
+  const extra = block.getFieldValue('CLAUSES') || '';
+  return [`{${key}: ${val} for ${varName} in ${iter}${filterStr}${extra}}`, Blockly.Python.ORDER_ATOMIC];
+};
+
+// [W4] set comprehension: {EXPR for VAR in ITER (if COND)? CLAUSES}
+Blockly.Blocks['set_comprehension'] = {
+  init: function() {
+    this.appendValueInput("EXPR").setCheck(null).appendField("{");
+    this.appendDummyInput()
+        .appendField("for")
+        .appendField(new Blockly.FieldTextInput("x"), "VAR")
+        .appendField("in");
+    this.appendValueInput("ITER").setCheck(null);
+    this.appendValueInput("COND").setCheck("Boolean").appendField("if");
+    this.appendDummyInput().appendField(new Blockly.FieldTextInput(""), "CLAUSES");
+    this.appendDummyInput().appendField("}");
+    this.setOutput(true, null);
+    this.setInputsInline(true);
+    this.setColour("#16a085");
+    this.setTooltip("Set comprehension. Leave 'if' empty for no filter.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['set_comprehension'] = function(block) {
+  const expr = Blockly.Python.valueToCode(block, 'EXPR', Blockly.Python.ORDER_NONE) || 'x';
+  const varName = block.getFieldValue('VAR') || 'x';
+  const iter = Blockly.Python.valueToCode(block, 'ITER', Blockly.Python.ORDER_NONE) || '[]';
+  const cond = Blockly.Python.valueToCode(block, 'COND', Blockly.Python.ORDER_NONE);
+  const filterStr = cond ? ` if ${cond}` : '';
+  const extra = block.getFieldValue('CLAUSES') || '';
+  return [`{${expr} for ${varName} in ${iter}${filterStr}${extra}}`, Blockly.Python.ORDER_ATOMIC];
+};
+
+// [W4] generator expression: (EXPR for VAR in ITER (if COND)? CLAUSES)
+Blockly.Blocks['gen_expression'] = {
+  init: function() {
+    this.appendValueInput("EXPR").setCheck(null).appendField("(");
+    this.appendDummyInput()
+        .appendField("for")
+        .appendField(new Blockly.FieldTextInput("x"), "VAR")
+        .appendField("in");
+    this.appendValueInput("ITER").setCheck(null);
+    this.appendValueInput("COND").setCheck("Boolean").appendField("if");
+    this.appendDummyInput().appendField(new Blockly.FieldTextInput(""), "CLAUSES");
+    this.appendDummyInput().appendField(")");
+    this.setOutput(true, null);
+    this.setInputsInline(true);
+    this.setColour("#16a085");
+    this.setTooltip("Generator expression. Leave 'if' empty for no filter.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['gen_expression'] = function(block) {
+  const expr = Blockly.Python.valueToCode(block, 'EXPR', Blockly.Python.ORDER_NONE) || 'x';
+  const varName = block.getFieldValue('VAR') || 'x';
+  const iter = Blockly.Python.valueToCode(block, 'ITER', Blockly.Python.ORDER_NONE) || '[]';
+  const cond = Blockly.Python.valueToCode(block, 'COND', Blockly.Python.ORDER_NONE);
+  const filterStr = cond ? ` if ${cond}` : '';
+  const extra = block.getFieldValue('CLAUSES') || '';
+  return [`(${expr} for ${varName} in ${iter}${filterStr}${extra})`, Blockly.Python.ORDER_ATOMIC];
+};
+
+// [W4] attribute assignment: obj.attr = value  (set_attribute statement block)
+Blockly.Blocks['set_attribute'] = {
+  init: function() {
+    this.appendValueInput("OBJECT").setCheck(null).appendField("set");
+    this.appendDummyInput()
+        .appendField(".")
+        .appendField(new Blockly.FieldTextInput("attr"), "ATTR")
+        .appendField("=");
+    this.appendValueInput("VALUE").setCheck(null);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setInputsInline(true);
+    this.setColour("#16a085");
+    this.setTooltip("Assigns a value to an object's attribute: object.attr = value");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['set_attribute'] = function(block) {
+  const object = Blockly.Python.valueToCode(block, 'OBJECT', Blockly.Python.ORDER_MEMBER) || 'obj';
+  const attr = block.getFieldValue('ATTR') || 'attr';
+  const value = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || 'None';
+  return `${object}.${attr} = ${value}\n`;
+};
+
+// [W4] multiple-target assignment: a = b = value
+Blockly.Blocks['multiple_assign'] = {
+  init: function() {
+    this.appendValueInput("VALUE")
+        .setCheck(null)
+        .appendField(new Blockly.FieldTextInput("a = b"), "TARGETS")
+        .appendField("=");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setInputsInline(true);
+    this.setColour("#16a085");
+    this.setTooltip("Assigns one value to multiple targets: a = b = value");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['multiple_assign'] = function(block) {
+  const targets = (block.getFieldValue('TARGETS') || 'a').trim();
+  const value = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || 'None';
+  return `${targets} = ${value}\n`;
+};
+
+// [W4] tuple/list unpacking assignment: a, b = value  /  a, *rest = value
+Blockly.Blocks['unpack_assign'] = {
+  init: function() {
+    this.appendValueInput("VALUE")
+        .setCheck(null)
+        .appendField(new Blockly.FieldTextInput("a, b"), "TARGETS")
+        .appendField("=");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setInputsInline(true);
+    this.setColour("#16a085");
+    this.setTooltip("Unpacks a value into multiple targets: a, b = value");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['unpack_assign'] = function(block) {
+  const targets = (block.getFieldValue('TARGETS') || 'a, b').trim();
+  const value = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || 'None';
+  return `${targets} = ${value}\n`;
+};
+
+// [W4] for-loop with tuple unpacking target: for k, v in iterable:
+Blockly.Blocks['for_unpack'] = {
+  init: function() {
+    this.appendValueInput("LIST")
+        .setCheck(null)
+        .appendField("for")
+        .appendField(new Blockly.FieldTextInput("k, v"), "TARGETS")
+        .appendField("in");
+    this.appendStatementInput("DO").setCheck(null).appendField("do");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#5ba55b");
+    this.setTooltip("Iterates with tuple unpacking: for k, v in iterable.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['for_unpack'] = function(block) {
+  const targets = (block.getFieldValue('TARGETS') || 'k, v').trim();
+  const list = Blockly.Python.valueToCode(block, 'LIST', Blockly.Python.ORDER_NONE) || '[]';
+  let branch = Blockly.Python.statementToCode(block, 'DO') || '    pass\n';
+  return `for ${targets} in ${list}:\n${branch}`;
+};
+
+// [W4] register forBlock aliases + a defensive lists_setIndex generator.
+[
+  'tuple_create', 'set_create', 'dict_create', 'dict_comprehension',
+  'set_comprehension', 'gen_expression', 'set_attribute', 'multiple_assign',
+  'unpack_assign', 'for_unpack'
+].forEach(t => {
+  if (Blockly.Python.forBlock) Blockly.Python.forBlock[t] = Blockly.Python[t];
+});
+
+// lists_setIndex comes from the Blockly CDN; only provide a generator if the
+// CDN default is missing (don't clobber a working default).
+if (!Blockly.Python['lists_setIndex']) {
+  Blockly.Python['lists_setIndex'] = function(block) {
+    const list = Blockly.Python.valueToCode(block, 'LIST', Blockly.Python.ORDER_MEMBER) || '[]';
+    const at = Blockly.Python.valueToCode(block, 'AT', Blockly.Python.ORDER_NONE) || '0';
+    const value = Blockly.Python.valueToCode(block, 'TO', Blockly.Python.ORDER_NONE) || 'None';
+    return `${list}[${at}] = ${value}\n`;
+  };
+}
+if (Blockly.Python.forBlock && !Blockly.Python.forBlock['lists_setIndex']) {
+  Blockly.Python.forBlock['lists_setIndex'] = Blockly.Python['lists_setIndex'];
+}
+
 // -------------------------------------------------------------
 
 // Expose functions globally for modular interaction
@@ -2661,7 +3630,18 @@ const BlockPyParser = {
   LambdaNode,
   PassNode,
   BreakNode,
-  ContinueNode
+  ContinueNode,
+  // [W4] collections & literals
+  TupleNode,
+  DictNode,
+  SetNode,
+  ComprehensionNode,
+  DictCompNode,
+  SetCompNode,
+  GenExpNode,
+  StarredNode,
+  SubscriptNode,
+  MultiAssignNode
 };
 
 // ── OpenCV Blocks ──────────────────────────────────────────────────────────────
