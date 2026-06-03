@@ -26,19 +26,30 @@ conversion, always ask the user** rather than guessing or silently degrading.
 A Playwright verification pass over the recently-merged W1–W4 blocks found these
 lossy round-trips (these break demo snippets, so they are fixed first):
 
-1. **Subscript read** — `d["a"]`, `t[1]` lose the index/key (collapse to `0`). The
-   subscript → `lists_getIndex` mapping in `astToBlockly` drops the index (string keys
-   rejected by a Number-typed shadow; numeric indices default to 0).
+1. **Subscript read** — `d["a"]`, `t[1]` lose the index/key (collapse to `0`) because
+   subscripts are forced into Blockly's list-only `lists_getIndex` (Number-typed,
+   1-based), which rejects string keys. **Decision (user-approved): add a dedicated,
+   semantically-correct `subscript_get` block** (OBJECT + KEY value inputs, 0-based, any
+   key type; works for list/dict/tuple/str). Route `case 'Subscript'` in
+   `convertExpressionToBlock` to it.
 2. **Comprehension iterable becomes a string literal** — `range(3)` serializes as the
-   `text` block `'range(3)'` in dict/set/gen comprehensions, so iteration is wrong.
-3. **Subscript assignment misrouted** — `d["k"] = 7` emits `lists_setIndex` instead of
-   the intended `set_attribute` block.
-4. **`nonlocal` block never renders** — nested-def serialization fails
-   (`MissingConnection` on the inner `procedures_defnoreturn`), dropping the inner body.
-5. **Tuple-unpack drops trailing args** — `x, y = 1, 2` renders as `unpack_assign` and
-   the following `print(x, y)` loses its second argument.
-6. **`global` body leaks** — the function body round-trips through a lossy
-   `raw_statement` block instead of clean blocks.
+   lossy `text` block `'range(3)'` in dict/set/gen comprehensions because the expression
+   fallback in `convertExpressionToBlock` (and the unhandled `Range` node) emits a `text`
+   string literal. **Fix: change that fallback to `raw_expression`** (regenerates the
+   expression verbatim → lossless) and add an explicit `case 'Range'` → `raw_expression`.
+3. **Subscript assignment** — `d["k"] = 7` uses list-only `lists_setIndex` (same key-loss
+   defect). **Decision (user-approved): add a dedicated `subscript_set` block**
+   (OBJECT + KEY + VALUE) and route the `Assign` case with a `Subscript` target to it.
+4. **`nonlocal` / nested function defs** — Blockly's `procedures_def*` are top-level hat
+   blocks and cannot nest inside another block's statement stack, so a function-in-a-
+   function fails with `MissingConnection`. **Decision (user-approved): convert a nested
+   `FunctionDef` to a lossless `raw_statement` text block** (no data loss) and **exclude
+   `nonlocal`/closures from the demo gallery** (gallery uses module-level functions only).
+5. **Tuple-unpack drops trailing args** — `x, y = 1, 2` renders as `unpack_assign` and the
+   following `print(x, y)` loses its second argument. Fix the round-trip so both the
+   unpack and the subsequent multi-arg call survive.
+6. **`global` body leaks** — a function body containing `global` round-trips partly
+   through a lossy `raw_statement`. Fix so the body converts to clean blocks.
 
 Working correctly (no fix needed, for reference): all W1 exception/context blocks, all
 W3 operators (incl. aug-assign desugaring to `variables_set` + operator block),
