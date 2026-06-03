@@ -22,7 +22,9 @@ const KEYWORDS = [
   'break', 'continue',
   // [W2] scope, generator & import-family keywords
   'del', 'global', 'nonlocal', 'yield', 'from',
-  'is' // [W3] identity operator keyword (OP-09)
+  'is', // [W3] identity operator keyword (OP-09)
+  // [W1] Exceptions & context managers (EXC-01..12). 'as'/'from' already added above.
+  'try', 'except', 'finally', 'raise', 'with', 'assert'
 ];
 
 class Token {
@@ -514,6 +516,66 @@ class FromImportNode extends ASTNode {
   }
 }
 
+// [W1] Exceptions & context managers AST nodes ──────────────────────────────
+
+// Minimal tuple node — only used by W1 for `except (A, B):` multi-type clauses.
+// Kept narrow in scope to avoid touching existing comma/assignment parsing.
+class TupleNode extends ASTNode {
+  constructor(elts, line) {
+    super(line);
+    this.type = 'Tuple';
+    this.elts = elts || [];
+  }
+}
+
+// try/except/else/finally (EXC-01..06)
+//   handlers: [{ excType: ExpressionNode|null, asName: string|null, body: [stmt] }]
+//   orelse:    [stmt]  (the `else:` clause, empty if absent)
+//   finalbody: [stmt]  (the `finally:` clause, empty if absent)
+class TryNode extends ASTNode {
+  constructor(body, handlers, orelse, finalbody, line) {
+    super(line);
+    this.type = 'Try';
+    this.body = body || [];
+    this.handlers = handlers || [];
+    this.orelse = orelse || [];
+    this.finalbody = finalbody || [];
+  }
+}
+
+// raise / raise Exc(...) / raise Exc from cause (EXC-07/08/09)
+//   exc:   ExpressionNode|null (null = bare re-raise)
+//   cause: ExpressionNode|null (the `from <cause>` clause)
+class RaiseNode extends ASTNode {
+  constructor(exc, cause, line) {
+    super(line);
+    this.type = 'Raise';
+    this.exc = exc || null;
+    this.cause = cause || null;
+  }
+}
+
+// assert test (, msg)? (EXC-10)
+class AssertNode extends ASTNode {
+  constructor(test, msg, line) {
+    super(line);
+    this.type = 'Assert';
+    this.test = test;
+    this.msg = msg || null;
+  }
+}
+
+// with ctx (as name)? (, ctx2 (as name2)?)*: (EXC-11/12)
+//   items: [{ context: ExpressionNode, asName: string|null }]
+class WithNode extends ASTNode {
+  constructor(items, body, line) {
+    super(line);
+    this.type = 'With';
+    this.items = items || [];
+    this.body = body || [];
+  }
+}
+
 // -------------------------------------------------------------
 // 3. Recursive Descent AST Parser
 // -------------------------------------------------------------
@@ -568,8 +630,9 @@ class Parser {
       if (stmt) body.push(stmt);
       
       // Consume trailing newline or wait for EOF/DEDENT
+      // [W1] 'Try'/'With' are compound statements (end on DEDENT, not NEWLINE).
       const nextTok = this.peek();
-      if (stmt && stmt.type !== 'For' && stmt.type !== 'While' && stmt.type !== 'If' && stmt.type !== 'FunctionDef' && stmt.type !== 'ClassDef') {
+      if (stmt && stmt.type !== 'For' && stmt.type !== 'While' && stmt.type !== 'If' && stmt.type !== 'FunctionDef' && stmt.type !== 'ClassDef' && stmt.type !== 'Try' && stmt.type !== 'With') {
         if (nextTok && nextTok.type !== TokenType.EOF && nextTok.type !== TokenType.DEDENT) {
           this.expect(TokenType.NEWLINE, undefined, 'Statements must be separated by newlines');
         }
@@ -621,6 +684,15 @@ class Parser {
           return this.parseReturn();
         case 'class':
           return this.parseClassDef([]);
+        // [W1] Exceptions & context managers
+        case 'try':
+          return this.parseTry();
+        case 'raise':
+          return this.parseRaise();
+        case 'assert':
+          return this.parseAssert();
+        case 'with':
+          return this.parseWith();
       }
     }
 
@@ -755,6 +827,122 @@ class Parser {
     return new YieldNode(val, false, tok.line);
   }
 
+  // [W1] try/except/else/finally (EXC-01..06)
+  parseTry() {
+    const tok = this.expect(TokenType.KEYWORD, 'try');
+    this.expect(TokenType.SYMBOL, ':', 'Expected ":" after try');
+    this.expect(TokenType.NEWLINE, undefined, 'Expected newline after try');
+    const body = this.parseSuite();
+
+    const handlers = [];
+    while (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'except') {
+      this.next(); // consume 'except'
+      let excType = null;
+      let asName = null;
+      // `except:` (bare) has the colon immediately; otherwise parse the exception type.
+      if (!(this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ':')) {
+        excType = this.parseExceptType(); // Name, Attribute, or parenthesized tuple (EXC-04)
+        if (this.match(TokenType.KEYWORD, 'as')) {
+          asName = this.expect(TokenType.IDENTIFIER, undefined, 'Expected name after "as" in except').value;
+        }
+      }
+      this.expect(TokenType.SYMBOL, ':', 'Expected ":" after except clause');
+      this.expect(TokenType.NEWLINE, undefined, 'Expected newline after except clause');
+      const handlerBody = this.parseSuite();
+      handlers.push({ excType, asName, body: handlerBody });
+    }
+
+    let orelse = [];
+    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'else') {
+      this.next();
+      this.expect(TokenType.SYMBOL, ':', 'Expected ":" after else in try');
+      this.expect(TokenType.NEWLINE, undefined, 'Expected newline after else in try');
+      orelse = this.parseSuite();
+    }
+
+    let finalbody = [];
+    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'finally') {
+      this.next();
+      this.expect(TokenType.SYMBOL, ':', 'Expected ":" after finally');
+      this.expect(TokenType.NEWLINE, undefined, 'Expected newline after finally');
+      finalbody = this.parseSuite();
+    }
+
+    return new TryNode(body, handlers, orelse, finalbody, tok.line);
+  }
+
+  // [W1] Parse the exception type in an `except` clause. Handles a single type
+  // (Name/Attribute, e.g. ValueError or module.Error) OR a parenthesized tuple
+  // of types (EXC-04, e.g. `except (ValueError, TypeError):`). The tuple is
+  // represented with a TupleNode so astToPython re-emits `(A, B)` faithfully.
+  parseExceptType() {
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '(') {
+      const startTok = this.next(); // consume '('
+      const elts = [this.parseExpression()];
+      while (this.match(TokenType.SYMBOL, ',')) {
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ')') break;
+        elts.push(this.parseExpression());
+      }
+      this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing exception type tuple');
+      // A single parenthesized type is just that type (the parens are grouping).
+      if (elts.length === 1) return elts[0];
+      return new TupleNode(elts, startTok.line);
+    }
+    return this.parseExpression();
+  }
+
+  // [W1] raise / bare raise / raise Exc from cause (EXC-07/08/09)
+  parseRaise() {
+    const tok = this.expect(TokenType.KEYWORD, 'raise');
+    const next = this.peek();
+    // bare `raise`
+    if (!next || next.type === TokenType.NEWLINE || next.type === TokenType.EOF || next.type === TokenType.DEDENT) {
+      return new RaiseNode(null, null, tok.line);
+    }
+    const exc = this.parseExpression();
+    let cause = null;
+    if (this.match(TokenType.KEYWORD, 'from')) {
+      cause = this.parseExpression();
+    }
+    return new RaiseNode(exc, cause, tok.line);
+  }
+
+  // [W1] assert cond / assert cond, msg (EXC-10)
+  parseAssert() {
+    const tok = this.expect(TokenType.KEYWORD, 'assert');
+    const test = this.parseExpression();
+    let msg = null;
+    if (this.match(TokenType.SYMBOL, ',')) {
+      msg = this.parseExpression();
+    }
+    return new AssertNode(test, msg, tok.line);
+  }
+
+  // [W1] with ctx as name (, ctx2 as name2)*: (EXC-11/12)
+  parseWith() {
+    const tok = this.expect(TokenType.KEYWORD, 'with');
+    const items = [];
+
+    const parseItem = () => {
+      const context = this.parseExpression();
+      let asName = null;
+      if (this.match(TokenType.KEYWORD, 'as')) {
+        asName = this.expect(TokenType.IDENTIFIER, undefined, 'Expected name after "as" in with').value;
+      }
+      items.push({ context, asName });
+    };
+
+    parseItem();
+    while (this.match(TokenType.SYMBOL, ',')) {
+      parseItem();
+    }
+
+    this.expect(TokenType.SYMBOL, ':', 'Expected ":" after with statement');
+    this.expect(TokenType.NEWLINE, undefined, 'Expected newline after with statement');
+    const body = this.parseSuite();
+    return new WithNode(items, body, tok.line);
+  }
+
   parseIf() {
     const tok = this.expect(TokenType.KEYWORD, 'if');
     const test = this.parseExpression();
@@ -879,7 +1067,8 @@ class Parser {
       if (stmt) body.push(stmt);
       
       const nextTok = this.peek();
-      if (stmt && stmt.type !== 'For' && stmt.type !== 'While' && stmt.type !== 'If' && stmt.type !== 'FunctionDef' && stmt.type !== 'ClassDef') {
+      // [W1] 'Try'/'With' are compound statements (end on DEDENT, not NEWLINE).
+      if (stmt && stmt.type !== 'For' && stmt.type !== 'While' && stmt.type !== 'If' && stmt.type !== 'FunctionDef' && stmt.type !== 'ClassDef' && stmt.type !== 'Try' && stmt.type !== 'With') {
         if (nextTok && nextTok.type !== TokenType.DEDENT && nextTok.type !== TokenType.NEWLINE && nextTok.type !== TokenType.EOF) {
           this.expect(TokenType.NEWLINE, undefined, 'Suite statements must be separated by newlines');
         }
@@ -887,7 +1076,7 @@ class Parser {
         this.match(TokenType.NEWLINE);
       }
     }
-    
+
     this.expect(TokenType.DEDENT, undefined, 'Expected dedent at the end of block');
     return body;
   }
@@ -1452,6 +1641,61 @@ function astToPython(node, indentLevel = 0) {
       return node.value === null ? `${indent}yield` : `${indent}yield ${astToPython(node.value)}`;
     }
 
+    // [W1] Exceptions & context managers ─────────────────────────────────────
+    case 'Tuple':
+      return `(${node.elts.map(e => astToPython(e)).join(', ')})`;
+
+    case 'Try': {
+      const tryHead = `${indent}try:`;
+      const tryBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
+      let out = `${tryHead}\n${tryBody || (indent + '    pass')}`;
+
+      for (const h of (node.handlers || [])) {
+        let header = `${indent}except`;
+        if (h.excType) header += ` ${astToPython(h.excType)}`;
+        if (h.asName) header += ` as ${h.asName}`;
+        header += ':';
+        const hBody = (h.body || []).map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
+        out += `\n${header}\n${hBody || (indent + '    pass')}`;
+      }
+
+      if (node.orelse && node.orelse.length > 0) {
+        const elseBody = node.orelse.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
+        out += `\n${indent}else:\n${elseBody || (indent + '    pass')}`;
+      }
+
+      if (node.finalbody && node.finalbody.length > 0) {
+        const finBody = node.finalbody.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
+        out += `\n${indent}finally:\n${finBody || (indent + '    pass')}`;
+      }
+
+      return out;
+    }
+
+    case 'Raise': {
+      if (!node.exc) return `${indent}raise`;
+      let r = `${indent}raise ${astToPython(node.exc)}`;
+      if (node.cause) r += ` from ${astToPython(node.cause)}`;
+      return r;
+    }
+
+    case 'Assert': {
+      let a = `${indent}assert ${astToPython(node.test)}`;
+      if (node.msg) a += `, ${astToPython(node.msg)}`;
+      return a;
+    }
+
+    case 'With': {
+      const itemsStr = (node.items || []).map(it => {
+        let s = astToPython(it.context);
+        if (it.asName) s += ` as ${it.asName}`;
+        return s;
+      }).join(', ');
+      const withHead = `${indent}with ${itemsStr}:`;
+      const withBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
+      return `${withHead}\n${withBody || (indent + '    pass')}`;
+    }
+
     default:
       return '';
   }
@@ -1585,6 +1829,37 @@ function collectVariables(node, varsSet = new Set()) {
       }
       break;
     // FromImport / Import: imported names are not workspace variables
+
+    // [W1] Exceptions & context managers ─────────────────────────────────────
+    case 'Tuple':
+      if (node.elts && Array.isArray(node.elts)) {
+        for (const elt of node.elts) collectVariables(elt, varsSet);
+      }
+      break;
+    case 'Try':
+      for (const stmt of (node.body || [])) collectVariables(stmt, varsSet);
+      for (const h of (node.handlers || [])) {
+        if (h.asName) varsSet.add(h.asName);
+        for (const stmt of (h.body || [])) collectVariables(stmt, varsSet);
+      }
+      for (const stmt of (node.orelse || [])) collectVariables(stmt, varsSet);
+      for (const stmt of (node.finalbody || [])) collectVariables(stmt, varsSet);
+      break;
+    case 'Raise':
+      if (node.exc) collectVariables(node.exc, varsSet);
+      if (node.cause) collectVariables(node.cause, varsSet);
+      break;
+    case 'Assert':
+      collectVariables(node.test, varsSet);
+      if (node.msg) collectVariables(node.msg, varsSet);
+      break;
+    case 'With':
+      for (const it of (node.items || [])) {
+        collectVariables(it.context, varsSet);
+        if (it.asName) varsSet.add(it.asName);
+      }
+      for (const stmt of (node.body || [])) collectVariables(stmt, varsSet);
+      break;
   }
   return varsSet;
 }
@@ -2052,6 +2327,153 @@ function convertStatementToBlock(node) {
         block.inputs["VALUE"] = { "block": convertExpressionToBlock(node.value) };
       }
       return block;
+    }
+
+    // [W1] Exceptions & context managers ─────────────────────────────────────
+    case 'Try': {
+      // try_statement: TRY suite + one except handler (EXC_TYPE / EXC_NAME text
+      // fields) + EXCEPT suite + optional ELSE + optional FINALLY.
+      // The block models a SINGLE handler. Additional handlers are preserved as
+      // raw_statement blocks appended into the EXCEPT suite so no branch is
+      // silently dropped (multi-except mutator is deferred — see report).
+      const handlers = node.handlers || [];
+      const firstHandler = handlers[0] || { excType: null, asName: null, body: [] };
+      const hasElse = node.orelse && node.orelse.length > 0;
+      const hasFinally = node.finalbody && node.finalbody.length > 0;
+
+      const tryBlock = {
+        "type": "try_statement",
+        "id": makeBlockId(),
+        "extraState": {
+          "hasElse": hasElse ? true : undefined,
+          "hasFinally": hasFinally ? true : undefined
+        },
+        "fields": {
+          "EXC_TYPE": firstHandler.excType ? astToPython(firstHandler.excType) : '',
+          "EXC_NAME": firstHandler.asName || ''
+        },
+        "inputs": {}
+      };
+
+      const tryBody = convertStatementListToBlock(node.body);
+      if (tryBody) tryBlock.inputs["TRY"] = { "block": tryBody };
+
+      // Build the except suite. Extra handlers (index >= 1) are emitted as a
+      // comment-style raw_statement so they round-trip textually rather than
+      // disappear.
+      let exceptStmts = (firstHandler.body || []).slice();
+      let exceptBody = convertStatementListToBlock(exceptStmts);
+      if (handlers.length > 1) {
+        // Append raw_statement markers for the deferred extra handlers.
+        const extraBlocks = handlers.slice(1).map(h => {
+          let header = 'except';
+          if (h.excType) header += ` ${astToPython(h.excType)}`;
+          if (h.asName) header += ` as ${h.asName}`;
+          const bodyTxt = (h.body || []).map(s => astToPython(s, 0)).join('; ') || 'pass';
+          return {
+            "type": "raw_statement",
+            "id": makeBlockId(),
+            "fields": { "STMT": `# [deferred handler] ${header}: ${bodyTxt}` }
+          };
+        });
+        // Chain extraBlocks onto the end of exceptBody.
+        if (!exceptBody) {
+          exceptBody = extraBlocks[0];
+          for (let i = 0; i < extraBlocks.length - 1; i++) extraBlocks[i].next = { "block": extraBlocks[i + 1] };
+        } else {
+          let tail = exceptBody;
+          while (tail.next) tail = tail.next.block;
+          for (const eb of extraBlocks) { tail.next = { "block": eb }; tail = eb; }
+        }
+      }
+      if (exceptBody) tryBlock.inputs["EXCEPT"] = { "block": exceptBody };
+
+      if (hasElse) {
+        const elseBody = convertStatementListToBlock(node.orelse);
+        if (elseBody) tryBlock.inputs["ELSE"] = { "block": elseBody };
+      }
+      if (hasFinally) {
+        const finBody = convertStatementListToBlock(node.finalbody);
+        if (finBody) tryBlock.inputs["FINALLY"] = { "block": finBody };
+      }
+
+      return tryBlock;
+    }
+
+    case 'Raise': {
+      // raise_statement: value input EXC (empty → bare raise) + text field CAUSE.
+      const raiseBlock = {
+        "type": "raise_statement",
+        "id": makeBlockId(),
+        "fields": {
+          "CAUSE": node.cause ? astToPython(node.cause) : ''
+        },
+        "inputs": {}
+      };
+      if (node.exc) {
+        raiseBlock.inputs["EXC"] = { "block": convertExpressionToBlock(node.exc) };
+      }
+      return raiseBlock;
+    }
+
+    case 'Assert': {
+      // assert_statement: value input TEST + optional value input MSG.
+      const assertBlock = {
+        "type": "assert_statement",
+        "id": makeBlockId(),
+        "inputs": {
+          "TEST": { "block": convertExpressionToBlock(node.test) }
+        }
+      };
+      if (node.msg) {
+        assertBlock.inputs["MSG"] = { "block": convertExpressionToBlock(node.msg) };
+      }
+      return assertBlock;
+    }
+
+    case 'With': {
+      // with_statement: value input CONTEXT + text field AS + statement input BODY.
+      // Models the FIRST context item directly. Additional items (EXC-12) are
+      // appended as raw_statement comment markers in the body so nothing is lost.
+      const items = node.items || [];
+      const first = items[0] || { context: null, asName: null };
+
+      const withBlock = {
+        "type": "with_statement",
+        "id": makeBlockId(),
+        "fields": {
+          "AS": first.asName || ''
+        },
+        "inputs": {}
+      };
+      if (first.context) {
+        withBlock.inputs["CONTEXT"] = { "block": convertExpressionToBlock(first.context) };
+      }
+
+      let bodyBlock = convertStatementListToBlock(node.body);
+      if (items.length > 1) {
+        // Deferred extra context managers preserved as comment markers.
+        const extraStr = items.slice(1).map(it => {
+          let s = astToPython(it.context);
+          if (it.asName) s += ` as ${it.asName}`;
+          return s;
+        }).join(', ');
+        const marker = {
+          "type": "raw_statement",
+          "id": makeBlockId(),
+          "fields": { "STMT": `# [deferred context] ${extraStr}` }
+        };
+        if (!bodyBlock) {
+          bodyBlock = marker;
+        } else {
+          let tail = bodyBlock;
+          while (tail.next) tail = tail.next.block;
+          tail.next = { "block": marker };
+        }
+      }
+      if (bodyBlock) withBlock.inputs["BODY"] = { "block": bodyBlock };
+
+      return withBlock;
     }
 
     default:
@@ -3353,6 +3775,177 @@ if (Blockly.Python.forBlock && !Blockly.Python.forBlock['math_modulo']) {
   Blockly.Python.forBlock['math_modulo'] = Blockly.Python['math_modulo'];
 }
 
+// ── [W1] Exceptions & context manager blocks ────────────────────────────────
+
+// try_statement: try suite + one except handler (type/name) + except suite,
+// with optional else and finally suites toggled via extraState/mutation.
+Blockly.Blocks['try_statement'] = {
+  init: function() {
+    this.hasElse_ = false;
+    this.hasFinally_ = false;
+    this.appendDummyInput().appendField("try");
+    this.appendStatementInput("TRY").setCheck(null);
+    this.appendDummyInput()
+        .appendField("except")
+        .appendField(new Blockly.FieldTextInput(""), "EXC_TYPE")
+        .appendField("as")
+        .appendField(new Blockly.FieldTextInput(""), "EXC_NAME");
+    this.appendStatementInput("EXCEPT").setCheck(null);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#d35400");
+    this.setTooltip("try / except. Leave the except type/name blank for a bare except. Optional else and finally via the gear.");
+    this.setHelpUrl("");
+    this.setMutator && this.setMutator(undefined);
+    this.updateShape_();
+  },
+  // Persist optional-clause state for the JSON serializer (saveExtraState/loadExtraState).
+  saveExtraState: function() {
+    return {
+      hasElse: this.hasElse_ || undefined,
+      hasFinally: this.hasFinally_ || undefined
+    };
+  },
+  loadExtraState: function(state) {
+    this.hasElse_ = !!(state && state.hasElse);
+    this.hasFinally_ = !!(state && state.hasFinally);
+    this.updateShape_();
+  },
+  // Legacy XML mutation support (mirrors extraState).
+  mutationToDom: function() {
+    const container = Blockly.utils.xml.createElement('mutation');
+    container.setAttribute('else', this.hasElse_ ? '1' : '0');
+    container.setAttribute('finally', this.hasFinally_ ? '1' : '0');
+    return container;
+  },
+  domToMutation: function(xmlElement) {
+    this.hasElse_ = xmlElement.getAttribute('else') === '1';
+    this.hasFinally_ = xmlElement.getAttribute('finally') === '1';
+    this.updateShape_();
+  },
+  updateShape_: function() {
+    // Remove optional inputs then re-add as needed (idempotent).
+    if (this.getInput('ELSE_LABEL')) this.removeInput('ELSE_LABEL');
+    if (this.getInput('ELSE')) this.removeInput('ELSE');
+    if (this.getInput('FINALLY_LABEL')) this.removeInput('FINALLY_LABEL');
+    if (this.getInput('FINALLY')) this.removeInput('FINALLY');
+    if (this.hasElse_) {
+      this.appendDummyInput('ELSE_LABEL').appendField("else");
+      this.appendStatementInput("ELSE").setCheck(null);
+    }
+    if (this.hasFinally_) {
+      this.appendDummyInput('FINALLY_LABEL').appendField("finally");
+      this.appendStatementInput("FINALLY").setCheck(null);
+    }
+  }
+};
+Blockly.Python['try_statement'] = function(block) {
+  const tryBody = Blockly.Python.statementToCode(block, 'TRY') || '    pass\n';
+  const excType = (block.getFieldValue('EXC_TYPE') || '').trim();
+  const excName = (block.getFieldValue('EXC_NAME') || '').trim();
+  const exceptBody = Blockly.Python.statementToCode(block, 'EXCEPT') || '    pass\n';
+
+  let header = 'except';
+  if (excType) header += ` ${excType}`;
+  if (excType && excName) header += ` as ${excName}`;
+  let code = `try:\n${tryBody}${header}:\n${exceptBody}`;
+
+  if (block.hasElse_) {
+    const elseBody = Blockly.Python.statementToCode(block, 'ELSE') || '    pass\n';
+    code += `else:\n${elseBody}`;
+  }
+  if (block.hasFinally_) {
+    const finBody = Blockly.Python.statementToCode(block, 'FINALLY') || '    pass\n';
+    code += `finally:\n${finBody}`;
+  }
+  return code;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['try_statement'] = Blockly.Python['try_statement'];
+}
+
+// raise_statement: raise <EXC value> (empty → bare raise) [from <CAUSE text>]
+Blockly.Blocks['raise_statement'] = {
+  init: function() {
+    this.appendValueInput("EXC")
+        .setCheck(null)
+        .appendField("raise");
+    this.appendDummyInput()
+        .appendField("from")
+        .appendField(new Blockly.FieldTextInput(""), "CAUSE");
+    this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#d35400");
+    this.setTooltip("Raise an exception. Leave the value empty for a bare re-raise. Leave 'from' empty for no cause.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['raise_statement'] = function(block) {
+  const exc = Blockly.Python.valueToCode(block, 'EXC', Blockly.Python.ORDER_NONE);
+  const cause = (block.getFieldValue('CAUSE') || '').trim();
+  if (!exc) return 'raise\n';
+  return cause ? `raise ${exc} from ${cause}\n` : `raise ${exc}\n`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['raise_statement'] = Blockly.Python['raise_statement'];
+}
+
+// assert_statement: assert <TEST> (, <MSG>)?
+Blockly.Blocks['assert_statement'] = {
+  init: function() {
+    this.appendValueInput("TEST")
+        .setCheck(null)
+        .appendField("assert");
+    this.appendValueInput("MSG")
+        .setCheck(null)
+        .appendField(",");
+    this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#d35400");
+    this.setTooltip("Assert that a condition is true, with an optional message.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['assert_statement'] = function(block) {
+  const test = Blockly.Python.valueToCode(block, 'TEST', Blockly.Python.ORDER_NONE) || 'False';
+  const msg = Blockly.Python.valueToCode(block, 'MSG', Blockly.Python.ORDER_NONE);
+  return msg ? `assert ${test}, ${msg}\n` : `assert ${test}\n`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['assert_statement'] = Blockly.Python['assert_statement'];
+}
+
+// with_statement: with <CONTEXT value> as <AS text>: <BODY suite>
+Blockly.Blocks['with_statement'] = {
+  init: function() {
+    this.appendValueInput("CONTEXT")
+        .setCheck(null)
+        .appendField("with");
+    this.appendDummyInput()
+        .appendField("as")
+        .appendField(new Blockly.FieldTextInput(""), "AS");
+    this.appendStatementInput("BODY").setCheck(null);
+    this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#d35400");
+    this.setTooltip("Context manager block: with <context> as <name>. Leave 'as' empty to omit the binding.");
+    this.setHelpUrl("");
+  }
+};
+Blockly.Python['with_statement'] = function(block) {
+  const context = Blockly.Python.valueToCode(block, 'CONTEXT', Blockly.Python.ORDER_NONE) || 'open("file")';
+  const asName = (block.getFieldValue('AS') || '').trim();
+  const body = Blockly.Python.statementToCode(block, 'BODY') || '    pass\n';
+  const head = asName ? `with ${context} as ${asName}:` : `with ${context}:`;
+  return `${head}\n${body}`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['with_statement'] = Blockly.Python['with_statement'];
+}
+
 // logic_null & controls_flow_statements come from the Blockly CDN; only provide
 // a generator if the CDN default is missing (don't clobber a working default).
 if (!Blockly.Python['logic_null']) {
@@ -3448,7 +4041,13 @@ const BlockPyParser = {
   GlobalNode,
   NonlocalNode,
   YieldNode,
-  FromImportNode
+  FromImportNode,
+  // [W1] Exceptions & context managers
+  TupleNode,
+  TryNode,
+  RaiseNode,
+  AssertNode,
+  WithNode
 };
 
 // ── OpenCV Blocks ──────────────────────────────────────────────────────────────
