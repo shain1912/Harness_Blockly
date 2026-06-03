@@ -3738,15 +3738,23 @@ function convertExpressionToBlock(node) {
         }
       };
 
+    // [Demo] range(...) in expression context (e.g. comprehension iterable)
+    // -> lossless raw_expression (NOT a string literal)
+    case 'Range':
+      return {
+        "type": "raw_expression",
+        "id": makeBlockId(),
+        "fields": { "EXPR": astToPython(node) }
+      };
+
   }
 
-  // Fallback for unrecognized expressions inside values
+  // Fallback for unrecognized expressions: preserve verbatim (lossless), never a
+  // string literal — a `text` block here silently quotes code like range(3) -> 'range(3)'.
   return {
-    "type": "text",
+    "type": "raw_expression",
     "id": makeBlockId(),
-    "fields": {
-      "TEXT": astToPython(node)
-    }
+    "fields": { "EXPR": astToPython(node) }
   };
 }
 
