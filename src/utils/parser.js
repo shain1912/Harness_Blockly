@@ -3133,17 +3133,25 @@ function convertCallExpression(node, isStatement = false) {
     }
   }
 
-  // print("text")
+  // print("text") — the nice text_print block holds exactly one value. For print()
+  // with zero or multiple args, fall back to a lossless raw_statement so no argument
+  // is dropped (text_print would silently keep only the first).
   if (node.func.type === 'Name' && node.func.id === 'print') {
-    const valArg = node.args[0] || new StrNode('');
-    return {
-      "type": "text_print",
-      "id": makeBlockId(),
-      "inputs": {
-        "TEXT": {
-          "block": convertExpressionToBlock(valArg)
+    if ((node.args || []).length === 1) {
+      return {
+        "type": "text_print",
+        "id": makeBlockId(),
+        "inputs": {
+          "TEXT": {
+            "block": convertExpressionToBlock(node.args[0])
+          }
         }
-      }
+      };
+    }
+    return {
+      "type": "raw_statement",
+      "id": makeBlockId(),
+      "fields": { "STMT": astToPython(node) }
     };
   }
 
