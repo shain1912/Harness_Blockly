@@ -2987,12 +2987,25 @@ function convertClassBodyToBlock(stmts) {
 
 function convertStatementListToBlock(statements) {
   if (!statements || statements.length === 0) return null;
-  
+
   let firstBlock = null;
   let currentBlock = null;
 
   for (const stmt of statements) {
-    const block = convertStatementToBlock(stmt);
+    // [Demo] Blockly's procedures_def*/class blocks are top-level "hat" blocks with no
+    // previous/next connection, so a nested function/class def inside a suite cannot be
+    // chained here (causes MissingConnection on load). Emit it as a lossless raw_statement
+    // carrying the full source so the round-trip stays exact.
+    let block;
+    if (stmt.type === 'FunctionDef' || stmt.type === 'ClassDef') {
+      block = {
+        "type": "raw_statement",
+        "id": makeBlockId(),
+        "fields": { "STMT": astToPython(stmt) }
+      };
+    } else {
+      block = convertStatementToBlock(stmt);
+    }
     if (!block) continue;
 
     if (!firstBlock) {
@@ -3939,7 +3952,10 @@ if (Blockly.Python.forBlock) {
 // Raw Python statement block — used as fallback for statements that can't map to built-in blocks
 Blockly.Blocks['raw_statement'] = {
   init: function() {
-    this.appendDummyInput().appendField(new Blockly.FieldTextInput('stmt'), 'STMT');
+    // Use a multiline field when available so multi-line raw source (nested defs,
+    // class methods) survives round-trips; FieldTextInput would strip newlines.
+    const StmtField = Blockly.FieldMultilineInput || Blockly.FieldTextInput;
+    this.appendDummyInput().appendField(new StmtField('stmt'), 'STMT');
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour('#888888');
