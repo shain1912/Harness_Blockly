@@ -2527,7 +2527,10 @@ function convertStatementToBlock(node) {
               "shadow": {
                 "type": "math_number",
                 "id": makeBlockId(),
-                "fields": { "NUM": stopVal }
+                // Blockly's controls_for is INCLUSIVE and its generator emits
+                // range(FROM, TO + 1, BY). Python's range(start, stop) is exclusive,
+                // so the inclusive TO must be stop - 1 to round-trip exactly.
+                "fields": { "NUM": (typeof stopVal === 'number') ? stopVal - 1 : stopVal }
               }
             },
             "BY": {
@@ -3246,6 +3249,18 @@ function convertCallExpression(node, isStatement = false) {
   return null;
 }
 
+// True if a `+` expression subtree involves a string literal (so it is concatenation,
+// not numeric addition). Recurses only through `+` BinOps — the operands of a string
+// concat are themselves strings, names, or further `+` concatenations.
+function _exprInvolvesString(node) {
+  if (!node) return false;
+  if (node.type === 'Str') return true;
+  if (node.type === 'BinOp' && node.op === '+') {
+    return _exprInvolvesString(node.left) || _exprInvolvesString(node.right);
+  }
+  return false;
+}
+
 function convertExpressionToBlock(node) {
   if (!node) return null;
 
@@ -3357,6 +3372,17 @@ function convertExpressionToBlock(node) {
               "block": convertExpressionToBlock(node.right)
             }
           }
+        };
+      }
+
+      // String concatenation: `+` whose subtree involves a string literal must NOT use
+      // math_arithmetic — its Number-typed A/B inputs reject text blocks on load, which
+      // silently coerces the strings to 0 (e.g. "Hi " + name -> 0 + 0). Preserve verbatim.
+      if (node.op === '+' && _exprInvolvesString(node)) {
+        return {
+          "type": "raw_expression",
+          "id": makeBlockId(),
+          "fields": { "EXPR": astToPython(node) }
         };
       }
 
