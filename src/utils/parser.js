@@ -3558,6 +3558,18 @@ function _exprInvolvesString(node) {
   return false;
 }
 
+// True if an arithmetic (+,-,*,/) subtree contains a typed literal (list/dict/set/tuple/
+// str) — those produce Blockly blocks with non-Number output types that math_arithmetic's
+// Number-typed inputs reject on load. Such expressions use the untyped binary_op block.
+function _exprInvolvesTyped(node) {
+  if (!node) return false;
+  if (['Str', 'List', 'Dict', 'Set', 'Tuple'].includes(node.type)) return true;
+  if (node.type === 'BinOp' && ['+', '-', '*', '/'].includes(node.op)) {
+    return _exprInvolvesTyped(node.left) || _exprInvolvesTyped(node.right);
+  }
+  return false;
+}
+
 function convertExpressionToBlock(node) {
   if (!node) return null;
 
@@ -3690,6 +3702,20 @@ function convertExpressionToBlock(node) {
       // Standard mathematical operations
       const mathOps = { '+': 'ADD', '-': 'MINUS', '*': 'MULTIPLY', '/': 'DIVIDE' };
       if (mathOps[node.op]) {
+        // If an operand is a typed literal (list/dict/set/tuple/str), math_arithmetic's
+        // Number-typed inputs would reject it on load (e.g. [0] + [9]*n crashes). Use an
+        // untyped binary_op block instead. Pure-numeric stays on the nicer math_arithmetic.
+        if (_exprInvolvesTyped(node)) {
+          return {
+            "type": "binary_op",
+            "id": makeBlockId(),
+            "fields": { "OP": node.op },
+            "inputs": {
+              "A": { "block": convertExpressionToBlock(node.left) },
+              "B": { "block": convertExpressionToBlock(node.right) }
+            }
+          };
+        }
         return {
           "type": "math_arithmetic",
           "id": makeBlockId(),
@@ -4414,6 +4440,31 @@ Blockly.Python['text_concat'] = function(block) {
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['text_concat'] = Blockly.Python['text_concat'];
+}
+
+// [Demo] Untyped binary operation a OP b (OP in +,-,*,/). Used when an operand is a
+// list/dict/set/tuple/str literal, which math_arithmetic's Number-typed inputs reject
+// (e.g. [0] + [INF] * n). Untyped inputs accept any block, so loading never fails.
+Blockly.Blocks['binary_op'] = {
+  init: function() {
+    this.appendValueInput('A').setCheck(null);
+    this.appendValueInput('B').setCheck(null)
+        .appendField(new Blockly.FieldDropdown([['+', '+'], ['-', '-'], ['*', '*'], ['/', '/']]), 'OP');
+    this.setInputsInline(true);
+    this.setOutput(true, null);
+    this.setColour('#5b67a5');
+    this.setTooltip('이항 연산 a op b (리스트/문자열 등 포함)');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['binary_op'] = function(block) {
+  const op = block.getFieldValue('OP') || '+';
+  const a = Blockly.Python.valueToCode(block, 'A', Blockly.Python.ORDER_NONE) || '0';
+  const b = Blockly.Python.valueToCode(block, 'B', Blockly.Python.ORDER_NONE) || '0';
+  return [`${a} ${op} ${b}`, Blockly.Python.ORDER_NONE];
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['binary_op'] = Blockly.Python['binary_op'];
 }
 
 // Raw Python expression block — used as fallback for expressions that can't map to built-in blocks
