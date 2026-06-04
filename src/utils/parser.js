@@ -1216,7 +1216,18 @@ class Parser {
     if (!next || next.type === TokenType.NEWLINE || next.type === TokenType.EOF || next.type === TokenType.DEDENT) {
       return new ReturnNode(null, tok.line);
     }
-    const val = this.parseExpression();
+    let val = this.parseExpression();
+    // Bare tuple return: `return a, b` -> Tuple (no parens on re-emit).
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ',') {
+      const elts = [val];
+      while (this.match(TokenType.SYMBOL, ',')) {
+        const nx = this.peek();
+        if (!nx || nx.type === TokenType.NEWLINE || nx.type === TokenType.EOF || nx.type === TokenType.DEDENT) break;
+        elts.push(this.parseExpression());
+      }
+      val = new TupleNode(elts, tok.line);
+      val.bareTuple = true; // emit without parentheses
+    }
     return new ReturnNode(val, tok.line);
   }
 
@@ -1591,6 +1602,37 @@ class Parser {
     return base;
   }
 
+  // Subscript contents: a single index/slice, or a comma-list (numpy arr[a:b, c]).
+  parseSubscriptIndex() {
+    const first = this._parseSliceOrExpr();
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ',') {
+      const elts = [first];
+      while (this.match(TokenType.SYMBOL, ',')) {
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ']') break;
+        elts.push(this._parseSliceOrExpr());
+      }
+      return new TupleNode(elts, (first && first.line) || 0);
+    }
+    return first;
+  }
+
+  // One subscript element: either a slice (lower:upper:step, any optional) or an expr.
+  _parseSliceOrExpr() {
+    const isColon = () => this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ':';
+    const isEnd = () => this.peek() && this.peek().type === TokenType.SYMBOL && (this.peek().value === ']' || this.peek().value === ',');
+    let lower = null;
+    if (!isColon()) lower = this.parseExpression();
+    if (!isColon()) return lower; // plain index
+    this.next(); // consume first ':'
+    let upper = null, step = null;
+    if (!isColon() && !isEnd()) upper = this.parseExpression();
+    if (isColon()) {
+      this.next(); // consume second ':'
+      if (!isEnd()) step = this.parseExpression();
+    }
+    return { type: 'Slice', lower, upper, step, line: (lower && lower.line) || 0 };
+  }
+
   // A single call argument: *args / **kwargs unpacking, keyword (name=value),
   // a bare generator expression (f(x for x in xs)), or a normal expression.
   parseCallArg() {
@@ -1656,9 +1698,9 @@ class Parser {
           expr = new CallNode(expr, args, expr.line);
         }
       } else if (tok.type === TokenType.SYMBOL && tok.value === '[') {
-        // List index retrieval e.g. arr[i]
+        // Subscript: arr[i], slices arr[a:b:c] (any part optional), numpy arr[a:b, c:d].
         this.next(); // consume '['
-        const indexExpr = this.parseExpression();
+        const indexExpr = this.parseSubscriptIndex();
         this.expect(TokenType.SYMBOL, ']', 'Expected "]" in list index retrieval');
         expr = new BinOpNode(expr, 'INDEX', indexExpr, expr.line);
       } else {
@@ -1874,8 +1916,26 @@ class Parser {
     return generators;
   }
 
-  // [W4] Parse a comprehension/for target: a single name or a tuple of names (k, v).
+  // [W4] Parse a comprehension/for target: a single name or a tuple of names (k, v),
+  // including a parenthesized tuple target — for (x, y, w, h) in faces.
   parseCompTarget() {
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '(') {
+      this.next(); // consume '('
+      const elts = [];
+      const readName = () => {
+        const id = this.expect(TokenType.IDENTIFIER, undefined, 'Expected identifier in tuple target');
+        elts.push(new NameNode(id.value, id.line));
+      };
+      readName();
+      while (this.match(TokenType.SYMBOL, ',')) {
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ')') break;
+        readName();
+      }
+      this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing tuple target');
+      const t = new TupleNode(elts, elts[0].line);
+      t.parenTarget = true; // preserve the parentheses on re-emit
+      return t;
+    }
     const firstId = this.expect(TokenType.IDENTIFIER, undefined, 'Expected identifier in comprehension/for target');
     const first = new NameNode(firstId.value, firstId.line);
     if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ',') {
@@ -1899,7 +1959,8 @@ class Parser {
 // (e.g. "k, v" not "(k, v)") as is idiomatic in Python loop/comp headers.
 function targetToPython(node) {
   if (node && node.type === 'Tuple') {
-    return node.elts.map(e => targetToPython(e)).join(', ');
+    const inner = node.elts.map(e => targetToPython(e)).join(', ');
+    return node.parenTarget ? `(${inner})` : inner;
   }
   return astToPython(node);
 }
@@ -2023,10 +2084,13 @@ function astToPython(node, indentLevel = 0) {
       return `[${astToPython(node.elt)} for ${targetToPython(node.target)} in ${astToPython(node.iter)}${node.ifs ? ' if ' + astToPython(node.ifs) : ''}]`;
 
     // [W4] Tuple literal
-    case 'Tuple':
+    case 'Tuple': {
       if (node.elts.length === 0) return '()';
       if (node.elts.length === 1) return `(${astToPython(node.elts[0])},)`;
-      return `(${node.elts.map(e => astToPython(e)).join(', ')})`;
+      const joined = node.elts.map(e => astToPython(e)).join(', ');
+      // Bare tuples (e.g. `return a, b` / `a, b = ...`) emit without parentheses.
+      return node.bareTuple ? joined : `(${joined})`;
+    }
 
     // [W4] Dict literal
     case 'Dict':
@@ -2058,6 +2122,13 @@ function astToPython(node, indentLevel = 0) {
       return `${node.name}=${astToPython(node.value)}`;
     case 'DoubleStarred':
       return `**${astToPython(node.value)}`;
+
+    // Slice inside a subscript: lower:upper[:step], any part optional.
+    case 'Slice': {
+      const lo = node.lower ? astToPython(node.lower) : '';
+      const up = node.upper ? astToPython(node.upper) : '';
+      return node.step ? `${lo}:${up}:${astToPython(node.step)}` : `${lo}:${up}`;
+    }
 
     // [W4] Subscript assignment target / access
     case 'Subscript':
@@ -2093,7 +2164,11 @@ function astToPython(node, indentLevel = 0) {
       
     case 'BinOp':
       if (node.op === 'INDEX') {
-        return `${astToPython(node.left)}[${astToPython(node.right)}]`;
+        // A tuple index (numpy arr[a, b]) is emitted without the tuple's parentheses.
+        const idx = (node.right && node.right.type === 'Tuple')
+          ? node.right.elts.map((e) => astToPython(e)).join(', ')
+          : astToPython(node.right);
+        return `${astToPython(node.left)}[${idx}]`;
       }
       // Unary operators (-x, +x, ~x, not x) have a null left operand
       if (!node.left) {
