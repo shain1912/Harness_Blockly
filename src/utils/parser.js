@@ -2774,8 +2774,9 @@ function convertStatementToBlock(node) {
       // Handle simple loops
       const varName = node.target.type === 'Name' ? node.target.id : 'i';
 
-      // If iterating range(10): map to repeating loops
-      if (node.iter.type === 'Range') {
+      // If iterating range(10) with a single name target: map to repeating loops.
+      // (Tuple targets / non-name targets fall through to the generic for_each block.)
+      if (node.iter.type === 'Range' && node.target.type === 'Name') {
         const range = node.iter;
         const startVal = range.start ? range.start.value : 0;
         const stopVal = range.stop ? range.stop.value : 10;
@@ -2842,22 +2843,17 @@ function convertStatementToBlock(node) {
         };
       }
       
-      // If iterating arbitrary collections (e.g. lists), map to controls_forEach
+      // Iterating any other iterable (list, string, dict, generator, tuple/nested target):
+      // use the custom for_each block. controls_forEach's LIST input is typed 'Array' (so a
+      // string/dict iter crashes on load) and its single VAR field can't hold a tuple target
+      // like "word, count". for_each_custom has an untyped iter + a full text target.
       return {
-        "type": "controls_forEach",
+        "type": "for_each_custom",
         "id": makeBlockId(),
-        "fields": {
-          "VAR": {
-            "id": varName
-          }
-        },
+        "fields": { "TARGET": targetToPython(node.target) },
         "inputs": {
-          "LIST": {
-            "block": convertExpressionToBlock(node.iter)
-          },
-          "DO": {
-            "block": convertStatementListToBlock(node.body)
-          }
+          "ITER": { "block": convertExpressionToBlock(node.iter) },
+          "DO": { "block": convertStatementListToBlock(node.body) }
         }
       };
     }
@@ -3478,6 +3474,24 @@ function convertCallExpression(node, isStatement = false) {
     };
   }
 
+  // Method call on a NON-simple receiver (a call/subscript/expression result), e.g.
+  // hist[0:85].sum(), Counter(words).most_common(n), title.strip().lower(). getCallFullPath
+  // only maps name/module receivers; use a generic method_call block (RECEIVER + METHOD +
+  // args) so these become real blocks instead of raw lumps.
+  if (node.func.type === 'Attribute' && node.func.value && node.func.value.type !== 'Name') {
+    const block = {
+      "type": "method_call",
+      "id": makeBlockId(),
+      "extraState": { "itemCount": (node.args || []).length },
+      "fields": { "METHOD": node.func.attr },
+      "inputs": { "RECEIVER": { "block": convertExpressionToBlock(node.func.value) } }
+    };
+    (node.args || []).forEach((arg, i) => {
+      block.inputs[`ARG${i}`] = { "block": convertExpressionToBlock(arg) };
+    });
+    return block;
+  }
+
   // Dynamic Abstract Library and Global calls
   const path = getCallFullPath(node.func);
   if (path) {
@@ -4089,13 +4103,39 @@ function convertExpressionToBlock(node) {
         }
       };
 
-    // [W4] Starred expression -> faithful raw expression
+    // *expr unpacking argument -> dedicated starred_arg block.
     case 'Starred':
       return {
-        "type": "raw_expression",
+        "type": "starred_arg",
         "id": makeBlockId(),
-        "fields": { "EXPR": astToPython(node) }
+        "inputs": { "VALUE": { "block": convertExpressionToBlock(node.value) } }
       };
+
+    // **expr unpacking argument -> dedicated double_starred_arg block.
+    case 'DoubleStarred':
+      return {
+        "type": "double_starred_arg",
+        "id": makeBlockId(),
+        "inputs": { "VALUE": { "block": convertExpressionToBlock(node.value) } }
+      };
+
+    // keyword argument name=value -> dedicated keyword_arg block.
+    case 'Keyword':
+      return {
+        "type": "keyword_arg",
+        "id": makeBlockId(),
+        "fields": { "NAME": node.name },
+        "inputs": { "VALUE": { "block": convertExpressionToBlock(node.value) } }
+      };
+
+    // slice lower:upper:step (inside a subscript) -> dedicated slice_expr block.
+    case 'Slice': {
+      const block = { "type": "slice_expr", "id": makeBlockId(), "inputs": {} };
+      if (node.lower) block.inputs["LOWER"] = { "block": convertExpressionToBlock(node.lower) };
+      if (node.upper) block.inputs["UPPER"] = { "block": convertExpressionToBlock(node.upper) };
+      if (node.step) block.inputs["STEP"] = { "block": convertExpressionToBlock(node.step) };
+      return block;
+    }
 
     case 'Attribute':
       // obj.attr  ->  custom attribute_access block (OBJECT value + NAME field)
@@ -4419,6 +4459,52 @@ function _defineFuncCallBlock(typeName, isStatement) {
 _defineFuncCallBlock('func_call', false);
 _defineFuncCallBlock('func_call_stmt', true);
 
+// [Demo] Method call on an arbitrary receiver expression: receiver.method(args). Handles
+// chained calls (f().g(), a[i].sum()) that getCallFullPath can't map. RECEIVER value input
+// + editable METHOD field + variable-arity args.
+Blockly.Blocks['method_call'] = {
+  itemCount_: 0,
+  init: function() {
+    this.itemCount_ = 0;
+    this.appendValueInput('RECEIVER').setCheck(null);
+    this.appendDummyInput('HEAD')
+        .appendField('.')
+        .appendField(new Blockly.FieldTextInput('method'), 'METHOD')
+        .appendField('(');
+    this.updateShape_();
+    this.setInputsInline(true);
+    this.setOutput(true, null);
+    this.setColour('#9b59b6');
+    this.setTooltip('메서드 호출 receiver.method(args)');
+    this.setHelpUrl('');
+  },
+  saveExtraState: function() { return { itemCount: this.itemCount_ }; },
+  loadExtraState: function(state) {
+    this.itemCount_ = (state && typeof state.itemCount === 'number') ? state.itemCount : 0;
+    this.updateShape_();
+  },
+  updateShape_: function() {
+    for (const inp of this.inputList.slice()) {
+      if (inp.name !== 'RECEIVER' && inp.name !== 'HEAD') this.removeInput(inp.name);
+    }
+    for (let i = 0; i < this.itemCount_; i++) {
+      const v = this.appendValueInput('ARG' + i).setCheck(null);
+      if (i > 0) v.appendField(',');
+    }
+    this.appendDummyInput('TAIL').appendField(')');
+  },
+};
+Blockly.Python['method_call'] = function(block) {
+  const recv = Blockly.Python.valueToCode(block, 'RECEIVER', Blockly.Python.ORDER_MEMBER) || 'obj';
+  const method = block.getFieldValue('METHOD') || 'method';
+  const args = [];
+  for (let i = 0; i < (block.itemCount_ || 0); i++) {
+    args.push(Blockly.Python.valueToCode(block, 'ARG' + i, Blockly.Python.ORDER_NONE) || '');
+  }
+  return [`${recv}.${method}(${args.join(', ')})`, Blockly.Python.ORDER_FUNCTION_CALL];
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['method_call'] = Blockly.Python['method_call'];
+
 // [Demo] String concatenation a + b — untyped inputs so strings/text blocks connect
 // (math_arithmetic's Number-typed inputs would coerce strings to 0). Chains nest via B.
 Blockly.Blocks['text_concat'] = {
@@ -4465,6 +4551,100 @@ Blockly.Python['binary_op'] = function(block) {
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['binary_op'] = Blockly.Python['binary_op'];
+}
+
+// [Demo] Generic for-each: for <target> in <iterable>. Untyped iter input (accepts list,
+// string, dict, range, generator) + a text target field (holds tuple/nested targets like
+// "word, count"). Replaces controls_forEach, whose Array-typed input crashed on non-lists.
+Blockly.Blocks['for_each_custom'] = {
+  init: function() {
+    this.appendValueInput('ITER').setCheck(null)
+        .appendField('for')
+        .appendField(new Blockly.FieldTextInput('item'), 'TARGET')
+        .appendField('in');
+    this.appendStatementInput('DO').setCheck(null).appendField('do');
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#5ba55b');
+    this.setTooltip('for <target> in <iterable>:');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['for_each_custom'] = function(block) {
+  const target = block.getFieldValue('TARGET') || 'item';
+  const iter = Blockly.Python.valueToCode(block, 'ITER', Blockly.Python.ORDER_NONE) || '[]';
+  let body = Blockly.Python.statementToCode(block, 'DO');
+  if (!body) body = (Blockly.Python.INDENT || '    ') + 'pass\n';
+  return `for ${target} in ${iter}:\n${body}`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['for_each_custom'] = Blockly.Python['for_each_custom'];
+}
+
+// [Demo] keyword argument: name=value (a real editable block, not a raw lump).
+Blockly.Blocks['keyword_arg'] = {
+  init: function() {
+    this.appendValueInput('VALUE').setCheck(null)
+        .appendField(new Blockly.FieldTextInput('key'), 'NAME').appendField('=');
+    this.setInputsInline(true);
+    this.setOutput(true, null);
+    this.setColour('#9b59b6');
+    this.setTooltip('키워드 인자 name=value');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['keyword_arg'] = function(block) {
+  const name = block.getFieldValue('NAME') || 'key';
+  const val = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || 'None';
+  return [`${name}=${val}`, Blockly.Python.ORDER_ATOMIC];
+};
+
+// [Demo] *expr and **expr unpacking arguments.
+Blockly.Blocks['starred_arg'] = {
+  init: function() {
+    this.appendValueInput('VALUE').setCheck(null).appendField('*');
+    this.setInputsInline(true); this.setOutput(true, null); this.setColour('#9b59b6');
+    this.setTooltip('* 언패킹 인자'); this.setHelpUrl('');
+  }
+};
+Blockly.Python['starred_arg'] = function(block) {
+  return [`*${Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || ''}`, Blockly.Python.ORDER_ATOMIC];
+};
+Blockly.Blocks['double_starred_arg'] = {
+  init: function() {
+    this.appendValueInput('VALUE').setCheck(null).appendField('**');
+    this.setInputsInline(true); this.setOutput(true, null); this.setColour('#9b59b6');
+    this.setTooltip('** 언패킹 인자'); this.setHelpUrl('');
+  }
+};
+Blockly.Python['double_starred_arg'] = function(block) {
+  return [`**${Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || ''}`, Blockly.Python.ORDER_ATOMIC];
+};
+
+// [Demo] slice lower:upper:step (inside a subscript). Untyped optional inputs.
+Blockly.Blocks['slice_expr'] = {
+  init: function() {
+    this.appendValueInput('LOWER').setCheck(null);
+    this.appendValueInput('UPPER').setCheck(null).appendField(':');
+    this.appendValueInput('STEP').setCheck(null).appendField(':');
+    this.setInputsInline(true);
+    this.setOutput(true, null);
+    this.setColour('#745ba5');
+    this.setTooltip('슬라이스 lower:upper:step (비워도 됨)');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['slice_expr'] = function(block) {
+  const lo = Blockly.Python.valueToCode(block, 'LOWER', Blockly.Python.ORDER_NONE) || '';
+  const up = Blockly.Python.valueToCode(block, 'UPPER', Blockly.Python.ORDER_NONE) || '';
+  const st = Blockly.Python.valueToCode(block, 'STEP', Blockly.Python.ORDER_NONE) || '';
+  return [st !== '' ? `${lo}:${up}:${st}` : `${lo}:${up}`, Blockly.Python.ORDER_ATOMIC];
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['keyword_arg'] = Blockly.Python['keyword_arg'];
+  Blockly.Python.forBlock['starred_arg'] = Blockly.Python['starred_arg'];
+  Blockly.Python.forBlock['double_starred_arg'] = Blockly.Python['double_starred_arg'];
+  Blockly.Python.forBlock['slice_expr'] = Blockly.Python['slice_expr'];
 }
 
 // Raw Python expression block — used as fallback for expressions that can't map to built-in blocks
