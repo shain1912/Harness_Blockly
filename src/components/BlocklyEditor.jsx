@@ -12,26 +12,32 @@ export default function BlocklyEditor({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Defined Dark/Cyber Theme for Blockly
+    // Scratch3/MakeCode-style light theme for the zelos renderer.
     const getBlocklyTheme = () => {
-      return window.Blockly.Theme.defineTheme('cyber_dark', {
-        'base': window.Blockly.Themes.Classic,
+      const base = window.Blockly.Themes.Zelos || window.Blockly.Themes.Classic;
+      return window.Blockly.Theme.defineTheme('scratch_light', {
+        'base': base,
         'componentStyles': {
-          'workspaceBackgroundColour': '#0c0f1b',
-          'toolboxBackgroundColour': '#0e1220',
-          'toolboxTextColour': '#94a3b8',
-          'flyoutBackgroundColour': '#0e1220',
-          'flyoutTextColour': '#94a3b8',
-          'scrollbarColour': '#64748b',
-          'scrollbarOpacity': 0.4
+          'workspaceBackgroundColour': '#f8fafc',
+          'toolboxBackgroundColour': '#ffffff',
+          'toolboxForegroundColour': '#334155',
+          'flyoutBackgroundColour': '#f1f5f9',
+          'flyoutForegroundColour': '#334155',
+          'flyoutOpacity': 1,
+          'scrollbarColour': '#cbd5e1',
+          'scrollbarOpacity': 0.6,
+          'insertionMarkerColour': '#334155',
+          'insertionMarkerOpacity': 0.3,
+          'cursorColour': '#334155'
         },
         'blockStyles': {
-          'logic_blocks': { 'colourPrimary': '#5b80a5' },
-          'loop_blocks': { 'colourPrimary': '#5ba55b' },
-          'math_blocks': { 'colourPrimary': '#5b67a5' },
-          'text_blocks': { 'colourPrimary': '#5ba5a5' },
-          'list_blocks': { 'colourPrimary': '#745ba5' },
-          'variable_blocks': { 'colourPrimary': '#a55b80' }
+          'logic_blocks': { 'colourPrimary': '#4C97FF' },
+          'loop_blocks': { 'colourPrimary': '#FFAB19' },
+          'math_blocks': { 'colourPrimary': '#59C059' },
+          'text_blocks': { 'colourPrimary': '#5CB1D6' },
+          'list_blocks': { 'colourPrimary': '#9966FF' },
+          'variable_blocks': { 'colourPrimary': '#FF8C1A' },
+          'procedure_blocks': { 'colourPrimary': '#FF6680' }
         }
       });
     };
@@ -43,11 +49,11 @@ export default function BlocklyEditor({
     const ws = window.Blockly.inject(containerRef.current, {
       toolbox: toolbox,
       theme: getBlocklyTheme(),
-      renderer: 'geras',
+      renderer: 'zelos',
       grid: {
         spacing: 20,
         length: 3,
-        colour: 'rgba(255, 255, 255, 0.05)',
+        colour: 'rgba(0, 0, 0, 0.06)',
         snap: true
       },
       zoom: {
