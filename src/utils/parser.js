@@ -3417,9 +3417,9 @@ function convertCallExpression(node, isStatement = false) {
     }
   }
 
-  // print("text") — the nice text_print block holds exactly one value. For print()
-  // with zero or multiple args, fall back to a lossless raw_statement so no argument
-  // is dropped (text_print would silently keep only the first).
+  // print(...). A single arg uses the nice built-in text_print block. Zero or multiple
+  // args use the custom print_multi block — one value input per argument — so each arg is
+  // a real, editable block and the call round-trips losslessly (no raw text lump).
   if (node.func.type === 'Name' && node.func.id === 'print') {
     if ((node.args || []).length === 1) {
       return {
@@ -3432,11 +3432,17 @@ function convertCallExpression(node, isStatement = false) {
         }
       };
     }
-    return {
-      "type": "raw_statement",
+    const args = node.args || [];
+    const block = {
+      "type": "print_multi",
       "id": makeBlockId(),
-      "fields": { "STMT": astToPython(node) }
+      "extraState": { "itemCount": args.length },
+      "inputs": {}
     };
+    args.forEach((arg, i) => {
+      block.inputs[`ARG${i}`] = { "block": convertExpressionToBlock(arg) };
+    });
+    return block;
   }
 
   // list.append(val)
@@ -4261,6 +4267,47 @@ Blockly.Python['raw_statement'] = function(block) {
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['raw_statement'] = Blockly.Python['raw_statement'];
+}
+
+// [Demo] print(a, b, ...) — a real block with one value input per argument (variable
+// arity via a mutator). print() with one arg uses the built-in text_print instead.
+Blockly.Blocks['print_multi'] = {
+  itemCount_: 2,
+  init: function() {
+    this.itemCount_ = 2;
+    this.updateShape_();
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setInputsInline(true);
+    this.setColour('#5ba55b');
+    this.setTooltip('print(a, b, ...) — 여러 인자를 출력');
+    this.setHelpUrl('');
+  },
+  saveExtraState: function() { return { itemCount: this.itemCount_ }; },
+  loadExtraState: function(state) {
+    this.itemCount_ = (state && typeof state.itemCount === 'number') ? state.itemCount : 0;
+    this.updateShape_();
+  },
+  updateShape_: function() {
+    // Rebuild from scratch — runs during load BEFORE input connections are restored.
+    for (const inp of this.inputList.slice()) this.removeInput(inp.name);
+    this.appendDummyInput('HEAD').appendField('print(');
+    for (let i = 0; i < this.itemCount_; i++) {
+      const valInput = this.appendValueInput('ARG' + i).setCheck(null);
+      if (i > 0) valInput.appendField(',');
+    }
+    this.appendDummyInput('TAIL').appendField(')');
+  },
+};
+Blockly.Python['print_multi'] = function(block) {
+  const args = [];
+  for (let i = 0; i < (block.itemCount_ || 0); i++) {
+    args.push(Blockly.Python.valueToCode(block, 'ARG' + i, Blockly.Python.ORDER_NONE) || 'None');
+  }
+  return `print(${args.join(', ')})\n`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['print_multi'] = Blockly.Python['print_multi'];
 }
 
 // Raw Python expression block — used as fallback for expressions that can't map to built-in blocks
