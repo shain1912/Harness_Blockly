@@ -287,8 +287,8 @@ class Tokenizer {
         continue;
       }
 
-      // Single char symbols ([W3] added % & | ^ ~ for modulo/bitwise — OP-03/11; [W4] added { } for dict/set literals)
-      if ('=+-*/<>():[],.%&|^~{}'.includes(char)) {
+      // Single char symbols ([W3] added % & | ^ ~ for modulo/bitwise — OP-03/11; [W4] added { } for dict/set literals; @ for decorators)
+      if ('=+-*/<>():[],.%&|^~{}@'.includes(char)) {
         const sym = this.nextChar();
         if (sym === '(' || sym === '[' || sym === '{') this.bracketDepth++;
         else if (sym === ')' || sym === ']' || sym === '}') this.bracketDepth = Math.max(0, this.bracketDepth - 1);
@@ -879,6 +879,30 @@ class Parser {
         case 'with':
           return this.parseWith();
       }
+    }
+
+    // Decorator: @name [(\...)] NEWLINE, collect and attach to following def/class
+    if (tok.type === TokenType.SYMBOL && tok.value === '@') {
+      const decorators = [];
+      while (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '@') {
+        this.next(); // consume '@'
+        // Parse the decorator expression (dotted name + optional call args)
+        let decoExpr = this.parseExpression();
+        // Consume NEWLINE after decorator
+        if (this.peek() && this.peek().type === TokenType.NEWLINE) this.next();
+        decorators.push(decoExpr);
+      }
+      const next = this.peek();
+      if (next && next.type === TokenType.KEYWORD && next.value === 'def') {
+        return this.parseFunctionDef(decorators);
+      }
+      if (next && next.type === TokenType.KEYWORD && next.value === 'class') {
+        return this.parseClassDef(decorators);
+      }
+      // Fallback (invalid Python — a decorator not followed by def/class): return the bare
+      // expression node as a statement, matching parseExpressionStatement's convention
+      // (it returns the expression node directly, never a wrapped 'Expr' type).
+      return decorators[decorators.length - 1] || null;
     }
 
     // Default: expression statement or assignment
@@ -2528,8 +2552,17 @@ function collectVariables(node, varsSet = new Set()) {
       if (node.step) collectVariables(node.step, varsSet);
       break;
     case 'FunctionDef':
+      // Walk params + body so variables_get blocks inside methods resolve correctly.
+      if (node.params && Array.isArray(node.params)) {
+        for (const p of node.params) {
+          if (typeof p === 'string' && !['True', 'False', 'None'].includes(p)) varsSet.add(p);
+        }
+      }
+      for (const stmt of (node.body || [])) collectVariables(stmt, varsSet);
+      break;
     case 'ClassDef':
-      // Skip function/class bodies — local variables are not workspace-level
+      // Walk class body so method-level variables are registered in the workspace.
+      for (const stmt of (node.body || [])) collectVariables(stmt, varsSet);
       break;
     // [W2] scope / generator nodes
     case 'Del':
@@ -3264,13 +3297,34 @@ function convertStatementToBlock(node) {
   }
 }
 
+// Build a connectable method_def block from a FunctionDef AST node. Used for class methods
+// and nested function defs (which can't use the non-connectable procedures_def* hat blocks).
+function functionDefToMethodBlock(stmt) {
+  const block = {
+    "type": "method_def",
+    "id": makeBlockId(),
+    "fields": {
+      "NAME": stmt.name,
+      "PARAMS": (stmt.params || []).join(', ')
+    },
+    "inputs": {}
+  };
+  if (stmt.decorators && stmt.decorators.length) {
+    block.fields.DECORATORS = stmt.decorators.map(d => '@' + astToPython(d)).join('\n');
+  }
+  const bodyBlock = convertStatementListToBlock(stmt.body);
+  if (bodyBlock) block.inputs.BODY = { "block": bodyBlock };
+  return block;
+}
+
 function convertClassBodyToBlock(stmts) {
   if (!stmts || stmts.length === 0) return null;
   let firstBlock = null, currentBlock = null;
   for (const stmt of stmts) {
-    // Methods become raw_statement blocks so they can nest inside class_def BODY input
+    // Methods become connectable method_def blocks; nested classes use class_def (both
+    // have prev/next connections so they stack inside the class BODY input).
     const block = stmt.type === 'FunctionDef'
-      ? { "type": "raw_statement", "id": makeBlockId(), "fields": { "STMT": astToPython(stmt, 0) } }
+      ? functionDefToMethodBlock(stmt)
       : convertStatementToBlock(stmt);
     if (!block) continue;
     if (!firstBlock) { firstBlock = block; currentBlock = block; }
@@ -3286,17 +3340,12 @@ function convertStatementListToBlock(statements) {
   let currentBlock = null;
 
   for (const stmt of statements) {
-    // [Demo] Blockly's procedures_def*/class blocks are top-level "hat" blocks with no
-    // previous/next connection, so a nested function/class def inside a suite cannot be
-    // chained here (causes MissingConnection on load). Emit it as a lossless raw_statement
-    // carrying the full source so the round-trip stays exact.
+    // Nested function defs use the connectable method_def block; nested classes use the
+    // connectable class_def block (via convertStatementToBlock). Both have prev/next
+    // connections so they chain into this suite without MissingConnection on load.
     let block;
-    if (stmt.type === 'FunctionDef' || stmt.type === 'ClassDef') {
-      block = {
-        "type": "raw_statement",
-        "id": makeBlockId(),
-        "fields": { "STMT": astToPython(stmt) }
-      };
+    if (stmt.type === 'FunctionDef') {
+      block = functionDefToMethodBlock(stmt);
     } else {
       block = convertStatementToBlock(stmt);
     }
@@ -4348,6 +4397,40 @@ Blockly.Python['class_def'] = function(block) {
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['class_def'] = Blockly.Python['class_def'];
+}
+
+// Connectable function/method definition block. Unlike procedures_def* (Blockly "hat"
+// blocks with no prev/next), this has statement connections so it can nest inside a
+// class_def BODY or another def's body. Params are a flat text field (lossless: defaults,
+// *args/**kwargs, type annotations all survive as text). Decorators emit as @-lines above.
+Blockly.Blocks['method_def'] = {
+  init: function() {
+    const DecoField = Blockly.FieldMultilineInput || Blockly.FieldTextInput;
+    this.appendDummyInput('DECO')
+        .appendField(new DecoField(''), 'DECORATORS');
+    this.appendDummyInput()
+        .appendField("def")
+        .appendField(new Blockly.FieldTextInput("method"), "NAME")
+        .appendField("(")
+        .appendField(new Blockly.FieldTextInput("self"), "PARAMS")
+        .appendField("):");
+    this.appendStatementInput("BODY").setCheck(null).appendField("do");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#8b5cf6");
+    this.setTooltip("Defines a function/method (nestable)");
+  }
+};
+Blockly.Python['method_def'] = function(block) {
+  const deco = (block.getFieldValue('DECORATORS') || '').trim();
+  const decoLines = deco ? deco.split('\n').map(d => d.trim()).join('\n') + '\n' : '';
+  const name = block.getFieldValue('NAME');
+  const params = block.getFieldValue('PARAMS') || '';
+  const body = Blockly.Python.statementToCode(block, 'BODY') || '    pass\n';
+  return `${decoLines}def ${name}(${params}):\n${body}`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['method_def'] = Blockly.Python['method_def'];
 }
 
 // Raw Python statement block — used as fallback for statements that can't map to built-in blocks
@@ -5676,6 +5759,82 @@ Blockly.Python['for_unpack'] = function(block) {
   if (Blockly.Python.forBlock) Blockly.Python.forBlock[t] = Blockly.Python[t];
 });
 
+// ── MakeCode-style +/- arity buttons ────────────────────────────────────────────
+// White-circle minus / plus icons (18x18, #575E75 glyph). Inline data-URIs so no asset
+// pipeline is needed.
+const ARITY_MINUS_SVG = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCI+PGNpcmNsZSBjeD0iOSIgY3k9IjkiIHI9IjgiIGZpbGw9IiNmZmYiIHN0cm9rZT0iI2NjYyIvPjxyZWN0IHg9IjQuNSIgeT0iOCIgd2lkdGg9IjkiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiM1NzVFNzUiLz48L3N2Zz4=';
+const ARITY_PLUS_SVG = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCI+PGNpcmNsZSBjeD0iOSIgY3k9IjkiIHI9IjgiIGZpbGw9IiNmZmYiIHN0cm9rZT0iI2NjYyIvPjxyZWN0IHg9IjQuNSIgeT0iOCIgd2lkdGg9IjkiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiM1NzVFNzUiLz48cmVjdCB4PSI4IiB5PSI0LjUiIHdpZHRoPSIyIiBoZWlnaHQ9IjkiIHJ4PSIxIiBmaWxsPSIjNTc1RTc1Ii8+PC9zdmc+';
+
+// Append ⊖ (only when itemCount_ > arityMin_) and ⊕ FieldImage buttons to the block's
+// trailing input. Runs at the end of every updateShape_, so buttons are rebuilt fresh
+// each shape change (no duplication).
+function appendArityButtons(block) {
+  if (!block.inputList || block.inputList.length === 0 || !Blockly.FieldImage) return;
+  const last = block.inputList[block.inputList.length - 1];
+  const min = block.arityMin_ || 0;
+  if ((block.itemCount_ || 0) > min) {
+    last.appendField(new Blockly.FieldImage(ARITY_MINUS_SVG, 18, 18, '-', function () {
+      const b = this.getSourceBlock && this.getSourceBlock();
+      if (b) b.changeArity_(-1);
+    }), 'MINUS');
+  }
+  last.appendField(new Blockly.FieldImage(ARITY_PLUS_SVG, 18, 18, '+', function () {
+    const b = this.getSourceBlock && this.getSourceBlock();
+    if (b) b.changeArity_(1);
+  }), 'PLUS');
+}
+
+// Wrap a dynamic-arity block definition: append +/- buttons after its updateShape_, and
+// install changeArity_ which preserves child connections across the rebuild.
+function enableArity(def, min) {
+  if (!def || typeof def.updateShape_ !== 'function') return;
+  const orig = def.updateShape_;
+  def.arityMin_ = min;
+  def.updateShape_ = function () {
+    orig.call(this);
+    appendArityButtons(this);
+  };
+  def.changeArity_ = function (delta) {
+    const next = (this.itemCount_ || 0) + delta;
+    if (next < (this.arityMin_ || 0)) return;
+    const prevGroup = (Blockly.Events && Blockly.Events.getGroup && Blockly.Events.getGroup()) || false;
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(true);
+    // 1. snapshot child connections by input name
+    const saved = {};
+    for (const input of this.inputList) {
+      if (input.connection && input.connection.targetConnection) {
+        saved[input.name] = input.connection.targetConnection;
+      }
+    }
+    // 2. mutate count + rebuild shape
+    this.itemCount_ = next;
+    this.updateShape_();
+    // 3. restore connections to same-named inputs that still exist
+    for (const name in saved) {
+      const input = this.getInput(name);
+      if (input && input.connection && !input.connection.targetConnection) {
+        try { input.connection.connect(saved[name]); } catch (e) {}
+      }
+    }
+    if (this.rendered && typeof this.render === 'function') this.render();
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(prevGroup);
+  };
+}
+
+enableArity(Blockly.Blocks['print_multi'], 1);
+enableArity(Blockly.Blocks['func_call'], 0);
+enableArity(Blockly.Blocks['func_call_stmt'], 0);
+enableArity(Blockly.Blocks['method_call'], 0);
+enableArity(Blockly.Blocks['tuple_create'], 0);
+enableArity(Blockly.Blocks['set_create'], 0);
+enableArity(Blockly.Blocks['dict_create'], 0);
+
+// Blockly's built-in list literal uses the same itemCount_/ADDn mutator scheme, so the
+// same wrapper gives it +/- buttons. Guard in case the core block name ever changes.
+if (Blockly.Blocks['lists_create_with']) {
+  enableArity(Blockly.Blocks['lists_create_with'], 0);
+}
+
 // lists_setIndex comes from the Blockly CDN; only provide a generator if the
 // CDN default is missing (don't clobber a working default).
 if (!Blockly.Python['lists_setIndex']) {
@@ -5842,6 +6001,32 @@ Blockly.Python['cv2_release'] = function(block) {
 ['cv2_videocapture','cv2_read','cv2_imshow','cv2_waitkey','cv2_destroyall','cv2_release'].forEach(t => {
   if (Blockly.Python.forBlock) Blockly.Python.forBlock[t] = Blockly.Python[t];
 });
+
+// Override Blockly.Python.finish to suppress the auto-generated "varName = None"
+// preamble that Blockly normally prepends for every workspace variable. That preamble
+// breaks lossless round-trips: parameters, for-loop targets, and attribute targets all
+// end up in the workspace variable map but must NOT appear as bare assignments at the
+// top of the generated code.  Stripping it keeps the generated Python identical to the
+// source (or at worst a structural isomorph that re-parses cleanly).
+if (typeof Blockly !== 'undefined' && Blockly.Python) {
+  Blockly.Python.finish = function(code) { return code; };
+}
+
+// Override the standard text block generator to emit double-quoted strings instead of
+// single-quoted. Python allows both; the project's canonical style (and astToPython)
+// uses double quotes, so keeping them consistent avoids spurious diff noise in
+// round-trip comparisons and in the code editor.
+if (typeof Blockly !== 'undefined' && Blockly.Python) {
+  Blockly.Python['text'] = function(block) {
+    const val = block.getFieldValue('TEXT') || '';
+    // Escape backslashes then double-quote characters before wrapping in double quotes.
+    const escaped = val.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return ['"' + escaped + '"', Blockly.Python.ORDER_ATOMIC];
+  };
+  if (Blockly.Python.forBlock) {
+    Blockly.Python.forBlock['text'] = Blockly.Python['text'];
+  }
+}
 
 if (typeof window !== 'undefined') {
   window.BlockPyParser = BlockPyParser;
