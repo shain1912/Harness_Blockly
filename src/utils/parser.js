@@ -1932,6 +1932,37 @@ function comprehensionClausesToPython(generators) {
   }).join('');
 }
 
+// Binary-operator precedence (higher binds tighter) — used to decide when an operand
+// must be parenthesized so astToPython preserves the original grouping/semantics.
+const _BIN_PREC = {
+  'or': 1, 'and': 2,
+  '==': 3, '!=': 3, '<': 3, '>': 3, '<=': 3, '>=': 3,
+  'is': 3, 'is not': 3, 'in': 3, 'not in': 3,
+  '|': 4, '^': 5, '&': 6, '<<': 7, '>>': 7,
+  '+': 8, '-': 8,
+  '*': 9, '/': 9, '//': 9, '%': 9,
+  '**': 11,
+};
+function _binPrec(op) { return _BIN_PREC[op] !== undefined ? _BIN_PREC[op] : 0; }
+
+// Emit a binary operand, wrapping it in parentheses when its own precedence is lower
+// than the parent's (or equal on the associativity-sensitive side), so grouping like
+// (a + b) / 2 is not flattened into a + b / 2.
+function _emitBinOperand(child, parentOp, isRight) {
+  const out = astToPython(child);
+  if (!child || child.type !== 'BinOp' || child.op === 'INDEX' || !child.left) return out;
+  const pp = _binPrec(parentOp), cp = _binPrec(child.op);
+  if (cp === 0 || pp === 0) return out;
+  let needParens = cp < pp;
+  // Same precedence: left-associative ops need parens on the RIGHT operand (a - (b - c));
+  // '**' is right-associative, so it needs parens on the LEFT operand instead.
+  if (cp === pp) {
+    if (parentOp === '**') needParens = !isRight;
+    else needParens = isRight;
+  }
+  return needParens ? `(${out})` : out;
+}
+
 function astToPython(node, indentLevel = 0) {
   if (!node) return '';
   const indent = '    '.repeat(indentLevel);
@@ -2066,16 +2097,20 @@ function astToPython(node, indentLevel = 0) {
       }
       // Unary operators (-x, +x, ~x, not x) have a null left operand
       if (!node.left) {
+        // A binary operand under a unary op must be parenthesized (e.g. -(a + b)).
+        const operand = node.right;
+        let inner = astToPython(operand);
+        if (operand && operand.type === 'BinOp' && operand.left && operand.op !== 'INDEX') inner = `(${inner})`;
         // [W3] bitwise NOT `~` prints with no space, like - and + (OP-11)
         if (node.op === '-' || node.op === '+' || node.op === '~') {
-          return `${node.op}${astToPython(node.right)}`;
+          return `${node.op}${inner}`;
         }
         // logical 'not' (keyword operator) needs a trailing space
-        return `${node.op} ${astToPython(node.right)}`;
+        return `${node.op} ${inner}`;
       }
       // [W3] All binary ops (incl. // % ** & | ^ << >> is/is not in/not in)
-      // print with surrounding spaces, matching Python style.
-      return `${astToPython(node.left)} ${node.op} ${astToPython(node.right)}`;
+      // print with surrounding spaces, parenthesizing operands by precedence.
+      return `${_emitBinOperand(node.left, node.op, false)} ${node.op} ${_emitBinOperand(node.right, node.op, true)}`;
       
     case 'Range':
       let rArgs = [];
