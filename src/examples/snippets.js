@@ -118,6 +118,15 @@ const DEMO_SNIPPETS = [
     code: 'import cv2\nimg = cv2.imread("photo.png")\nsmall = cv2.resize(img, (320, 240))\ncv2.imshow("resized", small)',
     expectedStdout: [],
   },
+
+  // ── Libraries (unseen, pip-installed) ────────────────────────────────────────
+  // Demonstrates: micropip-install + automatic block conversion + run for a library
+  // BlockPy has no preset for. humanize is pure-Python and installs in Pyodide.
+  {
+    id: 'lib-humanize', title: '미지 라이브러리: humanize', category: 'Libraries', desugar: true, execute: true,
+    code: 'import humanize\nprint(humanize.intcomma(1234567))\nprint(humanize.ordinal(21))\nprint(humanize.naturalsize(1048576))',
+    expectedStdout: ['1,234,567', '21st', '1.0 MB'],
+  },
 ];
 
 if (typeof window !== 'undefined') window.BlockPyExamples = DEMO_SNIPPETS;
