@@ -12,7 +12,37 @@ const BlockPyAbstraction = require('./src/utils/libraryAbstraction');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '30mb' })); // allow base64 image uploads
+
+// Media directory on real disk — uploaded images live here and it is the working
+// directory for shell-run Python, so cv2.imread('name.jpg') resolves to an upload.
+const MEDIA_DIR = path.join(os.tmpdir(), 'blockpy_media');
+try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (_) {}
+
+const PYTHON_CMD = process.env.PYTHON_CMD || (process.platform === 'win32' ? 'python' : 'python3');
+
+// Seed a synthetic sample image into the demo filenames using the real local cv2, so
+// OpenCV examples produce output in shell mode even before any upload (best-effort).
+function seedSampleImages() {
+  const py = [
+    'import cv2, numpy as np, os',
+    `d = r"${MEDIA_DIR.replace(/\\/g, '\\\\')}"`,
+    'img = np.full((240,320,3), 30, np.uint8)',
+    'cv2.rectangle(img,(40,50),(150,170),(0,0,255),-1)',
+    'cv2.circle(img,(230,110),55,(0,200,0),-1)',
+    'cv2.putText(img,"BlockPy",(30,215),cv2.FONT_HERSHEY_SIMPLEX,1.0,(255,255,255),2)',
+    'for f in ["input.jpg","photo.png","test.jpg","image.jpg","sample.jpg","namecard.jpg"]:',
+    '    p=os.path.join(d,f)',
+    '    if not os.path.exists(p): cv2.imwrite(p,img)',
+  ].join('\n');
+  const f = path.join(os.tmpdir(), `blockpy_seed_${Date.now()}.py`);
+  try {
+    fs.writeFileSync(f, py, 'utf8');
+    const c = spawn(PYTHON_CMD, [f], { env: process.env });
+    c.on('close', () => { try { fs.unlinkSync(f); } catch (_) {} });
+    c.on('error', () => { try { fs.unlinkSync(f); } catch (_) {} });
+  } catch (_) {}
+}
 
 // ─── MiniMax API Key Pool (Round-Robin) ───────────────────────────────────────
 const MINIMAX_KEYS = [
@@ -246,7 +276,6 @@ app.post('/api/ai-chat', async (req, res) => {
 // Runs the user's code with the machine's actual Python (real cv2, real webcam, real
 // imshow windows on the user's desktop). Streams stdout/stderr back live; aborting the
 // request (Stop) kills the process. Intended for local single-user use.
-const PYTHON_CMD = process.env.PYTHON_CMD || (process.platform === 'win32' ? 'python' : 'python3');
 
 app.post('/api/run-python', (req, res) => {
   const code = (req.body && req.body.code) || '';
@@ -263,6 +292,7 @@ app.post('/api/run-python', (req, res) => {
   let child;
   try {
     child = spawn(PYTHON_CMD, ['-u', file], {
+      cwd: MEDIA_DIR, // so cv2.imread('name.jpg') finds uploaded/sample images
       env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
     });
   } catch (e) {
@@ -301,6 +331,21 @@ app.post('/api/run-python', (req, res) => {
   });
 });
 
+// Save an uploaded image to the media dir so shell-run Python can cv2.imread() it.
+app.post('/api/upload-image', (req, res) => {
+  const { filename, dataBase64 } = req.body || {};
+  if (!filename || !dataBase64) { res.status(400).json({ error: 'filename and dataBase64 required' }); return; }
+  // sanitize filename to a basename (no path traversal)
+  const safe = path.basename(String(filename)).replace(/[^\w.\-]/g, '_') || 'upload.png';
+  try {
+    const bytes = Buffer.from(String(dataBase64).replace(/^data:[^,]+,/, ''), 'base64');
+    fs.writeFileSync(path.join(MEDIA_DIR, safe), bytes);
+    res.json({ ok: true, savedAs: safe, dir: MEDIA_DIR });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to save image: ' + e.message });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -315,5 +360,7 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`\n🚀 BlockPy Express Server  →  http://localhost:${PORT}`);
   console.log(`🤖 AI Engine: MiniMax-M2.7  (via Anthropic SDK)`);
-  console.log(`🔑 Key pool: ${MINIMAX_KEYS.length} key(s) loaded (round-robin)\n`);
+  console.log(`🔑 Key pool: ${MINIMAX_KEYS.length} key(s) loaded (round-robin)`);
+  console.log(`🖼️  Media dir (shell imread/upload): ${MEDIA_DIR}\n`);
+  seedSampleImages();
 });

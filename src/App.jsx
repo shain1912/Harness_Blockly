@@ -406,18 +406,28 @@ for i in range(4):
     try {
       setPyodideLoading(!pyodideReady);
       const buf = new Uint8Array(await file.arrayBuffer());
+      // (1) Pyodide FS — for the in-browser Run.
       await writeImageToFS(file.name, buf);
       setPyodideReady(true);
       setPyodideLoading(false);
       setUploadedImageName(file.name);
-      // Show the uploaded image immediately as the input preview.
       const dataUrl = await new Promise((resolve) => {
         const r = new FileReader();
         r.onload = () => resolve(r.result);
         r.readAsDataURL(file);
       });
+      // (2) Backend media dir — for the "실제 실행 (Shell)" real-python path.
+      let shellNote = '';
+      try {
+        const resp = await fetch('/api/upload-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, dataBase64: dataUrl }),
+        });
+        if (resp.ok) { const d = await resp.json(); shellNote = ` (Shell 실행에서도 cv2.imread("${d.savedAs}") 사용 가능)`; }
+      } catch (_) { /* backend may be off — browser Run still works */ }
       setCv2Images([{ title: `업로드: ${file.name}`, dataUrl }]);
-      setLogs((prev) => [...prev, `[이미지] "${file.name}" 업로드됨 — cv2.imread("${file.name}") 또는 예제 파일명으로 사용하세요.`]);
+      setLogs((prev) => [...prev, `[이미지] "${file.name}" 업로드됨 — cv2.imread("${file.name}")로 사용하세요.${shellNote}`]);
     } catch (e) {
       setLogs((prev) => [...prev, `[이미지 업로드 오류] ${e.message || e}`]);
     }
