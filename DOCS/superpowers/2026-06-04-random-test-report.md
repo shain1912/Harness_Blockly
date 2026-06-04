@@ -221,3 +221,51 @@ student_0~3, math_1은 rawLumps=0의 완전 무손실 케이스로, 향후 파�
 
 ### 도구
 좌측 **"회색 블록 (N)" 탭**: 변환 후 남은 raw 블록을 목록으로 보여주고, 클릭하면 해당 블록으로 이동·선택. 회색 부분을 한눈에 점검 가능.
+
+---
+
+## 회색 블록 캠페인 — 라운드 1: 클래스/메서드 정의 (2026-06-04)
+
+남은 회색 4부류 중 가장 큰 **중첩 def / 클래스 메서드 18개**를 통짜 `raw_statement`에서
+연결형 `method_def` 블록으로 전환. (스펙/계획: `DOCS/superpowers/specs/2026-06-04-method-def-block-design.md`,
+`DOCS/superpowers/plans/2026-06-04-method-def-block.md`)
+
+### 근본 원인
+`procedures_defnoreturn/defreturn`은 Blockly **hat 블록**(prev/next 연결 없음) → `class_def`
+BODY 스택이나 함수 본문 안에 중첩 불가 → 메서드/중첩 def를 통짜 raw로 덤프하던 것.
+
+### 조치
+- **신규 `method_def` 블록**: prev/next 연결 + NAME/PARAMS/DECORATORS 필드 + BODY statement 입력.
+  PARAMS는 평평한 텍스트(기본값·`*args`·타입주석 무손실), 데코레이터는 DECORATORS 필드로 보존.
+- **라우팅**: `convertClassBodyToBlock`·`convertStatementListToBlock`의 중첩 FunctionDef →
+  `functionDefToMethodBlock`(method_def, 본문 재귀로 임의 깊이 중첩), 중첩 ClassDef →
+  연결형 `class_def`. top-level def/class는 그대로 `procedures_def*`/`class_def` 유지.
+- **데코레이터 파싱**: 기존 파서엔 `@` 진입점이 없어 `@staticmethod` 등이 파싱 불가였음 →
+  Tokenizer에 `@` 심볼 + `parseStatement`에 데코레이터 수집(→ def/class에 부착) 추가.
+
+### 블록 경로(workspaceToCode) 생성기 개선 — 라운드트립 부산물
+브라우저 블록→코드 경로(`Blockly.Python.workspaceToCode`, 앱의 BlocklyEditor가 사용)에서만
+영향. **순수 Node 라운드트립 스위트(random/realistic)는 `astToPython`만 쓰므로 무관**.
+- **`collectVariables`**가 함수/클래스 본문을 walk → 메서드 본문의 `variables_get`가
+  워크스페이스 변수로 등록되어 Blockly 자동 리네임(i/j/k) 방지.
+- **`Blockly.Python.finish` 오버라이드**(`return code`): Blockly가 모든 워크스페이스 변수에
+  붙이던 `varName = None` 프리앰블 제거 — 유효 파이썬에선 항상 불필요(파라미터/for-타깃/
+  속성 피연산자까지 변수맵에 들어가 라운드트립을 오염시키던 것). for-루프 round-trip의
+  잠재 버그(`i = None\n\nfor ...`)도 동시 해소.
+- **`Blockly.Python['text']` 오버라이드**: 문자열을 이중따옴표로 출력. 블록 경로는 `text`
+  블록이 따옴표 스타일을 버리므로(값만 보존) 어차피 손실 — Blockly 기본(single)에서
+  double로 정규화(black/PEP 통상 스타일). 주의: `astToPython`은 원본 따옴표를 `raw`로 보존하므로
+  이 변경과 무관하며, Node 스위트의 단일따옴표 픽스처는 영향 없음.
+
+### 검증 (회귀 0)
+- Node 엄격 바이트 비교: **random 24 + realistic 33 = 57 통과**.
+- **method_def 5 통과**(블록정의 + 라우팅 3 + 브라우저 풀 라운드트립), examples_gallery_blocks **20 통과**.
+- 신규 회귀 스펙: `tests/method_def.spec.js`.
+- 기존 실패 4건(`test_new_blocks/list_comprehension`, `verify_w2/nonlocal_statement`,
+  `verify_w4/set_attribute`, `verify_w4/multiple_assign`)은 **브랜치 시작점에서도 동일 실패**로
+  확인된 pre-existing — 본 작업의 회귀 아님.
+
+### 결과
+- 회색(메서드/중첩 def) **18 → 0**. 브라우저: Dog 클래스가 `class_def` + `method_def`로
+  변환되고 `raw_statement` 0, 원문 Python 무손실 재생성.
+- **남은 회색**: docstring 22, lambda 4, 표현식 range 1 (후속 라운드 — lambda는 desugar 활용 예정).
