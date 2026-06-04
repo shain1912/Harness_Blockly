@@ -1112,31 +1112,36 @@ class Parser {
     this.expect(TokenType.NEWLINE, undefined, 'Expected newline after IF statement');
     
     const body = this.parseSuite();
-    let orelse = [];
 
-    // Check for elif or else
+    // Collect the elif clauses in order, then nest them so the chain is mutually
+    // exclusive: if/elif/elif/else => If(orelse=[If(orelse=[If(orelse=else)])]).
+    const elifs = [];
     while (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'elif') {
       const elifTok = this.next();
       const elifTest = this.parseExpression();
       this.expect(TokenType.SYMBOL, ':', 'Expected ":" after ELIF condition');
       this.expect(TokenType.NEWLINE, undefined, 'Expected newline after ELIF statement');
       const elifBody = this.parseSuite();
-      orelse.push(new IfNode(elifTest, elifBody, [], elifTok.line));
+      elifs.push(new IfNode(elifTest, elifBody, [], elifTok.line));
     }
 
+    let elseBody = [];
     if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'else') {
       this.next();
       this.expect(TokenType.SYMBOL, ':', 'Expected ":" after ELSE');
       this.expect(TokenType.NEWLINE, undefined, 'Expected newline after ELSE statement');
-      const elseBody = this.parseSuite();
-      
-      if (orelse.length > 0) {
-        // Nest else block into the last elif
-        let lastElif = orelse[orelse.length - 1];
-        lastElif.orelse = elseBody;
-      } else {
-        orelse = elseBody;
+      elseBody = this.parseSuite();
+    }
+
+    let orelse;
+    if (elifs.length > 0) {
+      elifs[elifs.length - 1].orelse = elseBody;
+      for (let i = elifs.length - 2; i >= 0; i--) {
+        elifs[i].orelse = [elifs[i + 1]];
       }
+      orelse = [elifs[0]];
+    } else {
+      orelse = elseBody;
     }
 
     return new IfNode(test, body, orelse, tok.line);
