@@ -50,6 +50,7 @@ export default function App() {
   const blocklySnapshotRef = useRef(null);
   const associatedPythonRef = useRef('');
   const interpreterRef = useRef(null);
+  const abstractionEngineRef = useRef(null);
 
   // Structural script equivalence helper
   const arePythonScriptsEquivalent = (codeA, codeB) => {
@@ -94,6 +95,16 @@ export default function App() {
 
       const blocklyJson = window.BlockPyParser.astToBlockly(parsedAST);
       window.Blockly.serialization.workspaces.load(blocklyJson, workspaceRef.current);
+
+      // Pick up any dynamic library blocks the parser auto-registered during astToBlockly.
+      const engine = abstractionEngineRef.current;
+      if (engine && engine.activeBlocks && engine.activeBlocks.length > 0) {
+        setInstalledBlocks((prev) => {
+          const known = new Set(prev.map((p) => p.type));
+          const added = engine.activeBlocks.filter((b) => !known.has(b.type));
+          return added.length ? [...prev, ...added] : prev;
+        });
+      }
 
       blocklySnapshotRef.current = window.Blockly.serialization.workspaces.save(workspaceRef.current);
       associatedPythonRef.current = currentCode;
@@ -232,8 +243,15 @@ export default function App() {
 
     // Populate preloaded blocks for OpenCV Visual Palette Parity
     const cv2Preset = window.BlockPyAbstraction.AI_PRESETS['cv2'];
-    if (cv2Preset) {
+    {
+      // Persistent abstraction engine — shared with the parser (window.__blockpyEngine)
+      // for on-the-fly dynamic-block registration during Convert.
       const engine = new window.BlockPyAbstraction.LibraryAbstractionEngine(null);
+      abstractionEngineRef.current = engine;
+      window.__blockpyEngine = engine;
+    }
+    if (cv2Preset) {
+      const engine = abstractionEngineRef.current;
       const preloaded = cv2Preset.blocks.map(b => {
         const blockType = engine.registerBlock('cv2', b.func, b.args, b.hasOutput, b.colour, b.title);
         return {
