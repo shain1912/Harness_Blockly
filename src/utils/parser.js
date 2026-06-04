@@ -144,9 +144,28 @@ class Tokenizer {
         }
 
         const next = this.peekChar();
-        // Skip indentation rules for empty lines or comments
-        if (next === '\n' || next === '\r' || next === '#' || next === null) {
-          continue; 
+        // Blank or comment-only lines carry no statement. Consume the whole line
+        // (incl. its newline) WITHOUT emitting a NEWLINE token — Python treats these as
+        // NL, not NEWLINE. Emitting one here would inject a stray NEWLINE before the
+        // block's INDENT (e.g. a comment as the first line of a `while:` body), which
+        // breaks suite parsing.
+        if (next === '#') {
+          let commentText = '';
+          while (this.peekChar() !== '\n' && this.peekChar() !== '\r' && this.peekChar() !== null) {
+            commentText += this.nextChar();
+          }
+          this.tokens.push(new Token(TokenType.COMMENT, commentText, this.line, this.col));
+          if (this.peekChar() === '\r') { this.nextChar(); if (this.peekChar() === '\n') this.nextChar(); }
+          else if (this.peekChar() === '\n') this.nextChar();
+          continue;
+        }
+        if (next === '\n' || next === '\r') {
+          if (this.peekChar() === '\r') { this.nextChar(); if (this.peekChar() === '\n') this.nextChar(); }
+          else this.nextChar();
+          continue;
+        }
+        if (next === null) {
+          continue;
         }
 
         const currentIndent = this.indentStack[this.indentStack.length - 1];

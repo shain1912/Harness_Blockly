@@ -19,7 +19,10 @@ const norm = (s) => s.replace(/\s+/g, '').trim();
 // Files whose round-trip is semantically identical but not byte-exact (benign
 // normalization such as dropping a redundant parenthesis around an aug-assign RHS).
 // These still must PARSE and produce a STABLE (idempotent) round-trip.
-const ALLOW_SEMANTIC = new Set(['p09.py']);
+// - p09.py: redundant parens around an aug-assign RHS dropped (semantically identical).
+// - cv_webcam_comments.py: inline/line comments are dropped on conversion (blocks don't
+//   model comments), so the code is identical but not byte-for-byte.
+const ALLOW_SEMANTIC = new Set(['p09.py', 'cv_webcam_comments.py']);
 
 const files = fs.readdirSync(FIX_DIR).filter((f) => f.endsWith('.py')).sort();
 
