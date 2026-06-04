@@ -7,3 +7,7 @@ playwright-report/
 *.deb
 .DS_Store
 *.log
+
+# Scratch reference screenshots pasted during development
+image.png
+image copy*.png
