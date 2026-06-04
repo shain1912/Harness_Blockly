@@ -2,6 +2,10 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const Anthropic = require('@anthropic-ai/sdk');
+const { spawn } = require('child_process');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
 
 const BlockPyDesugarer = require('./src/utils/desugarer');
 const BlockPyAbstraction = require('./src/utils/libraryAbstraction');
@@ -238,6 +242,63 @@ app.post('/api/ai-chat', async (req, res) => {
 });
 
 // ─── Health check ─────────────────────────────────────────────────────────────
+// ── Real Python execution in a local shell ──────────────────────────────────────
+// Runs the user's code with the machine's actual Python (real cv2, real webcam, real
+// imshow windows on the user's desktop). Streams stdout/stderr back live; aborting the
+// request (Stop) kills the process. Intended for local single-user use.
+const PYTHON_CMD = process.env.PYTHON_CMD || (process.platform === 'win32' ? 'python' : 'python3');
+
+app.post('/api/run-python', (req, res) => {
+  const code = (req.body && req.body.code) || '';
+  if (!code.trim()) { res.status(400).json({ error: 'No code provided' }); return; }
+
+  const file = path.join(os.tmpdir(), `blockpy_${Date.now()}_${Math.random().toString(36).slice(2)}.py`);
+  try { fs.writeFileSync(file, code, 'utf8'); }
+  catch (e) { res.status(500).json({ error: 'Failed to write temp file: ' + e.message }); return; }
+
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no'); // disable proxy buffering for live streaming
+
+  let child;
+  try {
+    child = spawn(PYTHON_CMD, ['-u', file], {
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+    });
+  } catch (e) {
+    res.write(`[shell error] could not start "${PYTHON_CMD}": ${e.message}\n`);
+    try { fs.unlinkSync(file); } catch (_) {}
+    res.end();
+    return;
+  }
+
+  let done = false;
+  const cleanup = () => { try { fs.unlinkSync(file); } catch (_) {} };
+
+  child.stdout.on('data', (d) => res.write(d));
+  child.stderr.on('data', (d) => res.write(d));
+  child.on('error', (e) => {
+    res.write(`\n[shell error] ${e.message}\n`);
+    if (e.code === 'ENOENT') {
+      res.write(`[shell] Python not found. Install Python (and opencv-python) or set PYTHON_CMD.\n`);
+    }
+  });
+  child.on('close', (codeNum) => {
+    done = true;
+    res.write(`\n[exit ${codeNum}]\n`);
+    cleanup();
+    res.end();
+  });
+
+  // Browser aborted (Stop) → kill the Python process. Use the RESPONSE 'close' (fires on
+  // client disconnect) — req 'close' fires when the request body finishes, which would
+  // kill the process immediately.
+  res.on('close', () => {
+    if (!done && child && !child.killed) { try { child.kill(); } catch (_) {} }
+    cleanup();
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',

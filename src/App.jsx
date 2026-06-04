@@ -55,6 +55,7 @@ export default function App() {
   const associatedPythonRef = useRef('');
   const interpreterRef = useRef(null);
   const abstractionEngineRef = useRef(null);
+  const shellAbortRef = useRef(null);
 
   // Structural script equivalence helper
   const arePythonScriptsEquivalent = (codeA, codeB) => {
@@ -422,6 +423,44 @@ for i in range(4):
     }
   };
 
+  // ── Run in a real local Python shell (backend) — real cv2, real webcam, real imshow ──
+  // Streams stdout/stderr from the actual `python` process. Native OpenCV windows (imshow,
+  // VideoCapture) open on the user's desktop. Requires the backend (npm run server).
+  const handleRunShell = async () => {
+    setCv2Images([]);
+    setLogs([`[Shell] 실제 Python 실행 (로컬 python + 진짜 cv2). imshow/웹캠 창은 데스크톱에 뜹니다.`, `[Shell] Code:\n${code}`]);
+    setActiveAuxTab('logs');
+    setIsRunning(true);
+    const controller = new AbortController();
+    shellAbortRef.current = controller;
+    try {
+      const resp = await fetch('/api/run-python', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+        signal: controller.signal,
+      });
+      if (!resp.ok || !resp.body) {
+        setLogs((prev) => [...prev, `[Shell] 백엔드 응답 오류 (${resp.status}). npm run server 가 실행 중인지 확인하세요.`]);
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        if (text) setLogs((prev) => [...prev, text.replace(/\n+$/, '')]);
+      }
+    } catch (e) {
+      if (e.name === 'AbortError') setLogs((prev) => [...prev, '[Shell] 중지됨.']);
+      else setLogs((prev) => [...prev, `[Shell] 오류: ${e.message}. 백엔드(npm run server)가 켜져 있는지 확인하세요.`]);
+    } finally {
+      setIsRunning(false);
+      shellAbortRef.current = null;
+    }
+  };
+
   // ── Run: Pyodide real Python execution ────────────────────────────────────────
   const handleRunExecution = async () => {
     if (isPaused) {
@@ -527,6 +566,7 @@ for i in range(4):
   // ── Stop: interrupt Pyodide + reset JS interpreter ────────────────────────────
   const handleStopExecution = () => {
     interruptPyodide();
+    if (shellAbortRef.current) { try { shellAbortRef.current.abort(); } catch (_) {} }
     if (interpreterRef.current) interpreterRef.current.reset();
     setHighlightedLine(null);
     setIsRunning(false);
@@ -730,16 +770,26 @@ for i in range(4):
                 <i className="fa-solid fa-image icon-cyan"></i>
                 <h3>이미지 / OpenCV 출력</h3>
               </div>
-              <label className="btn btn-teal btn-sm" htmlFor="cv-image-upload" style={{ cursor: 'pointer' }}>
-                <i className="fa-solid fa-upload"></i> 이미지 업로드
-                <input
-                  id="cv-image-upload"
-                  type="file"
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={(e) => handleImageUpload(e.target.files && e.target.files[0])}
-                />
-              </label>
+              <div className="panel-actions" style={{ gap: 8 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  id="btn-run-shell"
+                  onClick={handleRunShell}
+                  title="로컬 파이썬(쉘)에서 실제로 실행 — 진짜 cv2/웹캠/imshow 창"
+                >
+                  <i className="fa-solid fa-terminal"></i> 실제 실행 (Shell)
+                </button>
+                <label className="btn btn-teal btn-sm" htmlFor="cv-image-upload" style={{ cursor: 'pointer' }}>
+                  <i className="fa-solid fa-upload"></i> 이미지 업로드
+                  <input
+                    id="cv-image-upload"
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleImageUpload(e.target.files && e.target.files[0])}
+                  />
+                </label>
+              </div>
             </div>
             <div className="cv-image-body">
               {cv2Images.length === 0 ? (

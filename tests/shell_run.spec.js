@@ -1,0 +1,33 @@
+// VERIFICATION: the "실제 실행 (Shell)" path runs REAL local Python (real cv2) and streams
+// output. Requires the Express backend (npm run server); skips cleanly if it isn't up so
+// the Vite-only test runs don't fail.
+const { test, expect } = require('@playwright/test');
+
+async function backendUp(page) {
+  return page.evaluate(async () => {
+    try { const r = await fetch('/api/health'); return r.ok; } catch (_) { return false; }
+  });
+}
+
+test('Shell run streams real Python + cv2 output', async ({ page }) => {
+  test.setTimeout(60000);
+  await page.goto('http://localhost:3000', { waitUntil: 'networkidle', timeout: 30000 });
+  test.skip(!(await backendUp(page)), 'backend (npm run server) not running');
+
+  await page.locator('#tab-btn-python').click();
+  await page.locator('#python-code').fill(
+    'import cv2, numpy as np\nprint("cv2", cv2.__version__)\n' +
+    'g = cv2.cvtColor(np.zeros((40,50,3), np.uint8), cv2.COLOR_BGR2GRAY)\n' +
+    'print("gray", g.shape)\nprint("OK_CV2_SHELL")'
+  );
+  await page.waitForTimeout(400);
+  await page.locator('#btn-run-shell').click();
+  await page.waitForFunction(
+    () => (document.querySelector('#console-logs')?.textContent || '').includes('OK_CV2_SHELL'),
+    { timeout: 40000 }
+  );
+  const logs = await page.locator('#console-logs').textContent();
+  expect(logs).toMatch(/cv2 4\./);        // the REAL local opencv version
+  expect(logs).toContain('gray (40, 50)'); // real cvtColor reduced 3 channels -> 1
+  expect(logs).toContain('OK_CV2_SHELL');
+});
