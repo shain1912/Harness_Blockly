@@ -106,8 +106,11 @@ const DEMO_SNIPPETS = [
     expectedStdout: [],
   },
   {
-    id: 'cv-capture', title: 'OpenCV: 카메라 캡처', category: 'OpenCV', desugar: true, execute: true,
-    code: 'import cv2\ncap = cv2.VideoCapture(0)\nret, frame = cap.read()\ncv2.imshow("frame", frame)',
+    // Idiomatic webcam capture loop. Render/convert-only (execute:false): a real
+    // `while True` capture loop never terminates headlessly (the cv2 mock's waitKey
+    // always returns 0), so it is for showing the block conversion, not running.
+    id: 'cv-capture', title: 'OpenCV: 웹캠 캡처 루프', category: 'OpenCV', desugar: true, execute: false,
+    code: 'import cv2\ncap = cv2.VideoCapture(0)\nwhile True:\n    ret, frame = cap.read()\n    if not ret:\n        break\n    cv2.imshow("Webcam", frame)\n    if cv2.waitKey(1) == ord("q"):\n        break\ncap.release()\ncv2.destroyAllWindows()',
     expectedStdout: [],
   },
   {
