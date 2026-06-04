@@ -433,6 +433,29 @@ for i in range(4):
     }
   };
 
+  // ── Real pip install (backend) — installs into the local Python used by Shell runs ──
+  const [pipPkg, setPipPkg] = useState('');
+  const handlePipInstallShell = async () => {
+    const pkg = pipPkg.trim();
+    if (!pkg) return;
+    setActiveAuxTab('logs');
+    setLogs((prev) => [...prev, `[pip] 실제 설치: pip install ${pkg} ...`]);
+    try {
+      const resp = await fetch('/api/pip-install', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ package: pkg }),
+      });
+      if (!resp.ok || !resp.body) {
+        setLogs((prev) => [...prev, `[pip] 응답 오류 (${resp.status}). npm run server 확인.`]); return;
+      }
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      for (;;) { const { done, value } = await reader.read(); if (done) break; const t = dec.decode(value, { stream: true }); if (t) setLogs((prev) => [...prev, t.replace(/\n+$/, '')]); }
+    } catch (e) {
+      setLogs((prev) => [...prev, `[pip] 오류: ${e.message}. 백엔드가 켜져 있는지 확인하세요.`]);
+    }
+  };
+
   // ── Run in a real local Python shell (backend) — real cv2, real webcam, real imshow ──
   // Streams stdout/stderr from the actual `python` process. Native OpenCV windows (imshow,
   // VideoCapture) open on the user's desktop. Requires the backend (npm run server).
@@ -801,6 +824,21 @@ for i in range(4):
                 </label>
               </div>
             </div>
+            <form
+              className="pip-form"
+              style={{ margin: '6px 0' }}
+              onSubmit={(e) => { e.preventDefault(); handlePipInstallShell(); }}
+            >
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, opacity: 0.8 }}>pip install</span>
+              <input
+                className="pip-input"
+                type="text"
+                value={pipPkg}
+                onChange={(e) => setPipPkg(e.target.value)}
+                placeholder="예: pillow, numpy, mediapipe ..."
+              />
+              <button type="submit" className="btn btn-secondary btn-sm" disabled={!pipPkg.trim()}>설치</button>
+            </form>
             <div className="cv-image-body">
               {cv2Images.length === 0 ? (
                 <div className="cv-image-placeholder">

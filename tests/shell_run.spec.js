@@ -34,3 +34,19 @@ test('Shell run streams real Python + cv2 output', async ({ page }) => {
   expect(logs).toMatch(/cv2 4\./);         // the REAL local opencv version
   expect(logs).toContain('gray (40, 50)'); // real cvtColor reduced 3 channels -> 1
 });
+
+test('real pip install runs and reports a result', async ({ page }) => {
+  test.setTimeout(60000);
+  await page.goto('http://localhost:3000', { waitUntil: 'networkidle', timeout: 30000 });
+  test.skip(!(await backendUp(page)), 'backend (npm run server) not running');
+  // pip is the standard library's package manager — always present; "pip" alone errors
+  // usefully, but installing a tiny already-present spec returns fast with a clear result.
+  await page.locator('.pip-input').fill('cowsay');
+  await page.locator('.pip-form button[type=submit]').click();
+  await page.waitForFunction(
+    () => /\[pip exit /.test(document.querySelector('#console-logs')?.textContent || ''),
+    { timeout: 45000 }
+  );
+  const logs = (await page.locator('#console-logs').textContent()) || '';
+  expect(/Successfully installed|already satisfied/.test(logs)).toBe(true);
+});

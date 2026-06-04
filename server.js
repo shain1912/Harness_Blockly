@@ -331,6 +331,36 @@ app.post('/api/run-python', (req, res) => {
   });
 });
 
+// Real `pip install <package>` on the local machine (python -m pip). Streams output;
+// installed packages become available to subsequent shell runs. spawn (no shell) +
+// charset validation prevents command injection.
+app.post('/api/pip-install', (req, res) => {
+  const pkg = ((req.body && req.body.package) || '').trim();
+  if (!pkg) { res.status(400).json({ error: 'package required' }); return; }
+  if (!/^[A-Za-z0-9._\-=<>!\[\],~+ ]+$/.test(pkg)) {
+    res.status(400).json({ error: 'invalid package spec' }); return;
+  }
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  // Split on whitespace so "numpy pillow" or "pkg==1.2" both work; each token is a
+  // separate arg (no shell interpolation).
+  const args = ['-m', 'pip', 'install', ...pkg.split(/\s+/).filter(Boolean)];
+  let child;
+  try {
+    child = spawn(PYTHON_CMD, args, { env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+  } catch (e) {
+    res.write(`[pip error] ${e.message}\n`); res.end(); return;
+  }
+  let done = false;
+  child.stdout.on('data', (d) => res.write(d));
+  child.stderr.on('data', (d) => res.write(d));
+  child.on('error', (e) => res.write(`\n[pip error] ${e.message}\n`));
+  child.on('close', (codeNum) => { done = true; res.write(`\n[pip exit ${codeNum}]\n`); res.end(); });
+  res.on('close', () => { if (!done && !res.writableEnded && child && !child.killed) { try { child.kill(); } catch (_) {} } });
+});
+
 // Save an uploaded image to the media dir so shell-run Python can cv2.imread() it.
 app.post('/api/upload-image', (req, res) => {
   const { filename, dataBase64 } = req.body || {};
