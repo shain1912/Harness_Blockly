@@ -50,6 +50,7 @@ class Tokenizer {
     this.indentStack = [0];
     this.tokens = [];
     this.isLineStart = true;
+    this.bracketDepth = 0; // ()/[]/{} nesting — suppresses NEWLINE/INDENT (implicit line joining)
   }
 
   peekChar() {
@@ -131,12 +132,17 @@ class Tokenizer {
       if (this.isLineStart) {
         this.isLineStart = false;
         let spaceCount = 0;
-        
+
         while (this.peekChar() === ' ' || this.peekChar() === '\t') {
           const space = this.nextChar();
           spaceCount += (space === '\t' ? 4 : 1);
         }
-        
+
+        // Inside brackets, Python joins lines implicitly — ignore indentation entirely.
+        if (this.bracketDepth > 0) {
+          continue;
+        }
+
         const next = this.peekChar();
         // Skip indentation rules for empty lines or comments
         if (next === '\n' || next === '\r' || next === '#' || next === null) {
@@ -159,11 +165,13 @@ class Tokenizer {
         continue;
       }
 
-      // Handle Newlines
+      // Handle Newlines — suppressed inside brackets (implicit line joining).
       if (char === '\n' || char === '\r') {
         const nl = this.nextChar();
         if (nl === '\r' && this.peekChar() === '\n') this.nextChar(); // CRLF
-        this.tokens.push(new Token(TokenType.NEWLINE, '\n', this.line - 1, this.col));
+        if (this.bracketDepth === 0) {
+          this.tokens.push(new Token(TokenType.NEWLINE, '\n', this.line - 1, this.col));
+        }
         continue;
       }
 
@@ -259,6 +267,8 @@ class Tokenizer {
       // Single char symbols ([W3] added % & | ^ ~ for modulo/bitwise — OP-03/11; [W4] added { } for dict/set literals)
       if ('=+-*/<>():[],.%&|^~{}'.includes(char)) {
         const sym = this.nextChar();
+        if (sym === '(' || sym === '[' || sym === '{') this.bracketDepth++;
+        else if (sym === ')' || sym === ']' || sym === '}') this.bracketDepth = Math.max(0, this.bracketDepth - 1);
         this.tokens.push(new Token(TokenType.SYMBOL, sym, this.line, this.col - 1));
         continue;
       }
