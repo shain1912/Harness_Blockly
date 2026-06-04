@@ -3188,48 +3188,23 @@ function convertCallExpression(node, isStatement = false) {
     
     const blockType = `lib_${libName}_${funcName}`;
     
-    // On-the-fly static block registration!
-    // [W4] guard window access so this works under Node (non-browser) too.
-    if (!Blockly.Blocks[blockType] && typeof window !== 'undefined' && window.appOrchestrator && window.appOrchestrator.abstractionEngine) {
+    // On-the-fly dynamic block registration for an UNKNOWN library call.
+    // Only real module calls (lib !== 'global'); bare user-function calls keep their
+    // existing lossless representation. Registers the Blockly block ONLY — React owns the
+    // palette/toolbox state and syncs from engine.activeBlocks after Convert.
+    const engine = (typeof window !== 'undefined') ? window.__blockpyEngine : null;
+    if (!Blockly.Blocks[blockType] && libName !== 'global' && engine) {
       const args = node.args.map((_, idx) => `param_${idx}`);
       const hasOutput = !isStatement;
-      const colour = libName === 'cv2' ? '#06b6d4' : (libName === 'global' ? '#b55bf7' : '#009688');
-      const title = libName === 'global' ? `${funcName}` : `${libName}.${funcName}`;
-      
-      window.appOrchestrator.abstractionEngine.registerBlock(libName, funcName, args, hasOutput, colour, title);
-      
-      // Update orchestrator active blocks list & UI
-      if (!window.appOrchestrator.abstractionEngine.activeBlocks.some(b => b.type === blockType)) {
-        window.appOrchestrator.abstractionEngine.activeBlocks.push({
-          type: blockType,
-          title: title,
-          hasOutput: hasOutput
-        });
-        window.appOrchestrator.abstractionEngine.installedBlocksCount++;
-        
-        const badgeCount = document.getElementById('dynamic-blocks-count');
-        if (badgeCount) {
-          badgeCount.innerText = `${window.appOrchestrator.abstractionEngine.installedBlocksCount} Blocks Installed`;
-        }
-        
-        const blocksList = document.getElementById('dynamic-blocks-list');
-        if (blocksList) {
-          if (blocksList.querySelector('.empty-list-placeholder')) {
-            blocksList.innerHTML = '';
-          }
-          const pill = document.createElement('div');
-          pill.className = 'dyn-block-pill';
-          pill.innerHTML = `
-            <span class="dyn-block-name">${title}</span>
-            <span class="dyn-block-type">${hasOutput ? 'Output Block' : 'Statement Block'}</span>
-          `;
-          blocksList.appendChild(pill);
-        }
-        
-        window.appOrchestrator.abstractionEngine.updateBlocklyToolbox();
+      const colour = libName === 'cv2' ? '#06b6d4' : '#009688';
+      const title = `${libName}.${funcName}`;
+      engine.registerBlock(libName, funcName, args, hasOutput, colour, title);
+      if (!engine.activeBlocks.some((b) => b.type === blockType)) {
+        engine.activeBlocks.push({ type: blockType, title, hasOutput, func: funcName, args });
+        engine.installedBlocksCount = (engine.installedBlocksCount || 0) + 1;
       }
     }
-    
+
     if (Blockly.Blocks[blockType]) {
       const dynamicBlock = {
         "type": blockType,
