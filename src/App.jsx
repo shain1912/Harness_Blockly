@@ -401,7 +401,7 @@ for i in range(4):
 
     setTimeout(() => {
       syncCodeToBlocks(demoCode);
-    }, 100);
+    }, 0);
   };
 
   // ── Gray (raw) block inspector: collect the fallback blocks, jump to each ──────
