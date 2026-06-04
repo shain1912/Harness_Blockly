@@ -2072,9 +2072,19 @@ function astToPython(node, indentLevel = 0) {
       }
       return `${ifHead}\n${ifBody || (indent + '    pass')}${orelseStr}`;
       
-    case 'Call':
-      const callCode = `${astToPython(node.func)}(${node.args.map(arg => astToPython(arg)).join(', ')})`;
+    case 'Call': {
+      // A sole generator-expression argument needs no parens of its own — the call's
+      // parens suffice: sum(x for x in y), not sum((x for x in y)).
+      let argStr;
+      if (node.args.length === 1 && node.args[0] && node.args[0].type === 'GenExp') {
+        const g = node.args[0];
+        argStr = `${astToPython(g.elt)}${comprehensionClausesToPython(g.generators)}`;
+      } else {
+        argStr = node.args.map(arg => astToPython(arg)).join(', ');
+      }
+      const callCode = `${astToPython(node.func)}(${argStr})`;
       return indentLevel > 0 ? `${indent}${callCode}` : callCode;
+    }
       
     case 'ListComp':
       // [W4] prefer multi-clause generators when present, else legacy single-clause fields
