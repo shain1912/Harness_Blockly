@@ -6,7 +6,7 @@ import ConsoleLogs from './components/ConsoleLogs';
 import VariableWatch from './components/VariableWatch';
 import ASTTreeView from './components/ASTTreeView';
 import LibraryManager from './components/LibraryManager';
-import { runCode, initPyodide, interruptPyodide, pipInstall } from './utils/pyodideRunner';
+import { runCode, initPyodide, interruptPyodide, pipInstall, writeImageToFS } from './utils/pyodideRunner';
 
 export default function App() {
   const [code, setCode] = useState('');
@@ -26,6 +26,10 @@ export default function App() {
   const [runSpeed, setRunSpeed] = useState(50);
   const [highlightedLine, setHighlightedLine] = useState(null);
   
+  // OpenCV image output (from real cv2.imshow) + uploaded image name
+  const [cv2Images, setCv2Images] = useState([]);
+  const [uploadedImageName, setUploadedImageName] = useState(null);
+
   // Custom Abstract blocks and thoughts
   const [installedBlocks, setInstalledBlocks] = useState([]);
   const [aiThoughts, setAiThoughts] = useState([]);
@@ -383,6 +387,29 @@ for i in range(4):
     }, 100);
   };
 
+  // ── Image upload (App-Inventor-style): feed a real image to cv2.imread ─────────
+  const handleImageUpload = async (file) => {
+    if (!file) return;
+    try {
+      setPyodideLoading(!pyodideReady);
+      const buf = new Uint8Array(await file.arrayBuffer());
+      await writeImageToFS(file.name, buf);
+      setPyodideReady(true);
+      setPyodideLoading(false);
+      setUploadedImageName(file.name);
+      // Show the uploaded image immediately as the input preview.
+      const dataUrl = await new Promise((resolve) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.readAsDataURL(file);
+      });
+      setCv2Images([{ title: `업로드: ${file.name}`, dataUrl }]);
+      setLogs((prev) => [...prev, `[이미지] "${file.name}" 업로드됨 — cv2.imread("${file.name}") 또는 예제 파일명으로 사용하세요.`]);
+    } catch (e) {
+      setLogs((prev) => [...prev, `[이미지 업로드 오류] ${e.message || e}`]);
+    }
+  };
+
   // ── Run: Pyodide real Python execution ────────────────────────────────────────
   const handleRunExecution = async () => {
     if (isPaused) {
@@ -396,6 +423,7 @@ for i in range(4):
     setDrawnLines([]);
     setHighlightedLine(null);
     setVariables({});
+    setCv2Images([]);
     setIsRunning(true);
     setIsPaused(false);
     setPyodideLoading(!pyodideReady);
@@ -427,6 +455,12 @@ for i in range(4):
       },
       onSpriteCommand: spriteCallback,
       onCv2Action: handleCv2Action,
+      onCv2Image: (title, dataUrl) => {
+        setCv2Images((prev) => {
+          const rest = prev.filter((im) => im.title !== title);
+          return [...rest, { title, dataUrl }];
+        });
+      },
       onComplete: (err) => {
         setPyodideLoading(false);
         setPyodideReady(true);
@@ -676,6 +710,41 @@ for i in range(4):
             runSpeed={runSpeed}
             onSpeedChange={setRunSpeed}
           />
+
+          {/* OpenCV image: upload an input image + see real cv2.imshow output */}
+          <div className="cv-image-card">
+            <div className="panel-header">
+              <div className="panel-title-group">
+                <i className="fa-solid fa-image icon-cyan"></i>
+                <h3>이미지 / OpenCV 출력</h3>
+              </div>
+              <label className="btn btn-teal btn-sm" htmlFor="cv-image-upload" style={{ cursor: 'pointer' }}>
+                <i className="fa-solid fa-upload"></i> 이미지 업로드
+                <input
+                  id="cv-image-upload"
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => handleImageUpload(e.target.files && e.target.files[0])}
+                />
+              </label>
+            </div>
+            <div className="cv-image-body">
+              {cv2Images.length === 0 ? (
+                <div className="cv-image-placeholder">
+                  이미지를 업로드하고 OpenCV 예제를 Run 하면 처리 결과가 여기 표시됩니다.
+                  {uploadedImageName ? ` (업로드됨: ${uploadedImageName})` : ''}
+                </div>
+              ) : (
+                cv2Images.map((im, i) => (
+                  <figure key={i} className="cv-image-figure">
+                    <img src={im.dataUrl} alt={im.title} className="cv-image-out" />
+                    <figcaption>{im.title}</figcaption>
+                  </figure>
+                ))
+              )}
+            </div>
+          </div>
 
           {/* Auxiliary Tabs pane */}
           <div className="tab-card">

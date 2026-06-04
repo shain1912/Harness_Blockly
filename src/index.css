@@ -720,6 +720,41 @@ body {
 }
 .example-picker:hover { border-color: var(--neon-blue, #58a6ff); }
 
+/* OpenCV image upload + output panel */
+.cv-image-card {
+  background: var(--bg-card, #161b22);
+  border: 1px solid var(--border-color, #30363d);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+.cv-image-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+.cv-image-placeholder {
+  color: var(--text-secondary, #8b949e);
+  font-size: 0.82rem;
+  padding: 12px;
+}
+.cv-image-figure { margin: 0; text-align: center; }
+.cv-image-out {
+  max-width: 260px;
+  max-height: 200px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color, #30363d);
+  background: #000;
+}
+.cv-image-figure figcaption {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #8b949e);
+  margin-top: 4px;
+}
+
 .syntax-status {
   font-weight: 600;
 }
