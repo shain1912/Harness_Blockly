@@ -291,6 +291,40 @@ export function getInstalledPackages() {
   return [..._installedPackages];
 }
 
+// Returns true once Pyodide is initialized AND opencv-python is installed + bridged.
+export function isEnvironmentReady() {
+  return !!_pyodide && _installedPackages.has('cv2') && _cv2Patched;
+}
+
+// Pre-warm the environment in the background so the FIRST Run is instant: initialize
+// Pyodide, install the real opencv-python wheel, apply the cv2 GUI bridge, and seed the
+// sample images. Idempotent — reuses the already-built environment on later calls and
+// across runs in the same session (only a page reload rebuilds it).
+let _prewarmPromise = null;
+export function prewarmEnvironment(onStatus) {
+  if (_prewarmPromise) return _prewarmPromise;
+  _prewarmPromise = (async () => {
+    const pyodide = await initPyodide(onStatus || (() => {}));
+    if (!_installedPackages.has('cv2')) {
+      try {
+        onStatus && onStatus('[pip] Loading opencv-python (one-time)...');
+        const micropip = pyodide.pyimport('micropip');
+        await micropip.install('opencv-python');
+        _installedPackages.add('cv2');
+        onStatus && onStatus('[pip] ✅ opencv-python ready');
+      } catch (e) {
+        onStatus && onStatus(`[pip] ⚠️ opencv-python: ${e.message || e}`);
+      }
+    }
+    if (_installedPackages.has('cv2') && !_cv2Patched) {
+      try { await pyodide.runPythonAsync(CV2_GUI_PATCH); _cv2Patched = true; }
+      catch (e) { onStatus && onStatus(`[cv2] GUI bridge failed: ${e.message || e}`); }
+    }
+    return pyodide;
+  })();
+  return _prewarmPromise;
+}
+
 // Write an uploaded image into Pyodide's virtual filesystem so real cv2.imread(name)
 // reads it. Also overwrites the demo sample filenames so existing examples pick it up.
 export async function writeImageToFS(filename, uint8) {

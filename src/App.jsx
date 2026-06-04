@@ -6,7 +6,7 @@ import ConsoleLogs from './components/ConsoleLogs';
 import VariableWatch from './components/VariableWatch';
 import ASTTreeView from './components/ASTTreeView';
 import LibraryManager from './components/LibraryManager';
-import { runCode, initPyodide, interruptPyodide, pipInstall, writeImageToFS } from './utils/pyodideRunner';
+import { runCode, initPyodide, interruptPyodide, pipInstall, writeImageToFS, prewarmEnvironment, isEnvironmentReady } from './utils/pyodideRunner';
 
 export default function App() {
   const [code, setCode] = useState('');
@@ -287,6 +287,18 @@ export default function App() {
         interpreterRef.current.reset();
       }
     };
+  }, []);
+
+  // Pre-warm the Python environment (Pyodide + real opencv-python + sample images) in the
+  // background as soon as the app loads, so the first Run is instant rather than waiting
+  // for a one-time download/install. Within a session this is built once and reused.
+  useEffect(() => {
+    let cancelled = false;
+    setPyodideLoading(true);
+    prewarmEnvironment((msg) => { if (!cancelled) setLogs((prev) => [...prev, msg]); })
+      .then(() => { if (!cancelled) { setPyodideLoading(false); setPyodideReady(true); } })
+      .catch(() => { if (!cancelled) setPyodideLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   // When the Blockly tab becomes visible, force a resize + recenter. Blockly cannot lay
