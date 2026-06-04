@@ -3467,8 +3467,13 @@ function convertCallExpression(node, isStatement = false) {
       return null;
     }
     
-    const blockType = `lib_${libName}_${funcName}`;
-    
+    // Statement vs expression uses of the same function are DISTINCT block types
+    // (statement blocks have prev/next connections, output blocks don't). The `_stmt`
+    // suffix mirrors LibraryAbstractionEngine.registerBlock so they never collide —
+    // e.g. cv2.waitKey(0) (statement) vs `if cv2.waitKey(1) & ...` (expression).
+    const hasOutput = !isStatement;
+    const blockType = `lib_${libName}_${funcName}${hasOutput ? '' : '_stmt'}`;
+
     // On-the-fly dynamic block registration for an UNKNOWN library call.
     // Only real module calls (lib !== 'global'); bare user-function calls keep their
     // existing lossless representation. Registers the Blockly block ONLY — React owns the
@@ -3476,7 +3481,6 @@ function convertCallExpression(node, isStatement = false) {
     const engine = (typeof window !== 'undefined') ? window.__blockpyEngine : null;
     if (!Blockly.Blocks[blockType] && libName !== 'global' && engine) {
       const args = node.args.map((_, idx) => `param_${idx}`);
-      const hasOutput = !isStatement;
       const colour = libName === 'cv2' ? '#06b6d4' : '#009688';
       const title = `${libName}.${funcName}`;
       engine.registerBlock(libName, funcName, args, hasOutput, colour, title);

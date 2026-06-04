@@ -81,10 +81,13 @@ class LibraryAbstractionEngine {
     this.activeBlocks = []; // stores details of currently active dynamic blocks
   }
 
-  // Register a dynamic Blockly block at runtime
+  // Register a dynamic Blockly block at runtime.
+  // Statement and expression uses of the same lib function need DIFFERENT block types:
+  // an output (expression) block has no prev/next connection, a statement block does.
+  // The `_stmt` suffix keeps them distinct while the generator still emits lib.func(...).
   registerBlock(libName, funcName, args, hasOutput, colour, titleLabel) {
-    const blockType = `lib_${libName}_${funcName}`;
-    
+    const blockType = `lib_${libName}_${funcName}${hasOutput ? '' : '_stmt'}`;
+
     // Safety Guard: Avoid re-registering existing blocks to prevent Blockly collisions
     if (Blockly.Blocks[blockType]) {
       return blockType;

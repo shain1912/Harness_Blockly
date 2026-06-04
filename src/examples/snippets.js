@@ -118,6 +118,20 @@ const DEMO_SNIPPETS = [
     code: 'import cv2\nimg = cv2.imread("photo.png")\nsmall = cv2.resize(img, (320, 240))\ncv2.imshow("resized", small)',
     expectedStdout: [],
   },
+  {
+    // Realistic edge + contour pipeline. Render/convert-only: GaussianBlur/Canny/
+    // findContours aren't in the cv2 mock, so this is for showing the block conversion.
+    id: 'cv-contours', title: 'OpenCV: 에지 & 컨투어', category: 'OpenCV', desugar: true, execute: false,
+    code: 'import cv2\nimg = cv2.imread("input.jpg")\ngray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)\nblurred = cv2.GaussianBlur(gray, (5, 5), 0)\nedges = cv2.Canny(blurred, 50, 150)\ncontours, hierarchy = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)\ncv2.drawContours(img, contours, -1, (0, 255, 0), 2)\ncv2.imshow("Contours", img)\ncv2.waitKey(0)\ncv2.destroyAllWindows()',
+    expectedStdout: [],
+  },
+  {
+    // Webcam face recognition via a Haar cascade. Render/convert-only (infinite capture
+    // loop; CascadeClassifier/detectMultiScale aren't in the cv2 mock).
+    id: 'cv-face', title: 'OpenCV: 웹캠 얼굴 인식', category: 'OpenCV', desugar: true, execute: false,
+    code: 'import cv2\nface_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")\ncap = cv2.VideoCapture(0)\nwhile True:\n    ret, frame = cap.read()\n    if not ret:\n        break\n    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)\n    faces = face_cascade.detectMultiScale(gray, 1.1, 4)\n    for (x, y, w, h) in faces:\n        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)\n    cv2.imshow("Face Detection", frame)\n    if cv2.waitKey(1) & 0xFF == ord("q"):\n        break\ncap.release()\ncv2.destroyAllWindows()',
+    expectedStdout: [],
+  },
 
   // ── Libraries (unseen, pip-installed) ────────────────────────────────────────
   // Demonstrates: micropip-install + automatic block conversion + run for a library
