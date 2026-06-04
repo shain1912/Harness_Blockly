@@ -28,11 +28,13 @@ const KEYWORDS = [
 ];
 
 class Token {
-  constructor(type, value, line, col) {
+  constructor(type, value, line, col, raw) {
     this.type = type;
     this.value = value;
     this.line = line;
     this.col = col;
+    // Raw source text of the literal (strings/numbers) for lossless round-trips.
+    this.raw = raw !== undefined ? raw : value;
   }
 }
 
@@ -66,6 +68,59 @@ class Tokenizer {
       this.col++;
     }
     return char;
+  }
+
+  // Returns the number of string-prefix chars (0,1,2) if the upcoming source is an
+  // optional f/r/b/u prefix immediately followed by a quote; otherwise -1.
+  _stringPrefixLen() {
+    const s = this.source;
+    let i = this.cursor;
+    let n = 0;
+    while (n < 2 && i < s.length && /[frbuFRBU]/.test(s[i])) { i++; n++; }
+    if (i < s.length && (s[i] === '"' || s[i] === "'")) return n;
+    return -1;
+  }
+
+  // Scans a string literal (with `prefixLen` prefix chars already detected), handling
+  // both triple-quoted and single-quoted forms. Pushes a STRING token whose `raw` is the
+  // exact source and whose `value` is a best-effort decode (for block display only).
+  _scanString(prefixLen) {
+    const startLine = this.line, startCol = this.col, rawStart = this.cursor;
+    for (let k = 0; k < prefixLen; k++) this.nextChar();
+    const quote = this.peekChar();
+    const triple = quote + quote + quote;
+    const isTriple = this.source.substr(this.cursor, 3) === triple;
+    if (isTriple) {
+      this.nextChar(); this.nextChar(); this.nextChar();
+      while (this.cursor < this.source.length && this.source.substr(this.cursor, 3) !== triple) {
+        this.nextChar();
+      }
+      if (this.source.substr(this.cursor, 3) === triple) { this.nextChar(); this.nextChar(); this.nextChar(); }
+      else throw new SyntaxError(`Unterminated triple-quoted string starting at line ${startLine}, col ${startCol}`);
+    } else {
+      this.nextChar(); // opening quote
+      while (this.peekChar() !== quote && this.peekChar() !== null && this.peekChar() !== '\n') {
+        if (this.peekChar() === '\\') { this.nextChar(); this.nextChar(); }
+        else this.nextChar();
+      }
+      if (this.peekChar() === quote) this.nextChar();
+      else throw new SyntaxError(`Unterminated string starting at line ${startLine}, col ${startCol}`);
+    }
+    const raw = this.source.slice(rawStart, this.cursor);
+    this.tokens.push(new Token(TokenType.STRING, this._decodeStringRaw(raw), startLine, startCol, raw));
+  }
+
+  // Best-effort decode of a raw string literal to its text content (block display only;
+  // round-trips use the raw form). Strips prefix + quotes and unescapes \n and \t.
+  _decodeStringRaw(raw) {
+    let s = raw;
+    const m = s.match(/^[frbuFRBU]{0,2}/);
+    const prefix = m ? m[0].toLowerCase() : '';
+    s = s.slice(prefix.length);
+    if (s.length >= 6 && (s.startsWith('"""') || s.startsWith("'''"))) s = s.slice(3, -3);
+    else if (s.length >= 2) s = s.slice(1, -1);
+    if (!prefix.includes('r')) s = s.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\(["'\\])/g, '$1');
+    return s;
   }
 
   tokenize() {
@@ -129,43 +184,35 @@ class Tokenizer {
         continue;
       }
 
-      // Handle Strings
-      if (char === '"' || char === "'") {
-        const quoteChar = this.nextChar();
-        let strVal = '';
-        let startLine = this.line;
-        let startCol = this.col;
-        
-        while (this.peekChar() !== quoteChar && this.peekChar() !== null) {
-          const c = this.nextChar();
-          if (c === '\\') {
-            const next = this.nextChar();
-            if (next === 'n') strVal += '\n';
-            else if (next === 't') strVal += '\t';
-            else strVal += next;
-          } else {
-            strVal += c;
-          }
-        }
-        
-        if (this.peekChar() === quoteChar) {
-          this.nextChar(); // consume end quote
-        } else {
-          throw new SyntaxError(`Unterminated string starting at line ${startLine}, col ${startCol}`);
-        }
-        
-        this.tokens.push(new Token(TokenType.STRING, strVal, startLine, startCol));
+      // Handle Strings — incl. optional f/r/b/u prefixes and triple-quotes.
+      // We capture the RAW source (prefix + quotes + body) so astToPython re-emits it
+      // verbatim (lossless), while `value` is a best-effort decode used for block display.
+      const strPrefixLen = this._stringPrefixLen();
+      if (strPrefixLen >= 0) {
+        this._scanString(strPrefixLen);
         continue;
       }
 
-      // Handle Numbers
-      if (/[0-9]/.test(char)) {
-        let numStr = '';
+      // Handle Numbers — decimal, float, scientific, and 0x/0o/0b literals with
+      // optional underscores. Raw text is preserved for lossless round-trips.
+      if (/[0-9]/.test(char) || (char === '.' && /[0-9]/.test(this.source[this.cursor + 1] || ''))) {
         const startCol = this.col;
-        while (this.peekChar() !== null && /[0-9.]/.test(this.peekChar())) {
-          numStr += this.nextChar();
+        const rawStart = this.cursor;
+        const two = this.source.substr(this.cursor, 2).toLowerCase();
+        if (char === '0' && (two === '0x' || two === '0o' || two === '0b')) {
+          this.nextChar(); this.nextChar(); // consume 0x/0o/0b
+          while (this.peekChar() !== null && /[0-9a-fA-F_]/.test(this.peekChar())) this.nextChar();
+        } else {
+          // integer/float/scientific part
+          while (this.peekChar() !== null && /[0-9_.]/.test(this.peekChar())) this.nextChar();
+          if (this.peekChar() === 'e' || this.peekChar() === 'E') {
+            this.nextChar();
+            if (this.peekChar() === '+' || this.peekChar() === '-') this.nextChar();
+            while (this.peekChar() !== null && /[0-9_]/.test(this.peekChar())) this.nextChar();
+          }
         }
-        this.tokens.push(new Token(TokenType.NUMBER, numStr, this.line, startCol));
+        const numRaw = this.source.slice(rawStart, this.cursor);
+        this.tokens.push(new Token(TokenType.NUMBER, numRaw, this.line, startCol, numRaw));
         continue;
       }
 
@@ -351,18 +398,30 @@ class NameNode extends ASTNode {
 }
 
 class NumNode extends ASTNode {
-  constructor(value, line) {
+  constructor(value, line, raw) {
     super(line);
     this.type = 'Num';
-    this.value = parseFloat(value);
+    // Preserve the raw literal (e.g. "0xFF", "1_000", "5.0") for lossless re-emit.
+    this.raw = (raw !== undefined) ? raw : String(value);
+    this.value = NumNode._parse(this.raw);
+  }
+  static _parse(raw) {
+    const s = String(raw).replace(/_/g, '');
+    const low = s.toLowerCase();
+    if (low.startsWith('0x')) return parseInt(s, 16);
+    if (low.startsWith('0o')) return parseInt(s.slice(2), 8);
+    if (low.startsWith('0b')) return parseInt(s.slice(2), 2);
+    return parseFloat(s);
   }
 }
 
 class StrNode extends ASTNode {
-  constructor(value, line) {
+  constructor(value, line, raw) {
     super(line);
     this.type = 'Str';
     this.value = value;
+    // Raw literal incl. quotes/prefix (e.g. f"...", '''...'''); null for synthetic nodes.
+    this.raw = (raw !== undefined) ? raw : null;
   }
 }
 
@@ -1556,11 +1615,11 @@ class Parser {
 
     if (tok.type === TokenType.NUMBER) {
       this.next();
-      return new NumNode(tok.value, tok.line);
+      return new NumNode(tok.value, tok.line, tok.raw);
     }
     if (tok.type === TokenType.STRING) {
       this.next();
-      return new StrNode(tok.value, tok.line);
+      return new StrNode(tok.value, tok.line, tok.raw);
     }
     if (tok.type === TokenType.KEYWORD) {
       if (tok.value === 'True' || tok.value === 'False') {
@@ -1921,10 +1980,13 @@ function astToPython(node, indentLevel = 0) {
       return node.id;
       
     case 'Num':
-      return node.value.toString();
-      
+      // Preserve the original literal form (hex, underscores, float) when available.
+      return (node.raw !== undefined && node.raw !== null) ? node.raw : node.value.toString();
+
     case 'Str':
-      return `"${node.value.replace(/"/g, '\\"')}"`;
+      // Preserve the original literal (quote style, f/r prefix, triple-quotes) when available.
+      if (node.raw !== undefined && node.raw !== null) return node.raw;
+      return `"${String(node.value).replace(/"/g, '\\"')}"`;
       
     case 'Bool':
       return node.value ? 'True' : 'False';
