@@ -899,8 +899,10 @@ class Parser {
       if (next && next.type === TokenType.KEYWORD && next.value === 'class') {
         return this.parseClassDef(decorators);
       }
-      // Fallback: just return the last decorator expression as a statement
-      return decorators[decorators.length - 1] ? { type: 'Expr', value: decorators[decorators.length - 1] } : null;
+      // Fallback (invalid Python — a decorator not followed by def/class): return the bare
+      // expression node as a statement, matching parseExpressionStatement's convention
+      // (it returns the expression node directly, never a wrapped 'Expr' type).
+      return decorators[decorators.length - 1] || null;
     }
 
     // Default: expression statement or assignment
