@@ -290,12 +290,14 @@ app.post('/api/run-python', (req, res) => {
     res.end();
   });
 
-  // Browser aborted (Stop) → kill the Python process. Use the RESPONSE 'close' (fires on
-  // client disconnect) — req 'close' fires when the request body finishes, which would
-  // kill the process immediately.
+  // Browser aborted (Stop) → kill the Python process. Only kill on a genuine client
+  // disconnect: res 'close' BEFORE the response finished normally (res.end not called).
+  // Guarding on res.writableEnded avoids killing on normal completion or proxy quirks.
   res.on('close', () => {
-    if (!done && child && !child.killed) { try { child.kill(); } catch (_) {} }
     cleanup();
+    if (!done && !res.writableEnded && child && !child.killed) {
+      try { child.kill(); } catch (_) {}
+    }
   });
 });
 
