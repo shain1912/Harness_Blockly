@@ -106,6 +106,15 @@ export default function App() {
         });
       }
 
+      // Ensure the freshly-loaded blocks actually render and are in view. Loading into a
+      // hidden/zero-size workspace (e.g. while the Python tab is active) leaves blocks
+      // unrendered until a resize, and tall stacks can land off-screen — both look like
+      // "convert produced no blocks". Resize + center fixes it.
+      try {
+        window.Blockly.svgResize(workspaceRef.current);
+        if (typeof workspaceRef.current.scrollCenter === 'function') workspaceRef.current.scrollCenter();
+      } catch (_) { /* non-fatal */ }
+
       blocklySnapshotRef.current = window.Blockly.serialization.workspaces.save(workspaceRef.current);
       associatedPythonRef.current = currentCode;
 
@@ -275,6 +284,20 @@ export default function App() {
       }
     };
   }, []);
+
+  // When the Blockly tab becomes visible, force a resize + recenter. Blockly cannot lay
+  // out blocks while its container is display:none, so blocks converted on the Python tab
+  // would otherwise appear missing until the user nudges the canvas.
+  useEffect(() => {
+    if (activeEditorTab === 'blockly' && workspaceRef.current && window.Blockly) {
+      requestAnimationFrame(() => {
+        try {
+          window.Blockly.svgResize(workspaceRef.current);
+          if (typeof workspaceRef.current.scrollCenter === 'function') workspaceRef.current.scrollCenter();
+        } catch (_) { /* non-fatal */ }
+      });
+    }
+  }, [activeEditorTab]);
 
   // Update dynamic toolbox XML when blocks list updates
   useEffect(() => {
@@ -614,28 +637,6 @@ for i in range(4):
           </div>
         </div>
         
-        {/* Presets and template buttons */}
-        <div className="templates-bar">
-          <button className="btn btn-secondary btn-sm" onClick={() => loadDemoScript('star')}>
-            <i className="fa-solid fa-star icon-yellow"></i> Glowing Star
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => loadDemoScript('opencv')}>
-            <i className="fa-solid fa-video icon-cyan"></i> OpenCV Stream
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => loadDemoScript('listcomp')}>
-            <i className="fa-solid fa-list-check icon-green"></i> List Comp
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => loadDemoScript('ternary')}>
-            <i className="fa-solid fa-code-branch icon-pink"></i> Ternary
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => loadDemoScript('chained')}>
-            <i className="fa-solid fa-link icon-blue"></i> Chained Comp
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => loadDemoScript('augmented')}>
-            <i className="fa-solid fa-plus-minus icon-orange"></i> Aug Assign
-          </button>
-        </div>
-
         {/* Global actions badges and theme togglers */}
         <div className="header-actions">
           <div className="toggle-group">
