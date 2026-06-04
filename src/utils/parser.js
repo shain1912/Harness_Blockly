@@ -109,6 +109,10 @@ class Tokenizer {
     }
     const raw = this.source.slice(rawStart, this.cursor);
     this.tokens.push(new Token(TokenType.STRING, this._decodeStringRaw(raw), startLine, startCol, raw));
+    // A multi-line string consumes inner newlines (each sets isLineStart=true). Since the
+    // string IS content on its closing line, reset so the newline AFTER it emits a real
+    // NEWLINE instead of being swallowed as a blank line (which broke module docstrings).
+    this.isLineStart = false;
   }
 
   // Best-effort decode of a raw string literal to its text content (block display only;
@@ -1745,7 +1749,15 @@ class Parser {
     }
     if (tok.type === TokenType.STRING) {
       this.next();
-      return new StrNode(tok.value, tok.line, tok.raw);
+      // Python concatenates ADJACENT string literals: "a" "b" / f"x" f"y" -> one string.
+      let value = tok.value;
+      let raw = tok.raw;
+      while (this.peek() && this.peek().type === TokenType.STRING) {
+        const nxt = this.next();
+        value += nxt.value;
+        raw += ' ' + nxt.raw; // keep both literals (separated) for a faithful re-emit
+      }
+      return new StrNode(value, tok.line, raw);
     }
     if (tok.type === TokenType.KEYWORD) {
       if (tok.value === 'True' || tok.value === 'False') {
@@ -1952,32 +1964,34 @@ class Parser {
   // [W4] Parse a comprehension/for target: a single name or a tuple of names (k, v),
   // including a parenthesized tuple target — for (x, y, w, h) in faces.
   parseCompTarget() {
-    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '(') {
-      this.next(); // consume '('
-      const elts = [];
-      const readName = () => {
-        const id = this.expect(TokenType.IDENTIFIER, undefined, 'Expected identifier in tuple target');
-        elts.push(new NameNode(id.value, id.line));
-      };
-      readName();
-      while (this.match(TokenType.SYMBOL, ',')) {
-        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ')') break;
-        readName();
+    // One target element: a name, or a (possibly nested) parenthesized tuple target,
+    // e.g. for rank, (region, revenue) in ...  ->  Tuple[Name, Tuple[Name, Name]].
+    const parseElem = () => {
+      if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '(') {
+        const open = this.next(); // consume '('
+        const elts = [parseElem()];
+        while (this.match(TokenType.SYMBOL, ',')) {
+          if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ')') break;
+          elts.push(parseElem());
+        }
+        this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing tuple target');
+        const t = new TupleNode(elts, open.line);
+        t.parenTarget = true; // preserve the parentheses on re-emit
+        return t;
       }
-      this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing tuple target');
-      const t = new TupleNode(elts, elts[0].line);
-      t.parenTarget = true; // preserve the parentheses on re-emit
-      return t;
-    }
-    const firstId = this.expect(TokenType.IDENTIFIER, undefined, 'Expected identifier in comprehension/for target');
-    const first = new NameNode(firstId.value, firstId.line);
+      const id = this.expect(TokenType.IDENTIFIER, undefined, 'Expected identifier in comprehension/for target');
+      return new NameNode(id.value, id.line);
+    };
+
+    const first = parseElem();
     if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ',') {
       const elts = [first];
       while (this.match(TokenType.SYMBOL, ',')) {
-        // stop on a trailing comma followed by 'in'
-        if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'in') break;
-        const nid = this.expect(TokenType.IDENTIFIER, undefined, 'Expected identifier in tuple target');
-        elts.push(new NameNode(nid.value, nid.line));
+        // stop on a trailing comma before 'in' / end
+        const nx = this.peek();
+        if (nx && nx.type === TokenType.KEYWORD && nx.value === 'in') break;
+        if (nx && nx.type === TokenType.SYMBOL && nx.value === ')') break;
+        elts.push(parseElem());
       }
       return new TupleNode(elts, first.line);
     }
