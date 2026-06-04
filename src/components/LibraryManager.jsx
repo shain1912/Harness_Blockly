@@ -2,29 +2,15 @@ import React, { useState } from 'react';
 
 export default function LibraryManager({
   onAbstract,
-  onPipInstall,
   installedBlocks,
   aiThoughts,
   isAbstracting,
-  pyodideReady,
-  pyodideLoading,
 }) {
   const [selectedLib, setSelectedLib] = useState('cv2');
   const [customPrompt, setCustomPrompt] = useState('import tensorflow as tf\nmodel = tf.keras.Sequential()\nmodel.compile(optimizer="adam")\nmodel.fit(x, y)');
-  const [pipInput, setPipInput] = useState('');
-  const [pipBusy, setPipBusy] = useState(false);
 
   const handleAbstractClick = () => {
     onAbstract(selectedLib, selectedLib === 'custom' ? customPrompt : '');
-  };
-
-  const handlePipSubmit = async (e) => {
-    e.preventDefault();
-    if (!pipInput.trim()) return;
-    setPipBusy(true);
-    await onPipInstall(pipInput.trim());
-    setPipInput('');
-    setPipBusy(false);
   };
 
   return (
@@ -41,38 +27,7 @@ export default function LibraryManager({
 
       <div className="library-body">
 
-        {/* ── Pyodide pip install ─────────────────────────── */}
-        <div className="pip-panel">
-          <div className="ai-panel-title">
-            <i className="fa-brands fa-python"></i> pip install
-            {pyodideLoading && <span className="pip-status loading"> (loading Python...)</span>}
-            {pyodideReady && !pyodideLoading && <span className="pip-status ready"> ✅ ready</span>}
-          </div>
-          <form className="pip-form" onSubmit={handlePipSubmit}>
-            <input
-              className="pip-input"
-              type="text"
-              value={pipInput}
-              onChange={(e) => setPipInput(e.target.value)}
-              placeholder="e.g. numpy, requests, pygame..."
-              disabled={pipBusy}
-            />
-            <button
-              type="submit"
-              className="btn btn-teal btn-sm"
-              disabled={pipBusy || !pipInput.trim()}
-            >
-              {pipBusy ? <><i className="fa-solid fa-gear fa-spin"></i> Installing...</> : 'Install'}
-            </button>
-          </form>
-          <div className="pip-note">
-            Pure Python packages install via micropip. Packages with C extensions
-            must be in Pyodide's built-in list (numpy, pandas, matplotlib, PIL…).
-            pygame is not yet supported in browser WebAssembly.
-          </div>
-        </div>
-
-        <div className="divider" />
+        {/* pip install lives in the OpenCV/Shell panel now (real local pip). */}
 
         {/* ── AI Block Abstraction ────────────────────────── */}
         <div className="form-group">

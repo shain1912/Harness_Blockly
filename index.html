@@ -135,6 +135,7 @@
     <!-- ── Text ──────────────────────────────────────────────── -->
     <category name="Text" colour="#5ba5a5">
       <block type="text"><field name="TEXT">abc</field></block>
+      <block type="text_concat"></block>
       <block type="text_join"></block>
       <block type="text_append">
         <value name="TEXT">
@@ -216,6 +217,10 @@
 
     <!-- ── Functions ─────────────────────────────────────────── -->
     <category name="Functions" colour="#9b59b6" custom="PROCEDURE"></category>
+    <category name="Function Call" colour="#9b59b6">
+      <block type="func_call"></block>
+      <block type="func_call_stmt"></block>
+    </category>
 
     <!-- [W1] Exceptions -->
     <category name="Exceptions" colour="#d35400">

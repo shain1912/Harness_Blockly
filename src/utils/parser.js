@@ -3510,6 +3510,23 @@ function convertCallExpression(node, isStatement = false) {
       });
       return dynamicBlock;
     }
+
+    // Global / built-in function call (ord, len, abs, int, str, a user-defined foo()...).
+    // Use a generic func_call block: editable NAME field + one value input per argument,
+    // so it is a real editable block instead of a raw_expression lump and round-trips.
+    if (libName === 'global') {
+      const block = {
+        "type": isStatement ? "func_call_stmt" : "func_call",
+        "id": makeBlockId(),
+        "extraState": { "itemCount": (node.args || []).length },
+        "fields": { "NAME": funcName },
+        "inputs": {}
+      };
+      (node.args || []).forEach((arg, i) => {
+        block.inputs[`ARG${i}`] = { "block": convertExpressionToBlock(arg) };
+      });
+      return block;
+    }
   }
 
   return null;
@@ -3643,12 +3660,16 @@ function convertExpressionToBlock(node) {
 
       // String concatenation: `+` whose subtree involves a string literal must NOT use
       // math_arithmetic — its Number-typed A/B inputs reject text blocks on load, which
-      // silently coerces the strings to 0 (e.g. "Hi " + name -> 0 + 0). Preserve verbatim.
+      // silently coerces the strings to 0 (e.g. "Hi " + name -> 0 + 0). Use a dedicated
+      // untyped text_concat block so it is a real, editable block (not a raw lump).
       if (node.op === '+' && _exprInvolvesString(node)) {
         return {
-          "type": "raw_expression",
+          "type": "text_concat",
           "id": makeBlockId(),
-          "fields": { "EXPR": astToPython(node) }
+          "inputs": {
+            "A": { "block": convertExpressionToBlock(node.left) },
+            "B": { "block": convertExpressionToBlock(node.right) }
+          }
         };
       }
 
@@ -4308,6 +4329,77 @@ Blockly.Python['print_multi'] = function(block) {
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['print_multi'] = Blockly.Python['print_multi'];
+}
+
+// [Demo] Generic function call: name(arg0, arg1, ...). Editable NAME field + variable
+// arity. Two variants: func_call (output/expression) and func_call_stmt (statement).
+// Covers built-ins (ord, len, abs, int, str, ...) and user-defined functions.
+function _defineFuncCallBlock(typeName, isStatement) {
+  Blockly.Blocks[typeName] = {
+    itemCount_: 1,
+    init: function() {
+      this.itemCount_ = 1;
+      this.appendDummyInput('HEAD')
+          .appendField(new Blockly.FieldTextInput('func'), 'NAME')
+          .appendField('(');
+      this.updateShape_();
+      if (isStatement) { this.setPreviousStatement(true, null); this.setNextStatement(true, null); }
+      else { this.setOutput(true, null); }
+      this.setInputsInline(true);
+      this.setColour('#9b59b6');
+      this.setTooltip('함수 호출 name(arg, ...)');
+      this.setHelpUrl('');
+    },
+    saveExtraState: function() { return { itemCount: this.itemCount_ }; },
+    loadExtraState: function(state) {
+      this.itemCount_ = (state && typeof state.itemCount === 'number') ? state.itemCount : 0;
+      this.updateShape_();
+    },
+    updateShape_: function() {
+      for (const inp of this.inputList.slice()) { if (inp.name !== 'HEAD') this.removeInput(inp.name); }
+      for (let i = 0; i < this.itemCount_; i++) {
+        const v = this.appendValueInput('ARG' + i).setCheck(null);
+        if (i > 0) v.appendField(',');
+      }
+      this.appendDummyInput('TAIL').appendField(')');
+    },
+  };
+  const gen = function(block) {
+    const name = block.getFieldValue('NAME') || 'func';
+    const args = [];
+    for (let i = 0; i < (block.itemCount_ || 0); i++) {
+      args.push(Blockly.Python.valueToCode(block, 'ARG' + i, Blockly.Python.ORDER_NONE) || '');
+    }
+    const call = `${name}(${args.join(', ')})`;
+    return isStatement ? call + '\n' : [call, Blockly.Python.ORDER_FUNCTION_CALL];
+  };
+  Blockly.Python[typeName] = gen;
+  if (Blockly.Python.forBlock) Blockly.Python.forBlock[typeName] = gen;
+}
+_defineFuncCallBlock('func_call', false);
+_defineFuncCallBlock('func_call_stmt', true);
+
+// [Demo] String concatenation a + b — untyped inputs so strings/text blocks connect
+// (math_arithmetic's Number-typed inputs would coerce strings to 0). Chains nest via B.
+Blockly.Blocks['text_concat'] = {
+  init: function() {
+    this.appendValueInput('A').setCheck(null);
+    this.appendValueInput('B').setCheck(null).appendField('+');
+    this.setInputsInline(true);
+    this.setOutput(true, null);
+    this.setColour('#5ba5a5');
+    this.setTooltip('문자열 이어붙이기: a + b');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['text_concat'] = function(block) {
+  const order = (typeof Blockly.Python.ORDER_ADDITIVE === 'number') ? Blockly.Python.ORDER_ADDITIVE : Blockly.Python.ORDER_NONE;
+  const a = Blockly.Python.valueToCode(block, 'A', order) || '""';
+  const b = Blockly.Python.valueToCode(block, 'B', order) || '""';
+  return [`${a} + ${b}`, order];
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['text_concat'] = Blockly.Python['text_concat'];
 }
 
 // Raw Python expression block — used as fallback for expressions that can't map to built-in blocks
