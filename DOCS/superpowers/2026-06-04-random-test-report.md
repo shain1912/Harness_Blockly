@@ -192,3 +192,32 @@ student_0~3, math_1은 rawLumps=0의 완전 무손실 케이스로, 향후 파�
 1. docstring 전용 블록(현재 raw_statement) — 낮은 우선순위.
 2. 컴프리헨션 iterable의 `range()`·슬라이스를 raw_expression 대신 전용 블록으로 — 중간.
 3. 중첩 함수/클래스 메서드: hat 블록 중첩 제약 → 별도 "중첩 정의" 블록 필요 시 큰 작업.
+
+---
+
+## 회색(raw) 블록 감사 및 수정 (후속 2)
+
+"회색 있으면 우선 보고 이유 찾고 피드백" 지시에 따라, 브라우저(엔진 활성)에서 전체 픽스처를 변환해 **모든 raw 블록을 수집·분류·진단·수정**했습니다.
+
+### 발견 → 진단 → 수정
+| 원인 | 진단 | 조치 |
+|---|---|---|
+| `for ch in "문자열"` **크래시** | controls_forEach의 LIST 입력이 `Array` 타입이라 String 블록 연결 거부 → 로드 실패. 또 단일 VAR 필드라 튜플 타깃 표현 불가. | 무타입 `for_each_custom` 블록(텍스트 타깃 + 무타입 iter)로 교체 |
+| 슬라이스 `a[i:j:k]`, `:mid`, `:2` (15+) | subscript의 KEY가 Slice인데 변환 케이스 없음 → raw | `slice_expr` 블록 추가 |
+| 키워드 인자 `key=val`, `start=1` (13) | Keyword 노드 변환 케이스 없음 → raw | `keyword_arg` 블록 추가 |
+| `*args`/`**kwargs` (2) | Starred/DoubleStarred → raw | `starred_arg`/`double_starred_arg` 블록 |
+| 체인 메서드 `a[i].sum()`, `Counter(x).most_common(n)` (9) | 리시버가 단순 이름이 아니라 getCallFullPath가 null → raw | 범용 `method_call` 블록(RECEIVER+METHOD+ARGS) |
+| 리스트 산술 `[0]+[x]*n` 크래시 | math_arithmetic의 Number 입력이 Array 거부 | 무타입 `binary_op` 블록 |
+
+### 결과: 회색 블록 100 → 45 (크래시·파싱에러 0)
+남은 45개는 **전부 무손실(설계상 의도)** 또는 본질적 한계:
+- **docstring 22**: 단독 문자열 문장(사실상 주석). raw_statement로 무손실.
+- **중첩 def/클래스 메서드 18**: Blockly의 함수 정의는 최상위 'hat' 블록이라 다른 블록 안에 중첩 불가 → raw_statement로 무손실 보존(별도 중첩-정의 블록 신설은 큰 작업).
+- **lambda 4**: 람다는 블록화가 본질적으로 어려움 → raw(무손실).
+- **range(len(A)) 1**: 식 위치의 range → raw_expression(무손실).
+
+### 신규 블록(이번 라운드)
+`for_each_custom`, `slice_expr`, `keyword_arg`, `starred_arg`, `double_starred_arg`, `method_call`, `binary_op`.
+
+### 도구
+좌측 **"회색 블록 (N)" 탭**: 변환 후 남은 raw 블록을 목록으로 보여주고, 클릭하면 해당 블록으로 이동·선택. 회색 부분을 한눈에 점검 가능.
