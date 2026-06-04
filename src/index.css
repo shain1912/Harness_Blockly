@@ -755,6 +755,26 @@ body {
   margin-top: 4px;
 }
 
+/* Gray (raw/unconverted) block inspector */
+.gray-blocks-panel { padding: 10px 12px; height: 100%; overflow: auto; }
+.gray-blocks-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px; font-size: 0.85rem; color: var(--text-secondary, #8b949e);
+}
+.gray-blocks-empty { color: var(--text-secondary, #8b949e); font-size: 0.82rem; padding: 14px; }
+.gray-blocks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.gray-block-item {
+  display: flex; align-items: center; gap: 8px;
+  background: #2b2b2b; border: 1px solid #444; border-radius: 6px;
+  padding: 6px 8px; cursor: pointer;
+}
+.gray-block-item:hover { border-color: var(--neon-blue, #58a6ff); background: #333; }
+.gray-block-kind {
+  flex: 0 0 auto; font-size: 0.68rem; font-weight: 700;
+  background: #555; color: #ddd; border-radius: 4px; padding: 1px 6px;
+}
+.gray-block-text { font-size: 0.78rem; color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .syntax-status {
   font-weight: 600;
 }

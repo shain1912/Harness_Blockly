@@ -30,6 +30,9 @@ export default function App() {
   const [cv2Images, setCv2Images] = useState([]);
   const [uploadedImageName, setUploadedImageName] = useState(null);
 
+  // Gray (raw_statement/raw_expression) blocks — parts that didn't map to a dedicated block.
+  const [grayBlocks, setGrayBlocks] = useState([]);
+
   // Custom Abstract blocks and thoughts
   const [installedBlocks, setInstalledBlocks] = useState([]);
   const [aiThoughts, setAiThoughts] = useState([]);
@@ -122,6 +125,7 @@ export default function App() {
 
       blocklySnapshotRef.current = window.Blockly.serialization.workspaces.save(workspaceRef.current);
       associatedPythonRef.current = currentCode;
+      refreshGrayBlocks(); // update the gray (unconverted) block inspector
 
       setLogs(prev => [...prev, `[Sync-Engine] Successfully parsed Python AST. Desugared = ${shouldDesugar}.`]);
       setSyntaxStatus({ valid: true, error: '' });
@@ -398,6 +402,36 @@ for i in range(4):
     setTimeout(() => {
       syncCodeToBlocks(demoCode);
     }, 100);
+  };
+
+  // ── Gray (raw) block inspector: collect the fallback blocks, jump to each ──────
+  const refreshGrayBlocks = () => {
+    const ws = window.__blocklyWorkspace ||
+      (window.Blockly && window.Blockly.getMainWorkspace && window.Blockly.getMainWorkspace());
+    if (!ws) { setGrayBlocks([]); return; }
+    const list = ws.getAllBlocks()
+      .filter((b) => b.type === 'raw_statement' || b.type === 'raw_expression')
+      .map((b) => ({
+        id: b.id,
+        kind: b.type === 'raw_statement' ? '문장' : '식',
+        text: (b.getFieldValue('STMT') || b.getFieldValue('EXPR') || '').replace(/\s+/g, ' ').trim().slice(0, 140),
+      }));
+    setGrayBlocks(list);
+  };
+
+  const jumpToGray = (id) => {
+    const ws = window.__blocklyWorkspace ||
+      (window.Blockly && window.Blockly.getMainWorkspace && window.Blockly.getMainWorkspace());
+    if (!ws) return;
+    setActiveEditorTab('blockly');
+    requestAnimationFrame(() => {
+      try {
+        const b = ws.getBlockById(id);
+        if (!b) return;
+        if (typeof ws.centerOnBlock === 'function') ws.centerOnBlock(id);
+        if (typeof b.select === 'function') b.select();
+      } catch (_) { /* ignore */ }
+    });
   };
 
   // ── Image upload (App-Inventor-style): feed a real image to cv2.imread ─────────
@@ -873,12 +907,20 @@ for i in range(4):
               >
                 Logs Terminal
               </button>
-              <button 
+              <button
                 id="tab-btn-ai"
                 className={`tab-btn ${activeAuxTab === 'ai' ? 'active' : ''}`}
                 onClick={() => setActiveAuxTab('ai')}
               >
                 AI Abstractions
+              </button>
+              <button
+                id="tab-btn-gray"
+                className={`tab-btn ${activeAuxTab === 'gray' ? 'active' : ''}`}
+                onClick={() => { setActiveAuxTab('gray'); refreshGrayBlocks(); }}
+                title="전용 블록으로 변환되지 못해 회색(raw)으로 남은 부분"
+              >
+                회색 블록{grayBlocks.length ? ` (${grayBlocks.length})` : ''}
               </button>
             </div>
             <div className="tab-content-wrapper">
@@ -901,6 +943,30 @@ for i in range(4):
                   pyodideReady={pyodideReady}
                   pyodideLoading={pyodideLoading}
                 />
+              )}
+              {activeAuxTab === 'gray' && (
+                <div className="gray-blocks-panel">
+                  <div className="gray-blocks-head">
+                    <span>회색(미변환) 블록: <b>{grayBlocks.length}</b>개</span>
+                    <button className="btn btn-secondary btn-sm" onClick={refreshGrayBlocks}>
+                      <i className="fa-solid fa-rotate"></i> 새로고침
+                    </button>
+                  </div>
+                  {grayBlocks.length === 0 ? (
+                    <div className="gray-blocks-empty">
+                      전용 블록으로 변환되지 않은 부분이 없습니다. Convert 후 여기서 확인하세요.
+                    </div>
+                  ) : (
+                    <ul className="gray-blocks-list">
+                      {grayBlocks.map((g) => (
+                        <li key={g.id} className="gray-block-item" onClick={() => jumpToGray(g.id)} title="클릭하면 해당 블록으로 이동">
+                          <span className="gray-block-kind">{g.kind}</span>
+                          <code className="gray-block-text">{g.text}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
             </div>
           </div>
