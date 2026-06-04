@@ -8,6 +8,10 @@ const APP_URL = 'http://localhost:3000';
 async function bootWorkspace(page) {
   await page.goto(APP_URL);
   await page.waitForFunction(() => !!window.Blockly && !!window.__blocklyWorkspace, null, { timeout: 15000 });
+  // The app auto-loads a demo on mount and syncs it to blocks via a deferred timer. Wait
+  // for that initial sync to settle (workspace non-empty) so it cannot overwrite the test
+  // block we load next. Without this, newBlock()'s ws.clear() races the demo timer.
+  await page.waitForFunction(() => window.__blocklyWorkspace.getAllBlocks(false).length > 0, null, { timeout: 15000 });
 }
 
 // Load a single block (optionally with extraState) and return an in-page handle id.
