@@ -287,8 +287,8 @@ class Tokenizer {
         continue;
       }
 
-      // Single char symbols ([W3] added % & | ^ ~ for modulo/bitwise — OP-03/11; [W4] added { } for dict/set literals)
-      if ('=+-*/<>():[],.%&|^~{}'.includes(char)) {
+      // Single char symbols ([W3] added % & | ^ ~ for modulo/bitwise — OP-03/11; [W4] added { } for dict/set literals; @ for decorators)
+      if ('=+-*/<>():[],.%&|^~{}@'.includes(char)) {
         const sym = this.nextChar();
         if (sym === '(' || sym === '[' || sym === '{') this.bracketDepth++;
         else if (sym === ')' || sym === ']' || sym === '}') this.bracketDepth = Math.max(0, this.bracketDepth - 1);
@@ -879,6 +879,28 @@ class Parser {
         case 'with':
           return this.parseWith();
       }
+    }
+
+    // Decorator: @name [(\...)] NEWLINE, collect and attach to following def/class
+    if (tok.type === TokenType.SYMBOL && tok.value === '@') {
+      const decorators = [];
+      while (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '@') {
+        this.next(); // consume '@'
+        // Parse the decorator expression (dotted name + optional call args)
+        let decoExpr = this.parseExpression();
+        // Consume NEWLINE after decorator
+        if (this.peek() && this.peek().type === TokenType.NEWLINE) this.next();
+        decorators.push(decoExpr);
+      }
+      const next = this.peek();
+      if (next && next.type === TokenType.KEYWORD && next.value === 'def') {
+        return this.parseFunctionDef(decorators);
+      }
+      if (next && next.type === TokenType.KEYWORD && next.value === 'class') {
+        return this.parseClassDef(decorators);
+      }
+      // Fallback: just return the last decorator expression as a statement
+      return decorators[decorators.length - 1] ? { type: 'Expr', value: decorators[decorators.length - 1] } : null;
     }
 
     // Default: expression statement or assignment
@@ -3264,13 +3286,34 @@ function convertStatementToBlock(node) {
   }
 }
 
+// Build a connectable method_def block from a FunctionDef AST node. Used for class methods
+// and nested function defs (which can't use the non-connectable procedures_def* hat blocks).
+function functionDefToMethodBlock(stmt) {
+  const block = {
+    "type": "method_def",
+    "id": makeBlockId(),
+    "fields": {
+      "NAME": stmt.name,
+      "PARAMS": (stmt.params || []).join(', ')
+    },
+    "inputs": {}
+  };
+  if (stmt.decorators && stmt.decorators.length) {
+    block.fields.DECORATORS = stmt.decorators.map(d => '@' + astToPython(d)).join('\n');
+  }
+  const bodyBlock = convertStatementListToBlock(stmt.body);
+  if (bodyBlock) block.inputs.BODY = { "block": bodyBlock };
+  return block;
+}
+
 function convertClassBodyToBlock(stmts) {
   if (!stmts || stmts.length === 0) return null;
   let firstBlock = null, currentBlock = null;
   for (const stmt of stmts) {
-    // Methods become raw_statement blocks so they can nest inside class_def BODY input
+    // Methods become connectable method_def blocks; nested classes use class_def (both
+    // have prev/next connections so they stack inside the class BODY input).
     const block = stmt.type === 'FunctionDef'
-      ? { "type": "raw_statement", "id": makeBlockId(), "fields": { "STMT": astToPython(stmt, 0) } }
+      ? functionDefToMethodBlock(stmt)
       : convertStatementToBlock(stmt);
     if (!block) continue;
     if (!firstBlock) { firstBlock = block; currentBlock = block; }
@@ -3286,17 +3329,12 @@ function convertStatementListToBlock(statements) {
   let currentBlock = null;
 
   for (const stmt of statements) {
-    // [Demo] Blockly's procedures_def*/class blocks are top-level "hat" blocks with no
-    // previous/next connection, so a nested function/class def inside a suite cannot be
-    // chained here (causes MissingConnection on load). Emit it as a lossless raw_statement
-    // carrying the full source so the round-trip stays exact.
+    // Nested function defs use the connectable method_def block; nested classes use the
+    // connectable class_def block (via convertStatementToBlock). Both have prev/next
+    // connections so they chain into this suite without MissingConnection on load.
     let block;
-    if (stmt.type === 'FunctionDef' || stmt.type === 'ClassDef') {
-      block = {
-        "type": "raw_statement",
-        "id": makeBlockId(),
-        "fields": { "STMT": astToPython(stmt) }
-      };
+    if (stmt.type === 'FunctionDef') {
+      block = functionDefToMethodBlock(stmt);
     } else {
       block = convertStatementToBlock(stmt);
     }
