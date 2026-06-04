@@ -59,13 +59,11 @@ npm run test:report  # open the HTML report (test-results/report)
 ### React component layout
 `App.jsx` owns all state and the layout. Left panel: `Stage.jsx` (canvas turtle/sprite + run controls), and a tabbed pane of `VariableWatch` / `ConsoleLogs` / `LibraryManager`. Right panel: tabbed `BlocklyEditor` / `PythonEditor` / Desugared-code preview / `ASTTreeView`.
 
-## Legacy / do-not-edit files
+## Legacy / stale docs
 
-The repo contains a previous vanilla-JS implementation that is **not loaded by `index.html`** (which only loads `/src/main.jsx`). Do not edit these expecting changes to appear:
-- `app.js` (root) — old `AppOrchestrator` vanilla-JS app, superseded by `src/App.jsx`.
-- `libraryAbstraction.js` and `index.css` (root) — duplicates of the `src/` versions.
+The previous vanilla-JS implementation (root `app.js`, `parser.js`, `desugarer.js`, `interpreter.js`, `libraryAbstraction.js`, `index.css`) and the outdated `GEMINI.md` were removed in cleanup — the live app is entirely under `src/` (`index.html` loads only `/src/main.jsx`).
 
-`GEMINI.md` and `papers/` describe an aspirational/older structure (e.g. `src/blocks/`, `src/utils/ast.js`, `transpiler.js`, `AIAgent.jsx`, port 5173, Vitest) that **does not match the current code**. Trust the actual files in `src/` over those docs.
+`papers/` contains background research notes that describe an aspirational/older structure (e.g. `src/blocks/`, `src/utils/ast.js`, `transpiler.js`, `AIAgent.jsx`, port 5173, Vitest) that **does not match the current code**. Trust the actual files in `src/` over those notes.
 
 ## Conventions when extending
 
