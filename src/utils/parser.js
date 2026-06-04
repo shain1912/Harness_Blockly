@@ -1163,11 +1163,34 @@ class Parser {
 
     const params = [];
     if (!this.match(TokenType.SYMBOL, ')')) {
-      const firstParam = this.expect(TokenType.IDENTIFIER, undefined, 'Expected parameter name');
-      params.push(firstParam.value);
+      const parseOneParam = () => {
+        let prefix = '';
+        const pk = this.peek();
+        if (pk && pk.type === TokenType.SYMBOL && (pk.value === '*' || pk.value === '**')) {
+          prefix = this.next().value;
+        }
+        // bare `*` keyword-only marker (no following name)
+        if (prefix === '*' && !(this.peek() && this.peek().type === TokenType.IDENTIFIER)) {
+          return '*';
+        }
+        const name = this.expect(TokenType.IDENTIFIER, undefined, 'Expected parameter name').value;
+        let param = prefix + name;
+        // optional type annotation  : <expr>
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ':') {
+          this.next();
+          param += ': ' + astToPython(this.parseExpression());
+        }
+        // optional default value  = <expr>
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '=') {
+          this.next();
+          param += '=' + astToPython(this.parseExpression());
+        }
+        return param;
+      };
+      params.push(parseOneParam());
       while (this.match(TokenType.SYMBOL, ',')) {
-        const p = this.expect(TokenType.IDENTIFIER, undefined, 'Expected parameter name after comma');
-        params.push(p.value);
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ')') break; // trailing comma
+        params.push(parseOneParam());
       }
       this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing parameter list');
     }
@@ -1558,6 +1581,32 @@ class Parser {
     return base;
   }
 
+  // A single call argument: *args / **kwargs unpacking, keyword (name=value),
+  // a bare generator expression (f(x for x in xs)), or a normal expression.
+  parseCallArg() {
+    const pk = this.peek();
+    if (pk && pk.type === TokenType.SYMBOL && pk.value === '**') {
+      this.next();
+      return { type: 'DoubleStarred', value: this.parseExpression(), line: pk.line };
+    }
+    if (pk && pk.type === TokenType.SYMBOL && pk.value === '*') {
+      this.next();
+      return new StarredNode(this.parseExpression(), pk.line);
+    }
+    const expr = this.parseExpression();
+    // keyword argument:  name=value  (but not ==)
+    if (expr.type === 'Name' && this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '=') {
+      this.next();
+      return { type: 'Keyword', name: expr.id, value: this.parseExpression(), line: expr.line };
+    }
+    // bare generator expression argument:  func(x for x in xs)
+    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+      const generators = this.parseComprehensionClauses();
+      return new GenExpNode(expr, generators, expr.line);
+    }
+    return expr;
+  }
+
   parsePrimary() {
     let expr = this.parseAtom();
     
@@ -1571,9 +1620,10 @@ class Parser {
         this.next(); // consume '('
         const args = [];
         if (!this.match(TokenType.SYMBOL, ')')) {
-          args.push(this.parseExpression());
+          args.push(this.parseCallArg());
           while (this.match(TokenType.SYMBOL, ',')) {
-            args.push(this.parseExpression());
+            if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === ')') break; // trailing comma
+            args.push(this.parseCallArg());
           }
           this.expect(TokenType.SYMBOL, ')', 'Expected ")" at the end of function call');
         }
@@ -1961,6 +2011,12 @@ function astToPython(node, indentLevel = 0) {
     // [W4] Starred target/expr
     case 'Starred':
       return `*${astToPython(node.value)}`;
+
+    // Call-argument forms: keyword (k=v) and **kwargs unpacking
+    case 'Keyword':
+      return `${node.name}=${astToPython(node.value)}`;
+    case 'DoubleStarred':
+      return `**${astToPython(node.value)}`;
 
     // [W4] Subscript assignment target / access
     case 'Subscript':
