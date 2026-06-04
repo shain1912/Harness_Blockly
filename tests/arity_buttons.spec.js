@@ -105,4 +105,19 @@ test.describe('arity +/- buttons', () => {
     }, id);
     expect(saved).toBe(2);
   });
+
+  test('built-in lists_create_with gets +/- buttons too', async ({ page }) => {
+    await bootWorkspace(page);
+    const id = await newBlock(page, 'lists_create_with', { itemCount: 2 });
+    const r = await page.evaluate((id) => {
+      const b = window.__blocklyWorkspace.getBlockById(id);
+      const isWired = typeof b.changeArity_ === 'function';
+      if (isWired) b.changeArity_(1);
+      return { isWired, after: b.itemCount_, hasAdd2: !!b.getInput('ADD2'), hasPlus: !!b.getField('PLUS') };
+    }, id);
+    expect(r.isWired).toBe(true);
+    expect(r.after).toBe(3);
+    expect(r.hasAdd2).toBe(true);
+    expect(r.hasPlus).toBe(true);
+  });
 });

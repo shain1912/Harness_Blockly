@@ -5829,6 +5829,12 @@ enableArity(Blockly.Blocks['tuple_create'], 0);
 enableArity(Blockly.Blocks['set_create'], 0);
 enableArity(Blockly.Blocks['dict_create'], 0);
 
+// Blockly's built-in list literal uses the same itemCount_/ADDn mutator scheme, so the
+// same wrapper gives it +/- buttons. Guard in case the core block name ever changes.
+if (Blockly.Blocks['lists_create_with']) {
+  enableArity(Blockly.Blocks['lists_create_with'], 0);
+}
+
 // lists_setIndex comes from the Blockly CDN; only provide a generator if the
 // CDN default is missing (don't clobber a working default).
 if (!Blockly.Python['lists_setIndex']) {
