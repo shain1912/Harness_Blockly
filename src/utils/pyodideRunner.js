@@ -6,6 +6,7 @@ const PYODIDE_INDEX = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full
 
 let _pyodide = null;
 let _initPromise = null;
+let _cv2Patched = false;
 const _installedPackages = new Set();
 
 // ── Module classification ──────────────────────────────────────────────────────
@@ -27,7 +28,11 @@ const PYODIDE_BUILT_IN = new Set([
 ]);
 
 // Modules we handle ourselves (don't try to install)
-const MOCKED = new Set(['cv2','sprite']);
+const MOCKED = new Set(['sprite']);
+
+// Import name -> PyPI package name. `import cv2` installs the REAL opencv-python wheel
+// (works in Pyodide; only its GUI/IO layer is bridged to the browser — see CV2_GUI_PATCH).
+const IMPORT_TO_PACKAGE = { cv2: 'opencv-python' };
 
 // ── Script loader ──────────────────────────────────────────────────────────────
 async function _ensurePyodideScript() {
@@ -80,121 +85,61 @@ class _Sprite:
 
 sprite = _Sprite()
 
-# ── cv2 ─────────────────────────────────────────────────────────────────────────
-_cv2 = ModuleType('cv2')
-
-class VideoCapture:
-    def __init__(self, dev=0):
-        self.dev = dev
-        js.window._pyodide_cv2('open', str(dev))
-    def read(self): return (True, {'type':'frame','dev':self.dev})
-    def release(self): js.window._pyodide_cv2('release', str(self.dev))
-    def isOpened(self): return True
-    def get(self, prop): return 640.0
-    def set(self, prop, val): return True
-
-def _imshow(t, f): js.window._pyodide_cv2('imshow', str(t))
-def _waitKey(d=0): return 0
-def _destroyAllWindows(): js.window._pyodide_cv2('destroyAll', '')
-def _destroyWindow(t): js.window._pyodide_cv2('destroy', str(t))
-def _imread(p):
-    js.window._pyodide_cv2('imread', str(p))
-    return {'type':'image','path':p}
-def _imwrite(p, img): return True
-def _cvtColor(img, code): return img
-def _resize(img, dsize, *a, **k): return img
-
-# Image-processing ops — accept any args and pass the image through so realistic
-# pipelines run without AttributeError (no real pixels in this mock).
-def _passthrough(img, *a, **k): return img
-def _GaussianBlur(img, ksize, sigmaX=0, *a, **k): return img
-def _Canny(img, t1, t2, *a, **k): return img
-def _findContours(img, mode=0, method=2, *a, **k): return ([], None)
-def _drawContours(img, contours, idx, color, thickness=1, *a, **k): return img
-def _rectangle(img, pt1, pt2, color, thickness=1, *a, **k): return img
-def _line(img, pt1, pt2, color, thickness=1, *a, **k): return img
-def _circle(img, center, radius, color, thickness=1, *a, **k): return img
-def _putText(img, text, org, font, scale, color, thickness=1, *a, **k): return img
-def _threshold(img, thresh, maxval, ttype, *a, **k): return (thresh, img)
-def _inRange(img, lower, upper, *a, **k): return img
-def _bitwise_and(a, b, *r, **k): return a
-def _bitwise_or(a, b, *r, **k): return a
-def _bitwise_not(a, *r, **k): return a
-def _flip(img, code, *a, **k): return img
-def _getRotationMatrix2D(center, angle, scale, *a, **k): return {'type':'matrix'}
-def _warpAffine(img, M, dsize, *a, **k): return img
-def _addWeighted(a, alpha, b, beta, gamma, *r, **k): return a
-def _VideoWriter_fourcc(*a): return 0
-
-class CascadeClassifier:
-    def __init__(self, path=''): self.path = path
-    def detectMultiScale(self, img, scaleFactor=1.1, minNeighbors=3, *a, **k): return []
-    def empty(self): return False
-
-class VideoWriter:
-    def __init__(self, *a, **k): pass
-    def write(self, frame): return None
-    def release(self): return None
-    def isOpened(self): return True
-
-_cv2.VideoCapture = VideoCapture
-_cv2.VideoWriter = VideoWriter
-_cv2.VideoWriter_fourcc = _VideoWriter_fourcc
-_cv2.CascadeClassifier = CascadeClassifier
-_cv2.imshow = _imshow
-_cv2.waitKey = _waitKey
-_cv2.destroyAllWindows = _destroyAllWindows
-_cv2.destroyWindow = _destroyWindow
-_cv2.imread = _imread
-_cv2.imwrite = _imwrite
-_cv2.cvtColor = _cvtColor
-_cv2.resize = _resize
-_cv2.GaussianBlur = _GaussianBlur
-_cv2.blur = _passthrough
-_cv2.medianBlur = _passthrough
-_cv2.Canny = _Canny
-_cv2.findContours = _findContours
-_cv2.drawContours = _drawContours
-_cv2.rectangle = _rectangle
-_cv2.line = _line
-_cv2.circle = _circle
-_cv2.putText = _putText
-_cv2.threshold = _threshold
-_cv2.inRange = _inRange
-_cv2.bitwise_and = _bitwise_and
-_cv2.bitwise_or = _bitwise_or
-_cv2.bitwise_not = _bitwise_not
-_cv2.flip = _flip
-_cv2.getRotationMatrix2D = _getRotationMatrix2D
-_cv2.warpAffine = _warpAffine
-_cv2.addWeighted = _addWeighted
-_cv2.data = ModuleType('cv2.data')
-_cv2.data.haarcascades = ''
-_cv2.CAP_PROP_FRAME_WIDTH = 3
-_cv2.CAP_PROP_FRAME_HEIGHT = 4
-_cv2.CAP_PROP_FPS = 5
-_cv2.CAP_PROP_FRAME_COUNT = 7
-_cv2.COLOR_BGR2RGB = 4
-_cv2.COLOR_BGR2GRAY = 6
-_cv2.COLOR_BGR2HSV = 40
-_cv2.COLOR_GRAY2BGR = 8
-_cv2.RETR_EXTERNAL = 0
-_cv2.RETR_LIST = 1
-_cv2.RETR_TREE = 3
-_cv2.CHAIN_APPROX_NONE = 1
-_cv2.CHAIN_APPROX_SIMPLE = 2
-_cv2.THRESH_BINARY = 0
-_cv2.THRESH_BINARY_INV = 1
-_cv2.THRESH_OTSU = 8
-_cv2.FONT_HERSHEY_SIMPLEX = 0
-_cv2.INTER_LINEAR = 1
-sys.modules['cv2'] = _cv2
-import cv2
 `;
 
 async function _setupBuiltins(pyodide) {
   await pyodide.runPythonAsync(PYTHON_BUILTINS);
 }
+
+// Bridges REAL opencv-python's GUI/IO layer to the browser. All processing functions
+// (cvtColor, Canny, GaussianBlur, findContours, CascadeClassifier, ...) stay real OpenCV.
+//  - imshow: encodes the real ndarray to PNG and hands it to the canvas.
+//  - VideoCapture: stubbed (no camera device in Pyodide) so webcam loops exit cleanly.
+//  - imread: works on the Pyodide virtual FS; we seed a synthetic sample image into the
+//    demo filenames so examples produce real, visible output even before an upload, and
+//    uploaded images simply overwrite those files.
+const CV2_GUI_PATCH = `
+import cv2, base64, os
+import numpy as np
+import js
+
+def _bp_imshow(winname, mat):
+    try:
+        arr = np.asarray(mat)
+        if arr.dtype != np.uint8:
+            arr = cv2.normalize(arr, None, 0, 255, cv2.NORM_MINMAX).astype('uint8')
+        ok, buf = cv2.imencode('.png', arr)
+        if ok:
+            b64 = base64.b64encode(bytes(buf)).decode('ascii')
+            js.window._pyodide_cv2_image(str(winname), b64)
+    except Exception as e:
+        print('[cv2.imshow bridge]', e)
+
+cv2.imshow = _bp_imshow
+cv2.waitKey = lambda delay=0: -1
+cv2.destroyAllWindows = lambda: js.window._pyodide_cv2('destroyAll', '')
+cv2.destroyWindow = lambda w='': js.window._pyodide_cv2('destroy', str(w))
+
+class _BPVideoCapture:
+    def __init__(self, *a, **k): pass
+    def isOpened(self): return False
+    def read(self): return (False, None)
+    def release(self): pass
+    def get(self, *a): return 0.0
+    def set(self, *a): return False
+cv2.VideoCapture = _BPVideoCapture
+
+def _bp_make_sample():
+    img = np.full((240, 320, 3), 30, dtype=np.uint8)
+    cv2.rectangle(img, (40, 50), (150, 170), (0, 0, 255), -1)
+    cv2.circle(img, (230, 110), 55, (0, 200, 0), -1)
+    cv2.putText(img, 'BlockPy', (30, 215), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+    return img
+_bp_sample = _bp_make_sample()
+for _f in ['input.jpg', 'photo.png', 'test.jpg', 'image.jpg', 'sample.jpg']:
+    if not os.path.exists(_f):
+        cv2.imwrite(_f, _bp_sample)
+`;
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
@@ -236,7 +181,12 @@ export function interruptPyodide() {
 }
 
 export async function runCode(code, callbacks) {
-  const { onLog, onSpriteCommand, onCv2Action, onComplete } = callbacks;
+  const { onLog, onSpriteCommand, onCv2Action, onComplete, onCv2Image } = callbacks;
+
+  // Real cv2.imshow hands us a PNG (base64) of the processed image → show it.
+  window._pyodide_cv2_image = (title, b64) => {
+    if (onCv2Image) onCv2Image(String(title), `data:image/png;base64,${b64}`);
+  };
 
   // Wire JS callbacks that Python calls via js.window.*
   window._pyodide_sprite = (cmd, stateJson) => {
@@ -288,15 +238,23 @@ export async function runCode(code, callbacks) {
     if (_installedPackages.has(pkg)) continue;
     if (MOCKED.has(pkg) || STDLIB.has(pkg)) continue;
 
+    const installName = IMPORT_TO_PACKAGE[pkg] || pkg;
     const label = PYODIDE_BUILT_IN.has(pkg) ? 'built-in' : 'micropip';
-    onLog(`[pip] Loading ${pkg} (${label})...`);
+    onLog(`[pip] Loading ${installName} (${label})...`);
     try {
-      await micropip.install(pkg);
+      await micropip.install(installName);
       _installedPackages.add(pkg);
-      onLog(`[pip] ✅ ${pkg} ready`);
+      onLog(`[pip] ✅ ${installName} ready`);
     } catch (e) {
-      onLog(`[pip] ⚠️  ${pkg}: ${e.message || e}`);
+      onLog(`[pip] ⚠️  ${installName}: ${e.message || e}`);
     }
+  }
+
+  // Bridge real cv2's GUI/IO layer (imshow/VideoCapture/waitKey) to the browser, once
+  // opencv-python is available. All image PROCESSING stays real OpenCV.
+  if (_installedPackages.has('cv2') && !_cv2Patched) {
+    try { await pyodide.runPythonAsync(CV2_GUI_PATCH); _cv2Patched = true; }
+    catch (e) { onLog(`[cv2] GUI bridge failed: ${e.message || e}`); }
   }
 
   // Execute
@@ -331,6 +289,18 @@ export async function pipInstall(packageName, onLog) {
 
 export function getInstalledPackages() {
   return [..._installedPackages];
+}
+
+// Write an uploaded image into Pyodide's virtual filesystem so real cv2.imread(name)
+// reads it. Also overwrites the demo sample filenames so existing examples pick it up.
+export async function writeImageToFS(filename, uint8) {
+  const pyodide = await initPyodide(() => {});
+  const data = uint8 instanceof Uint8Array ? uint8 : new Uint8Array(uint8);
+  const targets = new Set([filename, 'input.jpg', 'photo.png', 'test.jpg', 'image.jpg', 'sample.jpg']);
+  for (const name of targets) {
+    try { pyodide.FS.writeFile(name, data); } catch (_) { /* ignore */ }
+  }
+  return true;
 }
 
 function _detectImports(code) {
