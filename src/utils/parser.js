@@ -2550,8 +2550,17 @@ function collectVariables(node, varsSet = new Set()) {
       if (node.step) collectVariables(node.step, varsSet);
       break;
     case 'FunctionDef':
+      // Walk params + body so variables_get blocks inside methods resolve correctly.
+      if (node.params && Array.isArray(node.params)) {
+        for (const p of node.params) {
+          if (typeof p === 'string' && !['True', 'False', 'None'].includes(p)) varsSet.add(p);
+        }
+      }
+      for (const stmt of (node.body || [])) collectVariables(stmt, varsSet);
+      break;
     case 'ClassDef':
-      // Skip function/class bodies — local variables are not workspace-level
+      // Walk class body so method-level variables are registered in the workspace.
+      for (const stmt of (node.body || [])) collectVariables(stmt, varsSet);
       break;
     // [W2] scope / generator nodes
     case 'Del':
@@ -5914,6 +5923,32 @@ Blockly.Python['cv2_release'] = function(block) {
 ['cv2_videocapture','cv2_read','cv2_imshow','cv2_waitkey','cv2_destroyall','cv2_release'].forEach(t => {
   if (Blockly.Python.forBlock) Blockly.Python.forBlock[t] = Blockly.Python[t];
 });
+
+// Override Blockly.Python.finish to suppress the auto-generated "varName = None"
+// preamble that Blockly normally prepends for every workspace variable. That preamble
+// breaks lossless round-trips: parameters, for-loop targets, and attribute targets all
+// end up in the workspace variable map but must NOT appear as bare assignments at the
+// top of the generated code.  Stripping it keeps the generated Python identical to the
+// source (or at worst a structural isomorph that re-parses cleanly).
+if (typeof Blockly !== 'undefined' && Blockly.Python) {
+  Blockly.Python.finish = function(code) { return code; };
+}
+
+// Override the standard text block generator to emit double-quoted strings instead of
+// single-quoted. Python allows both; the project's canonical style (and astToPython)
+// uses double quotes, so keeping them consistent avoids spurious diff noise in
+// round-trip comparisons and in the code editor.
+if (typeof Blockly !== 'undefined' && Blockly.Python) {
+  Blockly.Python['text'] = function(block) {
+    const val = block.getFieldValue('TEXT') || '';
+    // Escape backslashes then double-quote characters before wrapping in double quotes.
+    const escaped = val.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return ['"' + escaped + '"', Blockly.Python.ORDER_ATOMIC];
+  };
+  if (Blockly.Python.forBlock) {
+    Blockly.Python.forBlock['text'] = Blockly.Python['text'];
+  }
+}
 
 if (typeof window !== 'undefined') {
   window.BlockPyParser = BlockPyParser;

@@ -93,3 +93,27 @@ test.describe('method_def routing (Node, astToBlockly JSON shape)', () => {
     expect(f.fields.DECORATORS).toBe('@staticmethod');
   });
 });
+
+test.describe('method_def full round-trip (browser)', () => {
+  const norm = (s) => s.replace(/\s+/g, '').trim();
+
+  test('Dog class round-trips with method_def blocks and zero gray method lumps', async ({ page }) => {
+    test.setTimeout(45000);
+    const code = [
+      'class Dog:',
+      '    def __init__(self, name):',
+      '        self.name = name',
+      '    def bark(self):',
+      '        return self.name + " says woof"',
+      ''
+    ].join('\n');
+    const types = await convertPythonToBlocks(page, code);
+    expect(types).toContain('method_def');
+    expect(types).toContain('class_def');
+    const rawCount = await page.evaluate(() =>
+      window.__blocklyWorkspace.getAllBlocks(false).filter(b => b.type === 'raw_statement').length);
+    expect(rawCount).toBe(0);
+    const out = await generatedPython(page);
+    expect(norm(out)).toBe(norm(code));
+  });
+});
