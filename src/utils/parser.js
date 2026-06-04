@@ -1828,8 +1828,9 @@ class Parser {
       // Plain dict
       const keys = [first];
       const values = [firstVal];
+      let dictTrailing = false;
       while (this.match(TokenType.SYMBOL, ',')) {
-        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '}') break; // trailing comma
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '}') { dictTrailing = true; break; }
         const k = this.parseExpression();
         this.expect(TokenType.SYMBOL, ':', 'Expected ":" between dict key and value');
         const v = this.parseExpression();
@@ -1837,7 +1838,9 @@ class Parser {
         values.push(v);
       }
       this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing dict literal');
-      return new DictNode(keys, values, startTok.line);
+      const dictNode = new DictNode(keys, values, startTok.line);
+      dictNode.trailingComma = dictTrailing;
+      return dictNode;
     }
 
     // Set comprehension: {x for ...}
@@ -1849,12 +1852,15 @@ class Parser {
 
     // Plain set: {a, b, ...}
     const elts = [first];
+    let setTrailing = false;
     while (this.match(TokenType.SYMBOL, ',')) {
-      if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '}') break; // trailing comma
+      if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '}') { setTrailing = true; break; }
       elts.push(this.parseExpression());
     }
     this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing set literal');
-    return new SetNode(elts, startTok.line);
+    const setNode = new SetNode(elts, startTok.line);
+    setNode.trailingComma = setTrailing;
+    return setNode;
   }
 
   parseListOrComprehension() {
@@ -1887,13 +1893,16 @@ class Parser {
 
     // Standard list: [elt1, elt2, ...]
     const elts = [first];
+    let trailingComma = false;
     while (this.match(TokenType.SYMBOL, ',')) {
-      if (this.peek().type === TokenType.SYMBOL && this.peek().value === ']') break; // handle trailing comma
+      if (this.peek().type === TokenType.SYMBOL && this.peek().value === ']') { trailingComma = true; break; }
       elts.push(this.parseExpression());
     }
 
     this.expect(TokenType.SYMBOL, ']', 'Expected closing bracket "]" at the end of list');
-    return new ListNode(elts, startTok.line);
+    const listNode = new ListNode(elts, startTok.line);
+    listNode.trailingComma = trailingComma;
+    return listNode;
   }
 
   // [W4] Parse one or more comprehension clauses: ("for" <target> "in" <iter> ("if" <cond>)* )+
@@ -2105,11 +2114,11 @@ function astToPython(node, indentLevel = 0) {
     // [W4] Dict literal
     case 'Dict':
       if (node.keys.length === 0) return '{}';
-      return `{${node.keys.map((k, i) => `${astToPython(k)}: ${astToPython(node.values[i])}`).join(', ')}}`;
+      return `{${node.keys.map((k, i) => `${astToPython(k)}: ${astToPython(node.values[i])}`).join(', ')}${node.trailingComma ? ',' : ''}}`;
 
     // [W4] Set literal
     case 'Set':
-      return `{${node.elts.map(e => astToPython(e)).join(', ')}}`;
+      return `{${node.elts.map(e => astToPython(e)).join(', ')}${node.trailingComma ? ',' : ''}}`;
 
     // [W4] Dict comprehension
     case 'DictComp':
@@ -2170,8 +2179,8 @@ function astToPython(node, indentLevel = 0) {
       return node.value ? 'True' : 'False';
       
     case 'List':
-      return `[${node.elts.map(elt => astToPython(elt)).join(', ')}]`;
-      
+      return `[${node.elts.map(elt => astToPython(elt)).join(', ')}${node.trailingComma ? ',' : ''}]`;
+
     case 'BinOp':
       if (node.op === 'INDEX') {
         // A tuple index (numpy arr[a, b]) is emitted without the tuple's parentheses.
