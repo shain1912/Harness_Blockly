@@ -102,9 +102,45 @@ def _imread(p):
     return {'type':'image','path':p}
 def _imwrite(p, img): return True
 def _cvtColor(img, code): return img
-def _resize(img, dsize): return img
+def _resize(img, dsize, *a, **k): return img
+
+# Image-processing ops — accept any args and pass the image through so realistic
+# pipelines run without AttributeError (no real pixels in this mock).
+def _passthrough(img, *a, **k): return img
+def _GaussianBlur(img, ksize, sigmaX=0, *a, **k): return img
+def _Canny(img, t1, t2, *a, **k): return img
+def _findContours(img, mode=0, method=2, *a, **k): return ([], None)
+def _drawContours(img, contours, idx, color, thickness=1, *a, **k): return img
+def _rectangle(img, pt1, pt2, color, thickness=1, *a, **k): return img
+def _line(img, pt1, pt2, color, thickness=1, *a, **k): return img
+def _circle(img, center, radius, color, thickness=1, *a, **k): return img
+def _putText(img, text, org, font, scale, color, thickness=1, *a, **k): return img
+def _threshold(img, thresh, maxval, ttype, *a, **k): return (thresh, img)
+def _inRange(img, lower, upper, *a, **k): return img
+def _bitwise_and(a, b, *r, **k): return a
+def _bitwise_or(a, b, *r, **k): return a
+def _bitwise_not(a, *r, **k): return a
+def _flip(img, code, *a, **k): return img
+def _getRotationMatrix2D(center, angle, scale, *a, **k): return {'type':'matrix'}
+def _warpAffine(img, M, dsize, *a, **k): return img
+def _addWeighted(a, alpha, b, beta, gamma, *r, **k): return a
+def _VideoWriter_fourcc(*a): return 0
+
+class CascadeClassifier:
+    def __init__(self, path=''): self.path = path
+    def detectMultiScale(self, img, scaleFactor=1.1, minNeighbors=3, *a, **k): return []
+    def empty(self): return False
+
+class VideoWriter:
+    def __init__(self, *a, **k): pass
+    def write(self, frame): return None
+    def release(self): return None
+    def isOpened(self): return True
 
 _cv2.VideoCapture = VideoCapture
+_cv2.VideoWriter = VideoWriter
+_cv2.VideoWriter_fourcc = _VideoWriter_fourcc
+_cv2.CascadeClassifier = CascadeClassifier
 _cv2.imshow = _imshow
 _cv2.waitKey = _waitKey
 _cv2.destroyAllWindows = _destroyAllWindows
@@ -113,10 +149,45 @@ _cv2.imread = _imread
 _cv2.imwrite = _imwrite
 _cv2.cvtColor = _cvtColor
 _cv2.resize = _resize
+_cv2.GaussianBlur = _GaussianBlur
+_cv2.blur = _passthrough
+_cv2.medianBlur = _passthrough
+_cv2.Canny = _Canny
+_cv2.findContours = _findContours
+_cv2.drawContours = _drawContours
+_cv2.rectangle = _rectangle
+_cv2.line = _line
+_cv2.circle = _circle
+_cv2.putText = _putText
+_cv2.threshold = _threshold
+_cv2.inRange = _inRange
+_cv2.bitwise_and = _bitwise_and
+_cv2.bitwise_or = _bitwise_or
+_cv2.bitwise_not = _bitwise_not
+_cv2.flip = _flip
+_cv2.getRotationMatrix2D = _getRotationMatrix2D
+_cv2.warpAffine = _warpAffine
+_cv2.addWeighted = _addWeighted
+_cv2.data = ModuleType('cv2.data')
+_cv2.data.haarcascades = ''
 _cv2.CAP_PROP_FRAME_WIDTH = 3
 _cv2.CAP_PROP_FRAME_HEIGHT = 4
+_cv2.CAP_PROP_FPS = 5
+_cv2.CAP_PROP_FRAME_COUNT = 7
 _cv2.COLOR_BGR2RGB = 4
 _cv2.COLOR_BGR2GRAY = 6
+_cv2.COLOR_BGR2HSV = 40
+_cv2.COLOR_GRAY2BGR = 8
+_cv2.RETR_EXTERNAL = 0
+_cv2.RETR_LIST = 1
+_cv2.RETR_TREE = 3
+_cv2.CHAIN_APPROX_NONE = 1
+_cv2.CHAIN_APPROX_SIMPLE = 2
+_cv2.THRESH_BINARY = 0
+_cv2.THRESH_BINARY_INV = 1
+_cv2.THRESH_OTSU = 8
+_cv2.FONT_HERSHEY_SIMPLEX = 0
+_cv2.INTER_LINEAR = 1
 sys.modules['cv2'] = _cv2
 import cv2
 `;
