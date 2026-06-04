@@ -5759,6 +5759,76 @@ Blockly.Python['for_unpack'] = function(block) {
   if (Blockly.Python.forBlock) Blockly.Python.forBlock[t] = Blockly.Python[t];
 });
 
+// ── MakeCode-style +/- arity buttons ────────────────────────────────────────────
+// White-circle minus / plus icons (18x18, #575E75 glyph). Inline data-URIs so no asset
+// pipeline is needed.
+const ARITY_MINUS_SVG = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCI+PGNpcmNsZSBjeD0iOSIgY3k9IjkiIHI9IjgiIGZpbGw9IiNmZmYiIHN0cm9rZT0iI2NjYyIvPjxyZWN0IHg9IjQuNSIgeT0iOCIgd2lkdGg9IjkiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiM1NzVFNzUiLz48L3N2Zz4=';
+const ARITY_PLUS_SVG = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCI+PGNpcmNsZSBjeD0iOSIgY3k9IjkiIHI9IjgiIGZpbGw9IiNmZmYiIHN0cm9rZT0iI2NjYyIvPjxyZWN0IHg9IjQuNSIgeT0iOCIgd2lkdGg9IjkiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiM1NzVFNzUiLz48cmVjdCB4PSI4IiB5PSI0LjUiIHdpZHRoPSIyIiBoZWlnaHQ9IjkiIHJ4PSIxIiBmaWxsPSIjNTc1RTc1Ii8+PC9zdmc+';
+
+// Append ⊖ (only when itemCount_ > arityMin_) and ⊕ FieldImage buttons to the block's
+// trailing input. Runs at the end of every updateShape_, so buttons are rebuilt fresh
+// each shape change (no duplication).
+function appendArityButtons(block) {
+  if (!block.inputList || block.inputList.length === 0 || !Blockly.FieldImage) return;
+  const last = block.inputList[block.inputList.length - 1];
+  const min = block.arityMin_ || 0;
+  if ((block.itemCount_ || 0) > min) {
+    last.appendField(new Blockly.FieldImage(ARITY_MINUS_SVG, 18, 18, '-', function () {
+      const b = this.getSourceBlock && this.getSourceBlock();
+      if (b) b.changeArity_(-1);
+    }), 'MINUS');
+  }
+  last.appendField(new Blockly.FieldImage(ARITY_PLUS_SVG, 18, 18, '+', function () {
+    const b = this.getSourceBlock && this.getSourceBlock();
+    if (b) b.changeArity_(1);
+  }), 'PLUS');
+}
+
+// Wrap a dynamic-arity block definition: append +/- buttons after its updateShape_, and
+// install changeArity_ which preserves child connections across the rebuild.
+function enableArity(def, min) {
+  if (!def || typeof def.updateShape_ !== 'function') return;
+  const orig = def.updateShape_;
+  def.arityMin_ = min;
+  def.updateShape_ = function () {
+    orig.call(this);
+    appendArityButtons(this);
+  };
+  def.changeArity_ = function (delta) {
+    const next = (this.itemCount_ || 0) + delta;
+    if (next < (this.arityMin_ || 0)) return;
+    const prevGroup = (Blockly.Events && Blockly.Events.getGroup && Blockly.Events.getGroup()) || false;
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(true);
+    // 1. snapshot child connections by input name
+    const saved = {};
+    for (const input of this.inputList) {
+      if (input.connection && input.connection.targetConnection) {
+        saved[input.name] = input.connection.targetConnection;
+      }
+    }
+    // 2. mutate count + rebuild shape
+    this.itemCount_ = next;
+    this.updateShape_();
+    // 3. restore connections to same-named inputs that still exist
+    for (const name in saved) {
+      const input = this.getInput(name);
+      if (input && input.connection && !input.connection.targetConnection) {
+        try { input.connection.connect(saved[name]); } catch (e) {}
+      }
+    }
+    if (this.rendered && typeof this.render === 'function') this.render();
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(prevGroup);
+  };
+}
+
+enableArity(Blockly.Blocks['print_multi'], 1);
+enableArity(Blockly.Blocks['func_call'], 0);
+enableArity(Blockly.Blocks['func_call_stmt'], 0);
+enableArity(Blockly.Blocks['method_call'], 0);
+enableArity(Blockly.Blocks['tuple_create'], 0);
+enableArity(Blockly.Blocks['set_create'], 0);
+enableArity(Blockly.Blocks['dict_create'], 0);
+
 // lists_setIndex comes from the Blockly CDN; only provide a generator if the
 // CDN default is missing (don't clobber a working default).
 if (!Blockly.Python['lists_setIndex']) {
