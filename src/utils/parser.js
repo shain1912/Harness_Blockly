@@ -4350,6 +4350,40 @@ if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['class_def'] = Blockly.Python['class_def'];
 }
 
+// Connectable function/method definition block. Unlike procedures_def* (Blockly "hat"
+// blocks with no prev/next), this has statement connections so it can nest inside a
+// class_def BODY or another def's body. Params are a flat text field (lossless: defaults,
+// *args/**kwargs, type annotations all survive as text). Decorators emit as @-lines above.
+Blockly.Blocks['method_def'] = {
+  init: function() {
+    const DecoField = Blockly.FieldMultilineInput || Blockly.FieldTextInput;
+    this.appendDummyInput('DECO')
+        .appendField(new DecoField(''), 'DECORATORS');
+    this.appendDummyInput()
+        .appendField("def")
+        .appendField(new Blockly.FieldTextInput("method"), "NAME")
+        .appendField("(")
+        .appendField(new Blockly.FieldTextInput("self"), "PARAMS")
+        .appendField("):");
+    this.appendStatementInput("BODY").setCheck(null).appendField("do");
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#8b5cf6");
+    this.setTooltip("Defines a function/method (nestable)");
+  }
+};
+Blockly.Python['method_def'] = function(block) {
+  const deco = (block.getFieldValue('DECORATORS') || '').trim();
+  const decoLines = deco ? deco.split('\n').map(d => d.trim()).join('\n') + '\n' : '';
+  const name = block.getFieldValue('NAME');
+  const params = block.getFieldValue('PARAMS') || '';
+  const body = Blockly.Python.statementToCode(block, 'BODY') || '    pass\n';
+  return `${decoLines}def ${name}(${params}):\n${body}`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['method_def'] = Blockly.Python['method_def'];
+}
+
 // Raw Python statement block — used as fallback for statements that can't map to built-in blocks
 Blockly.Blocks['raw_statement'] = {
   init: function() {
