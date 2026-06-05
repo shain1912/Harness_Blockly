@@ -50,6 +50,7 @@ export default function App() {
   const [activeEditorTab, setActiveEditorTab] = useState('blockly');
   const [activeAuxTab, setActiveAuxTab] = useState('variables');
   const [isDarkTheme, setIsDarkTheme] = useState(true);
+  const [cvCardCollapsed, setCvCardCollapsed] = useState(false); // collapse the image/OpenCV card to give the logs more room
 
   // Synchronization refs
   const workspaceRef = useRef(null);
@@ -778,41 +779,10 @@ for i in range(4):
 
   return (
     <div className="harness-container">
-      {/* 1. Header Bar */}
-      <header className="header-bar">
-        <div className="brand-group">
-          <div className="logo-glow">
-            <i className="fa-solid fa-cube logo-icon"></i>
-          </div>
-          <div className="brand-text">
-            <h1>BlockPy Dashboard</h1>
-            <p>1:1 Bidirectional Lossless Parser Playground</p>
-          </div>
-        </div>
-        
-        {/* Global actions badges and theme togglers */}
-        <div className="header-actions">
-          <div className="toggle-group">
-            <label htmlFor="toggle-desugar">Auto Desugar</label>
-            <input 
-              type="checkbox" 
-              id="toggle-desugar" 
-              checked={shouldDesugar}
-              onChange={(e) => setShouldDesugar(e.target.checked)}
-            />
-          </div>
-          <button 
-            id="theme-toggle"
-            className="btn btn-secondary btn-icon-only theme-btn"
-            onClick={toggleTheme}
-            title="Toggle theme styling"
-          >
-            <i className={isDarkTheme ? "fa-solid fa-moon" : "fa-solid fa-sun"}></i>
-          </button>
-        </div>
-      </header>
+      {/* Header bar removed — Auto Desugar + theme controls relocated into the
+          AST Parser Tree tab to reclaim full-height vertical space. */}
 
-      {/* 2. Main Dashboard Layout grid */}
+      {/* Main Dashboard Layout grid */}
       <main className="dashboard-grid">
         {/* Left Side Panels: Stage, console, scopes, abstractions */}
         <section className="left-panel">
@@ -831,9 +801,17 @@ for i in range(4):
           />
 
           {/* OpenCV image: upload an input image + see real cv2.imshow output */}
-          <div className="cv-image-card">
+          <div className={`cv-image-card ${cvCardCollapsed ? 'collapsed' : ''}`}>
             <div className="panel-header">
               <div className="panel-title-group">
+                <button
+                  className="collapse-toggle"
+                  onClick={() => setCvCardCollapsed((v) => !v)}
+                  title={cvCardCollapsed ? '이미지/OpenCV 패널 펼치기' : '이미지/OpenCV 패널 접기 (로그 공간 확보)'}
+                  aria-expanded={!cvCardCollapsed}
+                >
+                  <i className={`fa-solid ${cvCardCollapsed ? 'fa-chevron-right' : 'fa-chevron-down'}`}></i>
+                </button>
                 <i className="fa-solid fa-image icon-cyan"></i>
                 <h3>이미지 / OpenCV 출력</h3>
               </div>
@@ -858,6 +836,7 @@ for i in range(4):
                 </label>
               </div>
             </div>
+            {!cvCardCollapsed && (
             <form
               className="pip-form"
               style={{ margin: '6px 0' }}
@@ -873,6 +852,8 @@ for i in range(4):
               />
               <button type="submit" className="btn btn-secondary btn-sm" disabled={!pipPkg.trim()}>설치</button>
             </form>
+            )}
+            {!cvCardCollapsed && (
             <div className="cv-image-body">
               {cv2Images.length === 0 ? (
                 <div className="cv-image-placeholder">
@@ -888,6 +869,7 @@ for i in range(4):
                 ))
               )}
             </div>
+            )}
           </div>
 
           {/* Auxiliary Tabs pane */}
@@ -1049,8 +1031,27 @@ for i in range(4):
               </div>
               <div style={{ display: activeEditorTab === 'ast' ? 'block' : 'none', height: '100%' }}>
                 <div className="tools-content-wrapper" style={{ height: '100%', overflow: 'auto' }}>
-                  <ASTTreeView 
-                    code={code} 
+                  <div className="ast-controls-row">
+                    <label className="toggle-group" htmlFor="toggle-desugar">
+                      <input
+                        type="checkbox"
+                        id="toggle-desugar"
+                        checked={shouldDesugar}
+                        onChange={(e) => setShouldDesugar(e.target.checked)}
+                      />
+                      <span>Auto Desugar</span>
+                    </label>
+                    <button
+                      id="theme-toggle"
+                      className="btn btn-secondary btn-icon-only theme-btn"
+                      onClick={toggleTheme}
+                      title="Toggle theme styling"
+                    >
+                      <i className={isDarkTheme ? "fa-solid fa-moon" : "fa-solid fa-sun"}></i>
+                    </button>
+                  </div>
+                  <ASTTreeView
+                    code={code}
                     onHoverLine={(line) => setHighlightedLine(line)}
                     onLeaveLine={() => setHighlightedLine(null)}
                   />
