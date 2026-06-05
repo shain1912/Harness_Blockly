@@ -20,14 +20,14 @@ Measured over all **182** catalog rows.
 
 | Bucket | Count | % of 182 |
 |--------|-------|----------|
-| ✅ Matched (dedicated block) | 158 | 86.8% |
-| 🟡 Partial (`raw` fallback) | 9 | 4.9% |
+| ✅ Matched (dedicated block) | 162 | 89.0% |
+| 🟡 Partial (`raw` fallback) | 5 | 2.7% |
 | ❌ Missing | 15 | 8.2% |
 
-- **block-convertible %** = (matched + partial) / total = (158 + 9) / 182 = **91.8%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
-- **dedicated-block %** = matched / total = 158 / 182 = **86.8%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+- **block-convertible %** = (matched + partial) / total = (162 + 5) / 182 = **91.8%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
+- **dedicated-block %** = matched / total = 162 / 182 = **89.0%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
 
-> **Update (W5 async/await):** `async def` / `await` / `async for` / `async with` (ASY-01..04) were every-row parse errors (whole section ❌). They now parse and round-trip **losslessly at the Python level**, moving the 4 rows ❌→🟡 (block-convertible 89.6%→91.8%; no more crash on async code). They are not yet ✅ because the block view drops the `async` qualifier (def/for/with) and `await` uses the `raw_expression` fallback — encoding `async`/`await` in the blocks is the follow-up to reach dedicated ✅.
+> **Update (W5 async/await):** `async def` / `await` / `async for` / `async with` (ASY-01..04) were every-row parse errors (whole section ❌). They now have **full bidirectional dedicated blocks** (4 rows ❌→✅, dedicated-block 86.8%→89.0%): a serializable `ASYNC_LABEL` marker on `method_def`/`for_each_custom`/`for_unpack`/`with_statement` carries the `async` qualifier, and `await` gets dedicated `await_expr` (value) / `await_stmt` (statement) blocks. Verified Python→AST→Python lossless (`tests/async_support.spec.js`) **and** Python→blocks→Python via a real workspace (`tests/async_blocks_browser.spec.js`, 5 cases) — the block view regenerates `async`/`await`.
 
 > **Update (method_call routing):** any `receiver.method(args)` call that no specialized path claims now emits the dedicated **`method_call`** block instead of a gray `raw_*` lump. That flipped **17** rows (all `str/dict/set/tuple` type methods, every `module.func(...)` stdlib call, and `for k, v in d.items()`) from 🟡→✅, raising dedicated-block coverage **77.5% → 86.8%**. The 5 remaining 🟡 are non-call constructs: lambda, docstring bodies, multi-`with`, and bare `range()`.
 
@@ -47,9 +47,9 @@ Measured over all **182** catalog rows.
 | 10. Built-in Functions (BIF) | 20 | 19 | 1 | 0 |
 | 11. Built-in Type Methods (MTH) | 5 | 5 | 0 | 0 |
 | 12. Standard Library Modules (STD) | 20 | 19 | 0 | 1 |
-| 13. Async (ASY) | 4 | 0 | 4 | 0 |
+| 13. Async (ASY) | 4 | 4 | 0 | 0 |
 | 14. Comments & Misc (MSC) | 6 | 2 | 1 | 3 |
-| **Total** | **182** | **158** | **9** | **15** |
+| **Total** | **182** | **162** | **5** | **15** |
 
 **Weakest sections** (most ❌ missing — these are genuine parse errors, the real remaining gaps):
 
@@ -61,16 +61,16 @@ Measured over all **182** catalog rows.
 
 ## Palette vs Parser gap
 
-The toolbox/palette in `index.html` (`<block type=...>`, **87** entries) and the set of blocks the parser actually *emits/defines* in `parser.js` (**60** custom blocks) are different sets. Two asymmetries:
+The toolbox/palette in `index.html` (`<block type=...>`, **87** entries) and the set of blocks the parser actually *emits/defines* in `parser.js` (**62** custom blocks) are different sets. Two asymmetries:
 
-### A. Blocks DEFINED in parser.js but NOT in the palette (14)
+### A. Blocks DEFINED in parser.js but NOT in the palette (16)
 
-`binary_op  class_def  double_starred_arg  for_each_custom  for_unpack  function_return  keyword_arg  method_call  method_def  raw_expression  raw_statement  slice_expr  starred_arg  unpack_assign`
+`await_expr  await_stmt  binary_op  class_def  double_starred_arg  for_each_custom  for_unpack  function_return  keyword_arg  method_call  method_def  raw_expression  raw_statement  slice_expr  starred_arg  unpack_assign`
 
 These are all **convert-only / output-only blocks** — produced by the Python→block converter (`astToBlockly`) but deliberately not draggable from the palette:
 
 - **(a) Structural / sub-blocks emitted only as children of a larger construct** — you don't drag these standalone; the converter builds them while parsing real code:
-  `class_def`, `method_def`, `method_call` (class bodies/`super()`), `function_return` (bare `return`), `for_each_custom` + `for_unpack` (for-loops, incl. enumerate/tuple targets), `unpack_assign` (`a, b = ...`), `slice_expr` (the `1:5` inside a subscript), `binary_op` (a generic op node), and the call-argument sub-blocks `keyword_arg`, `starred_arg`, `double_starred_arg` (the `a=1`, `*args`, `**kwargs` pieces inside a `func_call`). Dragging these from a palette without their parent context would be meaningless.
+  `class_def`, `method_def`, `method_call` (class bodies/`super()`), `function_return` (bare `return`), `for_each_custom` + `for_unpack` (for-loops, incl. enumerate/tuple targets), `unpack_assign` (`a, b = ...`), `slice_expr` (the `1:5` inside a subscript), `binary_op` (a generic op node), `await_expr` / `await_stmt` (the `await <expr>` value/statement pieces inside an async def), and the call-argument sub-blocks `keyword_arg`, `starred_arg`, `double_starred_arg` (the `a=1`, `*args`, `**kwargs` pieces inside a `func_call`). Dragging these from a palette without their parent context would be meaningless.
 - **(b) Gray fallback blocks** — `raw_statement` and `raw_expression` are intentionally palette-excluded: they exist only so unconvertible code (e.g. `math.sqrt(...)`, a lambda, a docstring body) still has *some* block representation. Offering them in the palette would invite users to hand-author "escape-hatch" blocks, defeating the 1:1 design.
 
 (Note: `subscript_get` / `subscript_set` ARE in both the palette and the parser, so they are not part of this gap.)
@@ -345,10 +345,10 @@ Each is a `Call` to a known builtin. Grouped for mapping.
 
 | ID | Construct | Example | Block? |
 |----|-----------|---------|--------|
-| ASY-01 | `async def` | `async def f():` | 🟡 `procedures_def*` — [W5] parses & round-trips losslessly (Python level); the dedicated def block does not yet encode the `async` qualifier (block→code drops it). |
-| ASY-02 | `await` | `await coro()` | 🟡 raw — [W5] parses & round-trips losslessly; `await <expr>` falls to the lossless `raw_expression` fallback (no dedicated await block yet). |
-| ASY-03 | `async for` | `async for x in ait:` | 🟡 `for_each_custom` — [W5] parses & round-trips losslessly; the for block does not yet encode `async`. |
-| ASY-04 | `async with` | `async with cm() as x:` | 🟡 `with_statement` — [W5] parses & round-trips losslessly; the with block does not yet encode `async`. |
+| ASY-01 | `async def` | `async def f():` | ✅ `method_def` — [W5] `ASYNC_LABEL` marker carries `async`; full bidirectional round-trip. |
+| ASY-02 | `await` | `await coro()` | ✅ `await_expr` / `await_stmt` — [W5] dedicated value & statement blocks; emit `await <expr>`. |
+| ASY-03 | `async for` | `async for x in ait:` | ✅ `for_each_custom` / `for_unpack` — [W5] `ASYNC_LABEL` marker carries `async`. |
+| ASY-04 | `async with` | `async with cm() as x:` | ✅ `with_statement` — [W5] `ASYNC_LABEL` marker carries `async`. |
 
 ---
 

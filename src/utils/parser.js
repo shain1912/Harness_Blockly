@@ -2732,11 +2732,22 @@ function convertStatementToBlock(node) {
       // Map sprite methods or standard print calls
       const callBlock = convertCallExpression(node, true);
       if (callBlock) return callBlock;
-      
+
       // If general unsupported call statement, fall back to generic expression block
       return makeGenericCallBlock(node);
     }
-    
+
+    // [W5] bare `await <expr>` statement -> connectable await_stmt block (not a raw lump).
+    case 'Await': {
+      return {
+        "type": "await_stmt",
+        "id": makeBlockId(),
+        "inputs": {
+          "VALUE": { "block": convertExpressionToBlock(node.value) }
+        }
+      };
+    }
+
     case 'Assign': {
       const tgt = node.target;
 
@@ -2841,13 +2852,14 @@ function convertStatementToBlock(node) {
     }
 
     case 'For': {
+      const asyncFields = node.isAsync ? { "ASYNC_LABEL": "async " } : {}; // [W5]
       // [W4] Tuple target (for k, v in ...) -> custom for_unpack block.
       if (node.target && node.target.type === 'Tuple') {
         const targetStr = node.target.elts.map(e => astToPython(e)).join(', ');
         return {
           "type": "for_unpack",
           "id": makeBlockId(),
-          "fields": { "TARGETS": targetStr },
+          "fields": { "TARGETS": targetStr, ...asyncFields },
           "inputs": {
             "LIST": { "block": convertExpressionToBlock(node.iter) },
             "DO": { "block": convertStatementListToBlock(node.body) }
@@ -2860,7 +2872,8 @@ function convertStatementToBlock(node) {
 
       // If iterating range(10) with a single name target: map to repeating loops.
       // (Tuple targets / non-name targets fall through to the generic for_each block.)
-      if (node.iter.type === 'Range' && node.target.type === 'Name') {
+      // [W5] async for can't use repeat/controls_for (no async marker) — force for_each_custom.
+      if (node.iter.type === 'Range' && node.target.type === 'Name' && !node.isAsync) {
         const range = node.iter;
         const startVal = range.start ? range.start.value : 0;
         const stopVal = range.stop ? range.stop.value : 10;
@@ -2934,7 +2947,7 @@ function convertStatementToBlock(node) {
       return {
         "type": "for_each_custom",
         "id": makeBlockId(),
-        "fields": { "TARGET": targetToPython(node.target) },
+        "fields": { "TARGET": targetToPython(node.target), ...asyncFields },
         "inputs": {
           "ITER": { "block": convertExpressionToBlock(node.iter) },
           "DO": { "block": convertStatementListToBlock(node.body) }
@@ -3007,6 +3020,9 @@ function convertStatementToBlock(node) {
     }
 
     case 'FunctionDef': {
+      // [W5] async def has no async-aware procedures_def* hat block; route it through the
+      // connectable method_def block, which carries the async marker losslessly.
+      if (node.isAsync) return functionDefToMethodBlock(node);
       const body = node.body;
       const lastStmt = body[body.length - 1];
       const hasReturn = lastStmt && lastStmt.type === 'Return';
@@ -3308,7 +3324,8 @@ function convertStatementToBlock(node) {
         "type": "with_statement",
         "id": makeBlockId(),
         "fields": {
-          "AS": first.asName || ''
+          "AS": first.asName || '',
+          ...(node.isAsync ? { "ASYNC_LABEL": "async " } : {}) // [W5] async with
         },
         "inputs": {}
       };
@@ -3363,6 +3380,7 @@ function functionDefToMethodBlock(stmt) {
   if (stmt.decorators && stmt.decorators.length) {
     block.fields.DECORATORS = stmt.decorators.map(d => '@' + astToPython(d)).join('\n');
   }
+  if (stmt.isAsync) block.fields.ASYNC_LABEL = 'async '; // [W5] async def
   const bodyBlock = convertStatementListToBlock(stmt.body);
   if (bodyBlock) block.inputs.BODY = { "block": bodyBlock };
   return block;
@@ -4257,6 +4275,16 @@ function convertExpressionToBlock(node) {
       return block;
     }
 
+    // [W5] await <expr> -> dedicated await_expr block (lossless, not a raw lump)
+    case 'Await':
+      return {
+        "type": "await_expr",
+        "id": makeBlockId(),
+        "inputs": {
+          "VALUE": { "block": convertExpressionToBlock(node.value) }
+        }
+      };
+
     case 'Attribute':
       // obj.attr  ->  custom attribute_access block (OBJECT value + NAME field)
       return {
@@ -4480,6 +4508,9 @@ Blockly.Blocks['method_def'] = {
     this.appendDummyInput('DECO')
         .appendField(new DecoField(''), 'DECORATORS');
     this.appendDummyInput()
+        // [W5] async marker — empty for a plain def, "async " for an async def. A
+        // serializable label so it round-trips without adding UI noise to sync defs.
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL')
         .appendField("def")
         .appendField(new Blockly.FieldTextInput("method"), "NAME")
         .appendField("(")
@@ -4497,8 +4528,9 @@ Blockly.Python['method_def'] = function(block) {
   const decoLines = deco ? deco.split('\n').map(d => d.trim()).join('\n') + '\n' : '';
   const name = block.getFieldValue('NAME');
   const params = block.getFieldValue('PARAMS') || '';
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || ''; // [W5] "async " or ""
   const body = Blockly.Python.statementToCode(block, 'BODY') || '    pass\n';
-  return `${decoLines}def ${name}(${params}):\n${body}`;
+  return `${decoLines}${asyncPrefix}def ${name}(${params}):\n${body}`;
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['method_def'] = Blockly.Python['method_def'];
@@ -4659,6 +4691,41 @@ Blockly.Python['method_call'] = function(block) {
 };
 if (Blockly.Python.forBlock) Blockly.Python.forBlock['method_call'] = Blockly.Python['method_call'];
 
+// [W5] await <expr> — value block (output), valid only inside an async def.
+Blockly.Blocks['await_expr'] = {
+  init: function() {
+    this.appendValueInput('VALUE').setCheck(null).appendField('await');
+    this.setInputsInline(true);
+    this.setOutput(true, null);
+    this.setColour('#8b5cf6');
+    this.setTooltip('await <awaitable> — only valid inside an async def');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['await_expr'] = function(block) {
+  const val = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || '';
+  return [`await ${val}`, Blockly.Python.ORDER_NONE];
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['await_expr'] = Blockly.Python['await_expr'];
+
+// [W5] await <expr> in statement position (bare `await coro()`).
+Blockly.Blocks['await_stmt'] = {
+  init: function() {
+    this.appendValueInput('VALUE').setCheck(null).appendField('await');
+    this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#8b5cf6');
+    this.setTooltip('await <awaitable> as a statement — only valid inside an async def');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['await_stmt'] = function(block) {
+  const val = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || '';
+  return `await ${val}\n`;
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['await_stmt'] = Blockly.Python['await_stmt'];
+
 // [Demo] String concatenation a + b — untyped inputs so strings/text blocks connect
 // (math_arithmetic's Number-typed inputs would coerce strings to 0). Chains nest via B.
 Blockly.Blocks['text_concat'] = {
@@ -4713,6 +4780,7 @@ if (Blockly.Python.forBlock) {
 Blockly.Blocks['for_each_custom'] = {
   init: function() {
     this.appendValueInput('ITER').setCheck(null)
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL') // [W5]
         .appendField('for')
         .appendField(new Blockly.FieldTextInput('item'), 'TARGET')
         .appendField('in');
@@ -4726,10 +4794,11 @@ Blockly.Blocks['for_each_custom'] = {
 };
 Blockly.Python['for_each_custom'] = function(block) {
   const target = block.getFieldValue('TARGET') || 'item';
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || ''; // [W5] "async " or ""
   const iter = Blockly.Python.valueToCode(block, 'ITER', Blockly.Python.ORDER_NONE) || '[]';
   let body = Blockly.Python.statementToCode(block, 'DO');
   if (!body) body = (Blockly.Python.INDENT || '    ') + 'pass\n';
-  return `for ${target} in ${iter}:\n${body}`;
+  return `${asyncPrefix}for ${target} in ${iter}:\n${body}`;
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['for_each_custom'] = Blockly.Python['for_each_custom'];
@@ -5390,6 +5459,7 @@ Blockly.Blocks['with_statement'] = {
   init: function() {
     this.appendValueInput("CONTEXT")
         .setCheck(null)
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL') // [W5]
         .appendField("with");
     this.appendDummyInput()
         .appendField("as")
@@ -5406,8 +5476,9 @@ Blockly.Blocks['with_statement'] = {
 Blockly.Python['with_statement'] = function(block) {
   const context = Blockly.Python.valueToCode(block, 'CONTEXT', Blockly.Python.ORDER_NONE) || 'open("file")';
   const asName = (block.getFieldValue('AS') || '').trim();
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || ''; // [W5] "async " or ""
   const body = Blockly.Python.statementToCode(block, 'BODY') || '    pass\n';
-  const head = asName ? `with ${context} as ${asName}:` : `with ${context}:`;
+  const head = asName ? `${asyncPrefix}with ${context} as ${asName}:` : `${asyncPrefix}with ${context}:`;
   return `${head}\n${body}`;
 };
 if (Blockly.Python.forBlock) {
@@ -5803,6 +5874,7 @@ Blockly.Blocks['for_unpack'] = {
   init: function() {
     this.appendValueInput("LIST")
         .setCheck(null)
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL') // [W5]
         .appendField("for")
         .appendField(new Blockly.FieldTextInput("k, v"), "TARGETS")
         .appendField("in");
@@ -5816,9 +5888,10 @@ Blockly.Blocks['for_unpack'] = {
 };
 Blockly.Python['for_unpack'] = function(block) {
   const targets = (block.getFieldValue('TARGETS') || 'k, v').trim();
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || ''; // [W5] "async " or ""
   const list = Blockly.Python.valueToCode(block, 'LIST', Blockly.Python.ORDER_NONE) || '[]';
   let branch = Blockly.Python.statementToCode(block, 'DO') || '    pass\n';
-  return `for ${targets} in ${list}:\n${branch}`;
+  return `${asyncPrefix}for ${targets} in ${list}:\n${branch}`;
 };
 
 // [W4] register forBlock aliases + a defensive lists_setIndex generator.
