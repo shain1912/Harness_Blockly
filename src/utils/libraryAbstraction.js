@@ -73,6 +73,111 @@ const AI_PRESETS = {
   }
 };
 
+// ──────────────────────────────────────────────────────────────────────────
+// P1: Macro block model (one-way authoring blocks).
+//
+// A macro spec collapses several lines of canonical Python into ONE kid-friendly
+// block. Shape:
+//   { type, name, slots:[{id,label,type,default}], pythonTemplate, icon, colour, category }
+// where pythonTemplate is multiline Python with `{slotId}` holes, and slot.type is
+// one of 'value' | 'number' | 'string'.
+//
+// Macros are AUTHORING-ONLY: dragging one emits Python; there is NO Python→macro
+// reverse-collapse. The core 1:1 parser owns all round-tripping (Invariant-1), so
+// macros add zero round-trip risk. Invariant-2 (enforced by validateMacroTemplate)
+// guarantees a macro can only ever emit Python the core parser round-trips losslessly.
+
+// Substitute every `{slotId}` hole in a template with its value (raw string form).
+function expandMacroTemplate(template, values) {
+  return template.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (whole, id) => {
+    if (Object.prototype.hasOwnProperty.call(values, id)) return String(values[id]);
+    return whole; // leave unknown holes untouched (surfaces as a template bug)
+  });
+}
+
+// Build a parser-safe sample value map from a spec's slot defaults — used to validate
+// the template against the core parser without a live workspace.
+function sampleValuesFor(spec) {
+  const out = {};
+  for (const slot of spec.slots || []) {
+    const d = slot.default;
+    if (slot.type === 'number') {
+      out[slot.id] = Number(d);
+    } else if (slot.type === 'string') {
+      out[slot.id] = JSON.stringify(d == null ? '' : String(d)); // quoted Python string
+    } else {
+      out[slot.id] = d == null ? 'None' : String(d); // value-type → raw expression
+    }
+  }
+  return out;
+}
+
+// Invariant-2 gate: expand the template with sample values, then confirm the result
+// PARSES and ROUND-TRIPS losslessly through the core parser. Returns
+// { ok, code, roundtrip, error }. `parser` defaults to window.BlockPyParser in-browser.
+function validateMacroTemplate(spec, parser) {
+  const P = parser || (typeof window !== 'undefined' ? window.BlockPyParser : null);
+  if (!P) throw new Error('validateMacroTemplate: core parser not available');
+  const code = expandMacroTemplate(spec.pythonTemplate, sampleValuesFor(spec));
+  const norm = (s) => s.replace(/\r/g, '').replace(/\s+/g, '').trim();
+  try {
+    const ast = new P.Parser(new P.Tokenizer(code).tokenize()).parse();
+    const roundtrip = P.astToPython(ast);
+    return { ok: norm(roundtrip) === norm(code), code, roundtrip };
+  } catch (e) {
+    return { ok: false, code, roundtrip: null, error: e.message || String(e) };
+  }
+}
+
+// Shipped macro presets — kid-friendly one-way authoring blocks. Each expands to several
+// lines of canonical Python; every template here passes Invariant-2 (see macro_block.spec.js).
+// Korean display names target elementary users; the emitted Python stays English.
+const MACRO_PRESETS = [
+  {
+    type: 'macro_mediapipe_hands',
+    name: '손 인식하기', icon: '✋', colour: '#10b981', category: 'mediapipe',
+    slots: [
+      { id: 'maxHands', label: '최대 손 개수', type: 'number', default: 2 },
+      { id: 'image', label: '이미지', type: 'value', default: 'frame' },
+    ],
+    pythonTemplate: 'hands = mp_hands.Hands(max_num_hands={maxHands})\nresult = hands.process({image})',
+  },
+  {
+    type: 'macro_requests_get_text',
+    name: '웹페이지 가져오기', icon: '🌐', colour: '#14b8a6', category: 'requests',
+    slots: [
+      { id: 'url', label: '주소', type: 'string', default: 'https://example.com' },
+    ],
+    pythonTemplate: 'response = requests.get({url})\ntext = response.text',
+  },
+  {
+    type: 'macro_cv2_webcam',
+    name: '웹캠 켜기', icon: '📷', colour: '#06b6d4', category: 'cv2',
+    slots: [
+      { id: 'device', label: '카메라 번호', type: 'number', default: 0 },
+    ],
+    pythonTemplate: 'camera = cv2.VideoCapture({device})\nret, frame = camera.read()',
+  },
+  {
+    type: 'macro_matplotlib_chart',
+    name: '그래프 그리기', icon: '📊', colour: '#a855f7', category: 'matplotlib',
+    slots: [
+      { id: 'x', label: '가로 값', type: 'value', default: 'x' },
+      { id: 'y', label: '세로 값', type: 'value', default: 'y' },
+      { id: 'title', label: '제목', type: 'string', default: 'My Chart' },
+    ],
+    pythonTemplate: 'plt.plot({x}, {y})\nplt.title({title})\nplt.show()',
+  },
+  {
+    type: 'macro_pandas_read_describe',
+    name: '표 데이터 분석하기', icon: '🧾', colour: '#eab308', category: 'pandas',
+    slots: [
+      { id: 'path', label: '파일 이름', type: 'string', default: 'data.csv' },
+    ],
+    pythonTemplate: 'data = pd.read_csv({path})\nsummary = data.describe()',
+  },
+];
+
 class LibraryAbstractionEngine {
   constructor(workspace, onLog = console.log) {
     this.workspace = workspace;
@@ -141,6 +246,77 @@ class LibraryAbstractionEngine {
     }
 
     return blockType;
+  }
+
+  // Register a ONE-WAY macro authoring block from a spec (see expandMacroTemplate above).
+  // Value slots become block connections (appendValueInput); number/string slots become
+  // in-block editable fields. The generator expands pythonTemplate from live slot values
+  // and emits multiline Python as a statement. Validates Invariant-2 before registering.
+  registerMacroBlock(spec, parser) {
+    const validation = validateMacroTemplate(spec, parser);
+    if (!validation.ok) {
+      this.onLog(`[Macro] Rejected "${spec.type}": template is not lossless core Python (${validation.error || 'round-trip mismatch'}).`);
+      return { ok: false, type: spec.type, validation };
+    }
+
+    const blockType = spec.type;
+    if (Blockly.Blocks[blockType]) {
+      if (!this.activeBlocks.some((b) => b.type === blockType)) {
+        this.activeBlocks.push({ type: blockType, title: spec.name, hasOutput: false, isMacro: true });
+      }
+      return { ok: true, type: blockType, validation, alreadyRegistered: true };
+    }
+
+    const slots = spec.slots || [];
+    Blockly.Blocks[blockType] = {
+      init: function () {
+        const header = this.appendDummyInput();
+        if (spec.icon) header.appendField(spec.icon);
+        header.appendField(spec.name || blockType);
+        slots.forEach((slot) => {
+          if (slot.type === 'number') {
+            this.appendDummyInput()
+                .appendField(slot.label || slot.id)
+                .appendField(new Blockly.FieldNumber(Number(slot.default) || 0), `SLOT_${slot.id}`);
+          } else if (slot.type === 'string') {
+            this.appendDummyInput()
+                .appendField(slot.label || slot.id)
+                .appendField(new Blockly.FieldTextInput(slot.default == null ? '' : String(slot.default)), `SLOT_${slot.id}`);
+          } else {
+            this.appendValueInput(`SLOT_${slot.id}`).setCheck(null).appendField(slot.label || slot.id);
+          }
+        });
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+        this.setColour(spec.colour || '#10b981');
+        this.setTooltip(spec.name || blockType);
+      },
+    };
+
+    const generatorFn = function (block) {
+      const values = {};
+      slots.forEach((slot) => {
+        if (slot.type === 'value') {
+          values[slot.id] = Blockly.Python.valueToCode(block, `SLOT_${slot.id}`, Blockly.Python.ORDER_NONE)
+            || (slot.default == null ? 'None' : String(slot.default));
+        } else if (slot.type === 'number') {
+          values[slot.id] = block.getFieldValue(`SLOT_${slot.id}`);
+        } else if (slot.type === 'string') {
+          values[slot.id] = JSON.stringify(block.getFieldValue(`SLOT_${slot.id}`) || '');
+        } else {
+          values[slot.id] = block.getFieldValue(`SLOT_${slot.id}`);
+        }
+      });
+      const code = expandMacroTemplate(spec.pythonTemplate, values);
+      return code.endsWith('\n') ? code : code + '\n';
+    };
+    Blockly.Python[blockType] = generatorFn;
+    if (Blockly.Python.forBlock) Blockly.Python.forBlock[blockType] = generatorFn;
+
+    this.activeBlocks.push({ type: blockType, title: spec.name, hasOutput: false, isMacro: true });
+    this.installedBlocksCount += 1;
+    this.onLog(`[Macro] Registered "${spec.name}" (${blockType}) → expands to ${spec.pythonTemplate.split('\n').length}-line Python.`);
+    return { ok: true, type: blockType, validation };
   }
 
   // Abstract library dynamically based on select or custom imports
@@ -311,7 +487,11 @@ class LibraryAbstractionEngine {
 // Expose globally and for Node environment
 const BlockPyAbstraction = {
   LibraryAbstractionEngine,
-  AI_PRESETS
+  AI_PRESETS,
+  MACRO_PRESETS,
+  expandMacroTemplate,
+  sampleValuesFor,
+  validateMacroTemplate
 };
 
 if (typeof window !== 'undefined') {
