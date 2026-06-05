@@ -134,7 +134,7 @@ export default function BlocklyEditor({
           <i className="fa-solid fa-cubes icon-purple"></i>
           <h3>Visual Block Workspace</h3>
         </div>
-        <div id="sync-indicator" className="badge badge-success" title="Block ↔ Python 동기화됨">
+        <div id="sync-indicator" className="badge badge-success" title="Block ↔ Python synced">
           <i className="fa-solid fa-rotate"></i> Synchronized
         </div>
       </div>

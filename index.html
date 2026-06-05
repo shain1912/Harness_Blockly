@@ -54,14 +54,6 @@
       <block type="attribute_access"></block>
     </category>
 
-    <!-- [W2] ── Scope &amp; Generators ───────────────────────────── -->
-    <category name="Scope &amp; Generators" colour="#7f8c8d">
-      <block type="del_statement"></block>
-      <block type="global_statement"></block>
-      <block type="nonlocal_statement"></block>
-      <block type="yield_statement"></block>
-    </category>
-
     <!-- ── Logic ─────────────────────────────────────────────── -->
     <category name="Logic" colour="#4C97FF">
       <block type="controls_if"></block>
@@ -77,9 +69,6 @@
       <block type="logic_boolean"></block>
       <block type="logic_null"></block>
       <block type="logic_ternary"></block>
-      <!-- [W3] identity (is / is not) and membership (in / not in) tests -->
-      <block type="identity_test"></block>
-      <block type="membership_test"></block>
     </category>
 
     <!-- ── Loops ─────────────────────────────────────────────── -->
@@ -118,10 +107,8 @@
       <block type="math_trig"></block>
       <block type="math_round"></block>
       <block type="math_modulo"></block>
-      <!-- [W3] floor division, bitwise binary ops, and bitwise NOT -->
+      <!-- [W3] floor division -->
       <block type="math_int_divide"></block>
-      <block type="bitwise_operation"></block>
-      <block type="bitwise_not"></block>
       <block type="math_constrain">
         <value name="LOW"><shadow type="math_number"><field name="NUM">1</field></shadow></value>
         <value name="HIGH"><shadow type="math_number"><field name="NUM">100</field></shadow></value>
@@ -209,7 +196,6 @@
       <block type="tuple_create"></block>
       <block type="dict_comprehension"></block>
       <block type="set_comprehension"></block>
-      <block type="gen_expression"></block>
       <block type="subscript_get"></block>
       <block type="subscript_set"></block>
       <block type="set_attribute"></block>
@@ -233,12 +219,6 @@
         <mutation else="1" finally="1"></mutation>
       </block>
       <block type="raise_statement"></block>
-      <block type="assert_statement"></block>
-      <block type="with_statement">
-        <value name="CONTEXT">
-          <shadow type="text"><field name="TEXT">open("file.txt")</field></shadow>
-        </value>
-      </block>
     </category>
 
     <!-- ── Motion & Pen ──────────────────────────────────────── -->
@@ -285,8 +265,56 @@
       <block type="cv2_release"></block>
     </category>
 
-    <!-- ── AI Library Blocks ──────────────────────────────────── -->
-    <category name="AI Libraries" colour="#009688" id="abstract-lib-category" style="display: none;">
+    <!-- ── Advanced — MakeCode-style collapsible group ──────────
+         Gathers expert / Convert-only blocks. Nested categories make the parent
+         row expandable (chevron), separated from the main palette by a gap. -->
+    <sep gap="32"></sep>
+    <category name="Advanced" colour="#3d3d3a" expanded="false">
+
+      <!-- OOP: classes & methods (Convert-only structural blocks, exposed for learning) -->
+      <category name="OOP" colour="#FF6680">
+        <block type="class_def"></block>
+        <block type="method_def"></block>
+        <block type="method_call"></block>
+        <block type="function_return"></block>
+      </category>
+
+      <!-- Scope & Generators -->
+      <category name="Scope &amp; Generators" colour="#7f8c8d">
+        <block type="del_statement"></block>
+        <block type="global_statement"></block>
+        <block type="nonlocal_statement"></block>
+        <block type="yield_statement"></block>
+        <block type="gen_expression"></block>
+      </category>
+
+      <!-- Function args: *args / **kwargs / keyword args -->
+      <category name="Function Args" colour="#FF6680">
+        <block type="keyword_arg"></block>
+        <block type="starred_arg"></block>
+        <block type="double_starred_arg"></block>
+      </category>
+
+      <!-- Bitwise -->
+      <category name="Bitwise" colour="#59C059">
+        <block type="bitwise_operation"></block>
+        <block type="bitwise_not"></block>
+      </category>
+
+      <!-- Advanced syntax: slicing, unpacking, identity/membership, assert, with -->
+      <category name="Advanced Syntax" colour="#b55bf7">
+        <block type="slice_expr"></block>
+        <block type="unpack_assign"></block>
+        <block type="identity_test"></block>
+        <block type="membership_test"></block>
+        <block type="assert_statement"></block>
+        <block type="with_statement">
+          <value name="CONTEXT">
+            <shadow type="text"><field name="TEXT">open("file.txt")</field></shadow>
+          </value>
+        </block>
+      </category>
+
     </category>
 
   </xml>

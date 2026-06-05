@@ -16,82 +16,82 @@
 const DEMO_SNIPPETS = [
   // ── Basics ────────────────────────────────────────────────────────────────
   {
-    id: 'basics-arith', title: '변수와 산술', category: 'Basics', desugar: true, execute: true,
+    id: 'basics-arith', title: 'Variables & Arithmetic', category: 'Basics', desugar: true, execute: true,
     code: 'x = 10\ny = 3\nprint(x + y)\nprint(x * y)\nprint(x // y)\nprint(x % y)',
     expectedStdout: ['13', '30', '3', '1'],
   },
   {
-    id: 'basics-str', title: '문자열', category: 'Basics', desugar: true, execute: true,
+    id: 'basics-str', title: 'Strings', category: 'Basics', desugar: true, execute: true,
     code: 'name = "BlockPy"\nprint("Hello, " + name + "!")\nprint(name.upper())\nprint(len(name))',
     expectedStdout: ['Hello, BlockPy!', 'BLOCKPY', '7'],
   },
 
   // ── Data structures ─────────────────────────────────────────────────────────
   {
-    id: 'data-list', title: '리스트', category: 'Data', desugar: true, execute: true,
+    id: 'data-list', title: 'Lists', category: 'Data', desugar: true, execute: true,
     code: 'nums = [1, 2, 3, 4, 5]\nnums.append(6)\nprint(nums)\nprint(nums[0])\nprint(sum(nums))',
     expectedStdout: ['[1, 2, 3, 4, 5, 6]', '21'],
   },
   {
-    id: 'data-dict', title: '딕셔너리', category: 'Data', desugar: true, execute: true,
+    id: 'data-dict', title: 'Dictionaries', category: 'Data', desugar: true, execute: true,
     code: 'scores = {"alice": 90, "bob": 85}\nscores["carol"] = 95\nprint(scores["alice"])\nprint(len(scores))',
     expectedStdout: ['90', '3'],
   },
   {
-    id: 'data-set-tuple', title: '집합과 튜플', category: 'Data', desugar: true, execute: true,
+    id: 'data-set-tuple', title: 'Sets & Tuples', category: 'Data', desugar: true, execute: true,
     code: 's = {1, 2, 2, 3}\nprint(len(s))\npoint = (3, 4)\nprint(point[0] + point[1])',
     expectedStdout: ['3', '7'],
   },
 
   // ── Control flow ──────────────────────────────────────────────────────────
   {
-    id: 'ctrl-if', title: '조건문', category: 'Control', desugar: true, execute: true,
+    id: 'ctrl-if', title: 'Conditionals', category: 'Control', desugar: true, execute: true,
     code: 'score = 75\nif score >= 90:\n    print("A")\nelif score >= 70:\n    print("B")\nelse:\n    print("C")',
     expectedStdout: ['B'],
   },
   {
-    id: 'ctrl-for', title: '반복문 (for)', category: 'Control', desugar: true, execute: true,
+    id: 'ctrl-for', title: 'Loops (for)', category: 'Control', desugar: true, execute: true,
     code: 'total = 0\nfor i in range(1, 6):\n    total = total + i\nprint(total)',
     expectedStdout: ['15'],
   },
   {
-    id: 'ctrl-while', title: '반복문 (while)', category: 'Control', desugar: true, execute: true,
+    id: 'ctrl-while', title: 'Loops (while)', category: 'Control', desugar: true, execute: true,
     code: 'n = 5\nresult = 1\nwhile n > 0:\n    result = result * n\n    n = n - 1\nprint(result)',
     expectedStdout: ['120'],
   },
 
   // ── Functions / comprehensions ──────────────────────────────────────────────
   {
-    id: 'fn-def', title: '함수', category: 'Functions', desugar: true, execute: true,
+    id: 'fn-def', title: 'Functions', category: 'Functions', desugar: true, execute: true,
     code: 'def square(x):\n    return x * x\nprint(square(5))',
     expectedStdout: ['25'],
   },
   {
-    id: 'fn-listcomp', title: '리스트 컴프리헨션', category: 'Functions', desugar: false, execute: true,
+    id: 'fn-listcomp', title: 'List Comprehension', category: 'Functions', desugar: false, execute: true,
     code: 'nums = [1, 2, 3, 4, 5]\nsquares = [n * n for n in nums]\nprint(squares)',
     expectedStdout: ['[1, 4, 9, 16, 25]'],
   },
   {
-    id: 'fn-dictcomp', title: '딕셔너리 컴프리헨션', category: 'Functions', desugar: false, execute: true,
+    id: 'fn-dictcomp', title: 'Dict Comprehension', category: 'Functions', desugar: false, execute: true,
     code: 'squares = {n: n * n for n in range(1, 4)}\nprint(squares[3])',
     expectedStdout: ['9'],
   },
 
   // ── Exceptions / generators ──────────────────────────────────────────────────
   {
-    id: 'exc-try', title: '예외 처리', category: 'Exceptions', desugar: true, execute: true,
+    id: 'exc-try', title: 'Exception Handling', category: 'Exceptions', desugar: true, execute: true,
     code: 'try:\n    x = int("abc")\nexcept ValueError:\n    print("invalid number")\nfinally:\n    print("done")',
     expectedStdout: ['invalid number', 'done'],
   },
   {
-    id: 'gen-yield', title: '제너레이터', category: 'Exceptions', desugar: true, execute: true,
+    id: 'gen-yield', title: 'Generators', category: 'Exceptions', desugar: true, execute: true,
     code: 'def countdown(n):\n    while n > 0:\n        yield n\n        n = n - 1\nprint(list(countdown(3)))',
     expectedStdout: ['[3, 2, 1]'],
   },
 
   // ── Classes ──────────────────────────────────────────────────────────────────
   {
-    id: 'cls-basic', title: '클래스', category: 'Classes', desugar: true, execute: true,
+    id: 'cls-basic', title: 'Classes', category: 'Classes', desugar: true, execute: true,
     code: 'class Dog:\n    def __init__(self, name):\n        self.name = name\n    def bark(self):\n        return self.name + " says woof"\nd = Dog("Rex")\nprint(d.bark())',
     expectedStdout: ['Rex says woof'],
   },
@@ -101,7 +101,7 @@ const DEMO_SNIPPETS = [
   // VideoCapture/read/resize), so each runs without error; output is on the canvas,
   // not stdout, so expectedStdout is empty (the test asserts render + no error).
   {
-    id: 'cv-gray', title: 'OpenCV: 그레이스케일', category: 'OpenCV', desugar: true, execute: true,
+    id: 'cv-gray', title: 'OpenCV: Grayscale', category: 'OpenCV', desugar: true, execute: true,
     code: 'import cv2\nimg = cv2.imread("test.jpg")\ngray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)\ncv2.imshow("gray", gray)\ncv2.waitKey(1000)\ncv2.destroyAllWindows()',
     expectedStdout: [],
   },
@@ -109,26 +109,26 @@ const DEMO_SNIPPETS = [
     // Idiomatic webcam capture loop. Render/convert-only (execute:false): a real
     // `while True` capture loop never terminates headlessly (the cv2 mock's waitKey
     // always returns 0), so it is for showing the block conversion, not running.
-    id: 'cv-capture', title: 'OpenCV: 웹캠 캡처 루프', category: 'OpenCV', desugar: true, execute: false,
+    id: 'cv-capture', title: 'OpenCV: Webcam Capture Loop', category: 'OpenCV', desugar: true, execute: false,
     code: 'import cv2\ncap = cv2.VideoCapture(0)\nwhile True:\n    ret, frame = cap.read()\n    if not ret:\n        break\n    cv2.imshow("Webcam", frame)\n    if cv2.waitKey(1) == ord("q"):\n        break\ncap.release()\ncv2.destroyAllWindows()',
     expectedStdout: [],
   },
   {
-    id: 'cv-resize', title: 'OpenCV: 리사이즈', category: 'OpenCV', desugar: true, execute: true,
+    id: 'cv-resize', title: 'OpenCV: Resize', category: 'OpenCV', desugar: true, execute: true,
     code: 'import cv2\nimg = cv2.imread("photo.png")\nsmall = cv2.resize(img, (320, 240))\ncv2.imshow("resized", small)',
     expectedStdout: [],
   },
   {
     // Realistic edge + contour pipeline. Render/convert-only: GaussianBlur/Canny/
     // findContours aren't in the cv2 mock, so this is for showing the block conversion.
-    id: 'cv-contours', title: 'OpenCV: 에지 & 컨투어', category: 'OpenCV', desugar: true, execute: false,
+    id: 'cv-contours', title: 'OpenCV: Edges & Contours', category: 'OpenCV', desugar: true, execute: false,
     code: 'import cv2\nimg = cv2.imread("input.jpg")\ngray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)\nblurred = cv2.GaussianBlur(gray, (5, 5), 0)\nedges = cv2.Canny(blurred, 50, 150)\ncontours, hierarchy = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)\ncv2.drawContours(img, contours, -1, (0, 255, 0), 2)\ncv2.imshow("Contours", img)\ncv2.waitKey(0)\ncv2.destroyAllWindows()',
     expectedStdout: [],
   },
   {
     // Webcam face recognition via a Haar cascade. Render/convert-only (infinite capture
     // loop; CascadeClassifier/detectMultiScale aren't in the cv2 mock).
-    id: 'cv-face', title: 'OpenCV: 웹캠 얼굴 인식', category: 'OpenCV', desugar: true, execute: false,
+    id: 'cv-face', title: 'OpenCV: Webcam Face Detection', category: 'OpenCV', desugar: true, execute: false,
     code: 'import cv2\nface_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")\ncap = cv2.VideoCapture(0)\nwhile True:\n    ret, frame = cap.read()\n    if not ret:\n        break\n    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)\n    faces = face_cascade.detectMultiScale(gray, 1.1, 4)\n    for (x, y, w, h) in faces:\n        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)\n    cv2.imshow("Face Detection", frame)\n    if cv2.waitKey(1) & 0xFF == ord("q"):\n        break\ncap.release()\ncv2.destroyAllWindows()',
     expectedStdout: [],
   },
@@ -137,7 +137,7 @@ const DEMO_SNIPPETS = [
   // Demonstrates: micropip-install + automatic block conversion + run for a library
   // BlockPy has no preset for. humanize is pure-Python and installs in Pyodide.
   {
-    id: 'lib-humanize', title: '미지 라이브러리: humanize', category: 'Libraries', desugar: true, execute: true,
+    id: 'lib-humanize', title: 'Unseen Library: humanize', category: 'Libraries', desugar: true, execute: true,
     code: 'import humanize\nprint(humanize.intcomma(1234567))\nprint(humanize.ordinal(21))\nprint(humanize.naturalsize(1048576))',
     expectedStdout: ['1,234,567', '21st', '1.0 MB'],
   },

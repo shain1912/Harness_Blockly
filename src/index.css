@@ -1669,6 +1669,18 @@ select:focus, .pip-input:focus {
   background: var(--surface-cream-strong) !important;
 }
 .blocklyToolboxCategoryIcon { width: 0 !important; margin: 0 !important; }
+/* Expandable parent (Advanced): show a ▼ when collapsed, ▲ when expanded */
+.blocklyToolboxCategoryContainer[aria-expanded] > .blocklyToolboxCategory .blocklyToolboxCategoryLabel::before {
+  content: '\25BC';            /* ▼ down — click to expand */
+  display: inline-block;
+  margin-right: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.12s ease;
+}
+.blocklyToolboxCategoryContainer[aria-expanded="true"] > .blocklyToolboxCategory .blocklyToolboxCategoryLabel::before {
+  content: '\25B2';            /* ▲ up — click to collapse */
+}
 .blocklyToolboxCategoryLabel {
   font-family: var(--font-sans) !important;
   font-size: 15px !important;

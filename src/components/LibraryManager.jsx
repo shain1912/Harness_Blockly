@@ -32,7 +32,7 @@ export default function LibraryManager({
 
         {/* ── pip install (real local shell pip) ───────────── */}
         <div className="form-group">
-          <label htmlFor="pip-pkg-input">pip install — 라이브러리 설치</label>
+          <label htmlFor="pip-pkg-input">pip install — install a library</label>
           <form
             className="pip-form"
             onSubmit={(e) => { e.preventDefault(); onPipInstallShell && onPipInstallShell(); }}
@@ -44,9 +44,9 @@ export default function LibraryManager({
               type="text"
               value={pipPkg}
               onChange={(e) => onPipPkgChange && onPipPkgChange(e.target.value)}
-              placeholder="예: pillow, numpy, mediapipe ..."
+              placeholder="e.g. pillow, numpy, mediapipe ..."
             />
-            <button type="submit" className="btn btn-primary btn-sm" disabled={!pipPkg.trim()}>설치</button>
+            <button type="submit" className="btn btn-primary btn-sm" disabled={!pipPkg.trim()}>Install</button>
           </form>
         </div>
 
