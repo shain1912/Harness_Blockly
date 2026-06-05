@@ -18,24 +18,25 @@ function analyze(code) {
 }
 
 const CASES = [
-  ['async def', 'async def fetch():\n    await get()'],
-  ['await assign', 'async def main():\n    x = await load()\n    return x'],
-  ['async for', 'async for item in stream():\n    print(item)'],
-  ['async with', 'async with lock() as h:\n    read(h)'],
-  ['await expr', 'result = await client.get(url)'],
+  ['async def', 'async def fetch():\n    await get()', 'method_def'],
+  ['await assign', 'async def main():\n    x = await load()\n    return x', 'await_expr'],
+  ['async for', 'async for item in stream():\n    print(item)', 'for_each_custom'],
+  ['async with', 'async with lock() as h:\n    read(h)', 'with_statement'],
+  ['await expr', 'result = await client.get(url)', 'await_expr'],
+  ['async for unpack', 'async for k, v in pairs():\n    print(k, v)', 'for_unpack'],
 ];
 
 test.describe('async/await support (ASY-01..04, pure Node)', () => {
-  for (const [label, code] of CASES) {
+  for (const [label, code, dedicatedType] of CASES) {
     test(`${label}: round-trips losslessly`, () => {
       const { py } = analyze(code);
       expect(norm(py)).toBe(norm(code));            // lossless Python round-trip
     });
-    test(`${label}: astToBlockly emits no string-literal lump`, () => {
+    test(`${label}: astToBlockly emits the dedicated ${dedicatedType} block (no raw lump)`, () => {
       const { types } = analyze(code);
-      // await falls to the lossless raw_expression fallback (acceptable); the bug we guard
-      // against is a `text` block that silently quotes the await expression as a string.
-      expect(types).not.toContain('text');
+      expect(types).toContain(dedicatedType);       // routed to a real, named block
+      expect(types).not.toContain('raw_statement'); // not a gray statement lump
+      expect(types).not.toContain('raw_expression');// not a gray expression lump
     });
   }
 });
