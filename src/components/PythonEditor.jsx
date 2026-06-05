@@ -78,13 +78,13 @@ export default function PythonEditor({
               id="example-picker"
               className="example-picker"
               defaultValue=""
-              title="데모 예제 불러오기"
+              title="Load a demo example"
               onChange={(e) => {
                 const sn = examples.find((s) => s.id === e.target.value);
                 if (sn && onLoadExample) onLoadExample(sn);
               }}
             >
-              <option value="" disabled>예제 선택…</option>
+              <option value="" disabled>Select example…</option>
               {Object.entries(examplesByCategory).map(([category, items]) => (
                 <optgroup key={category} label={category}>
                   {items.map((s) => (

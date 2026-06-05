@@ -4464,7 +4464,7 @@ Blockly.Blocks['print_multi'] = {
     this.setNextStatement(true, null);
     this.setInputsInline(true);
     this.setColour('#5ba55b');
-    this.setTooltip('print(a, b, ...) — 여러 인자를 출력');
+    this.setTooltip('print(a, b, ...) — print multiple arguments');
     this.setHelpUrl('');
   },
   saveExtraState: function() { return { itemCount: this.itemCount_ }; },
@@ -4510,7 +4510,7 @@ function _defineFuncCallBlock(typeName, isStatement) {
       else { this.setOutput(true, null); }
       this.setInputsInline(true);
       this.setColour('#9b59b6');
-      this.setTooltip('함수 호출 name(arg, ...)');
+      this.setTooltip('Function call name(arg, ...)');
       this.setHelpUrl('');
     },
     saveExtraState: function() { return { itemCount: this.itemCount_ }; },
@@ -4558,7 +4558,7 @@ Blockly.Blocks['method_call'] = {
     this.setInputsInline(true);
     this.setOutput(true, null);
     this.setColour('#9b59b6');
-    this.setTooltip('메서드 호출 receiver.method(args)');
+    this.setTooltip('Method call receiver.method(args)');
     this.setHelpUrl('');
   },
   saveExtraState: function() { return { itemCount: this.itemCount_ }; },
@@ -4597,7 +4597,7 @@ Blockly.Blocks['text_concat'] = {
     this.setInputsInline(true);
     this.setOutput(true, null);
     this.setColour('#5ba5a5');
-    this.setTooltip('문자열 이어붙이기: a + b');
+    this.setTooltip('String concatenation: a + b');
     this.setHelpUrl('');
   }
 };
@@ -4622,7 +4622,7 @@ Blockly.Blocks['binary_op'] = {
     this.setInputsInline(true);
     this.setOutput(true, null);
     this.setColour('#5b67a5');
-    this.setTooltip('이항 연산 a op b (리스트/문자열 등 포함)');
+    this.setTooltip('Binary op a op b (incl. lists/strings)');
     this.setHelpUrl('');
   }
 };
@@ -4672,7 +4672,7 @@ Blockly.Blocks['keyword_arg'] = {
     this.setInputsInline(true);
     this.setOutput(true, null);
     this.setColour('#9b59b6');
-    this.setTooltip('키워드 인자 name=value');
+    this.setTooltip('Keyword argument name=value');
     this.setHelpUrl('');
   }
 };
@@ -4687,7 +4687,7 @@ Blockly.Blocks['starred_arg'] = {
   init: function() {
     this.appendValueInput('VALUE').setCheck(null).appendField('*');
     this.setInputsInline(true); this.setOutput(true, null); this.setColour('#9b59b6');
-    this.setTooltip('* 언패킹 인자'); this.setHelpUrl('');
+    this.setTooltip('* unpacking argument'); this.setHelpUrl('');
   }
 };
 Blockly.Python['starred_arg'] = function(block) {
@@ -4697,7 +4697,7 @@ Blockly.Blocks['double_starred_arg'] = {
   init: function() {
     this.appendValueInput('VALUE').setCheck(null).appendField('**');
     this.setInputsInline(true); this.setOutput(true, null); this.setColour('#9b59b6');
-    this.setTooltip('** 언패킹 인자'); this.setHelpUrl('');
+    this.setTooltip('** unpacking argument'); this.setHelpUrl('');
   }
 };
 Blockly.Python['double_starred_arg'] = function(block) {
@@ -4713,7 +4713,7 @@ Blockly.Blocks['slice_expr'] = {
     this.setInputsInline(true);
     this.setOutput(true, null);
     this.setColour('#745ba5');
-    this.setTooltip('슬라이스 lower:upper:step (비워도 됨)');
+    this.setTooltip('Slice lower:upper:step (any may be empty)');
     this.setHelpUrl('');
   }
 };

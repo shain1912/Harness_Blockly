@@ -135,44 +135,44 @@ function validateMacroTemplate(spec, parser) {
 const MACRO_PRESETS = [
   {
     type: 'macro_mediapipe_hands',
-    name: '손 인식하기', icon: '✋', colour: '#10b981', category: 'mediapipe',
+    name: 'Detect Hands', icon: '✋', colour: '#10b981', category: 'mediapipe',
     slots: [
-      { id: 'maxHands', label: '최대 손 개수', type: 'number', default: 2 },
-      { id: 'image', label: '이미지', type: 'value', default: 'frame' },
+      { id: 'maxHands', label: 'Max Hands', type: 'number', default: 2 },
+      { id: 'image', label: 'Image', type: 'value', default: 'frame' },
     ],
     pythonTemplate: 'hands = mp_hands.Hands(max_num_hands={maxHands})\nresult = hands.process({image})',
   },
   {
     type: 'macro_requests_get_text',
-    name: '웹페이지 가져오기', icon: '🌐', colour: '#14b8a6', category: 'requests',
+    name: 'Fetch Web Page', icon: '🌐', colour: '#14b8a6', category: 'requests',
     slots: [
-      { id: 'url', label: '주소', type: 'string', default: 'https://example.com' },
+      { id: 'url', label: 'URL', type: 'string', default: 'https://example.com' },
     ],
     pythonTemplate: 'response = requests.get({url})\ntext = response.text',
   },
   {
     type: 'macro_cv2_webcam',
-    name: '웹캠 켜기', icon: '📷', colour: '#06b6d4', category: 'cv2',
+    name: 'Open Webcam', icon: '📷', colour: '#06b6d4', category: 'cv2',
     slots: [
-      { id: 'device', label: '카메라 번호', type: 'number', default: 0 },
+      { id: 'device', label: 'Camera Index', type: 'number', default: 0 },
     ],
     pythonTemplate: 'camera = cv2.VideoCapture({device})\nret, frame = camera.read()',
   },
   {
     type: 'macro_matplotlib_chart',
-    name: '그래프 그리기', icon: '📊', colour: '#a855f7', category: 'matplotlib',
+    name: 'Draw Chart', icon: '📊', colour: '#a855f7', category: 'matplotlib',
     slots: [
-      { id: 'x', label: '가로 값', type: 'value', default: 'x' },
-      { id: 'y', label: '세로 값', type: 'value', default: 'y' },
-      { id: 'title', label: '제목', type: 'string', default: 'My Chart' },
+      { id: 'x', label: 'X values', type: 'value', default: 'x' },
+      { id: 'y', label: 'Y values', type: 'value', default: 'y' },
+      { id: 'title', label: 'Title', type: 'string', default: 'My Chart' },
     ],
     pythonTemplate: 'plt.plot({x}, {y})\nplt.title({title})\nplt.show()',
   },
   {
     type: 'macro_pandas_read_describe',
-    name: '표 데이터 분석하기', icon: '🧾', colour: '#eab308', category: 'pandas',
+    name: 'Analyze Table Data', icon: '🧾', colour: '#eab308', category: 'pandas',
     slots: [
-      { id: 'path', label: '파일 이름', type: 'string', default: 'data.csv' },
+      { id: 'path', label: 'File Name', type: 'string', default: 'data.csv' },
     ],
     pythonTemplate: 'data = pd.read_csv({path})\nsummary = data.describe()',
   },

@@ -414,7 +414,7 @@ for i in range(4):
       .filter((b) => b.type === 'raw_statement' || b.type === 'raw_expression')
       .map((b) => ({
         id: b.id,
-        kind: b.type === 'raw_statement' ? '문장' : '식',
+        kind: b.type === 'raw_statement' ? 'statement' : 'expression',
         text: (b.getFieldValue('STMT') || b.getFieldValue('EXPR') || '').replace(/\s+/g, ' ').trim().slice(0, 140),
       }));
     setGrayBlocks(list);
@@ -451,7 +451,7 @@ for i in range(4):
         r.onload = () => resolve(r.result);
         r.readAsDataURL(file);
       });
-      // (2) Backend media dir — for the "실제 실행 (Shell)" real-python path.
+      // (2) Backend media dir — for the "Run (Shell)" real-python path.
       let shellNote = '';
       try {
         const resp = await fetch('/api/upload-image', {
@@ -459,13 +459,13 @@ for i in range(4):
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ filename: file.name, dataBase64: dataUrl }),
         });
-        if (resp.ok) { const d = await resp.json(); shellNote = ` (Shell 실행에서도 cv2.imread("${d.savedAs}") 사용 가능)`; }
+        if (resp.ok) { const d = await resp.json(); shellNote = ` (also usable in Shell run via cv2.imread("${d.savedAs}"))`; }
       } catch (_) { /* backend may be off — browser Run still works */ }
-      setCv2Images([{ title: `업로드: ${file.name}`, dataUrl }]);
+      setCv2Images([{ title: `Uploaded: ${file.name}`, dataUrl }]);
       setUploadedMedia((prev) => [{ name: file.name, dataUrl }, ...prev.filter((m) => m.name !== file.name)].slice(0, 12));
-      setLogs((prev) => [...prev, `[이미지] "${file.name}" 업로드됨 — cv2.imread("${file.name}")로 사용하세요.${shellNote}`]);
+      setLogs((prev) => [...prev, `[Image] "${file.name}" uploaded — use cv2.imread("${file.name}").${shellNote}`]);
     } catch (e) {
-      setLogs((prev) => [...prev, `[이미지 업로드 오류] ${e.message || e}`]);
+      setLogs((prev) => [...prev, `[Image upload error] ${e.message || e}`]);
     }
   };
 
@@ -475,20 +475,20 @@ for i in range(4):
     const pkg = pipPkg.trim();
     if (!pkg) return;
     setActiveAuxTab('logs');
-    setLogs((prev) => [...prev, `[pip] 실제 설치: pip install ${pkg} ...`]);
+    setLogs((prev) => [...prev, `[pip] Installing: pip install ${pkg} ...`]);
     try {
       const resp = await fetch('/api/pip-install', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ package: pkg }),
       });
       if (!resp.ok || !resp.body) {
-        setLogs((prev) => [...prev, `[pip] 응답 오류 (${resp.status}). npm run server 확인.`]); return;
+        setLogs((prev) => [...prev, `[pip] Response error (${resp.status}). Check npm run server.`]); return;
       }
       const reader = resp.body.getReader();
       const dec = new TextDecoder();
       for (;;) { const { done, value } = await reader.read(); if (done) break; const t = dec.decode(value, { stream: true }); if (t) setLogs((prev) => [...prev, t.replace(/\n+$/, '')]); }
     } catch (e) {
-      setLogs((prev) => [...prev, `[pip] 오류: ${e.message}. 백엔드가 켜져 있는지 확인하세요.`]);
+      setLogs((prev) => [...prev, `[pip] Error: ${e.message}. Make sure the backend is running.`]);
     }
   };
 
@@ -497,7 +497,7 @@ for i in range(4):
   // VideoCapture) open on the user's desktop. Requires the backend (npm run server).
   const handleRunShell = async () => {
     setCv2Images([]);
-    setLogs([`[Shell] 실제 Python 실행 (로컬 python + 진짜 cv2). imshow/웹캠 창은 데스크톱에 뜹니다.`, `[Shell] Code:\n${code}`]);
+    setLogs([`[Shell] Running real Python (local python + real cv2). imshow/webcam windows open on the desktop.`, `[Shell] Code:\n${code}`]);
     setActiveAuxTab('logs');
     setIsRunning(true);
     const controller = new AbortController();
@@ -510,7 +510,7 @@ for i in range(4):
         signal: controller.signal,
       });
       if (!resp.ok || !resp.body) {
-        setLogs((prev) => [...prev, `[Shell] 백엔드 응답 오류 (${resp.status}). npm run server 가 실행 중인지 확인하세요.`]);
+        setLogs((prev) => [...prev, `[Shell] Backend response error (${resp.status}). Make sure npm run server is running.`]);
         return;
       }
       const reader = resp.body.getReader();
@@ -522,8 +522,8 @@ for i in range(4):
         if (text) setLogs((prev) => [...prev, text.replace(/\n+$/, '')]);
       }
     } catch (e) {
-      if (e.name === 'AbortError') setLogs((prev) => [...prev, '[Shell] 중지됨.']);
-      else setLogs((prev) => [...prev, `[Shell] 오류: ${e.message}. 백엔드(npm run server)가 켜져 있는지 확인하세요.`]);
+      if (e.name === 'AbortError') setLogs((prev) => [...prev, '[Shell] Stopped.']);
+      else setLogs((prev) => [...prev, `[Shell] Error: ${e.message}. Make sure the backend (npm run server) is running.`]);
     } finally {
       setIsRunning(false);
       shellAbortRef.current = null;
@@ -815,7 +815,7 @@ for i in range(4):
                 id="tab-btn-gray"
                 className={`tab-btn ${activeAuxTab === 'gray' ? 'active' : ''}`}
                 onClick={() => { setActiveAuxTab('gray'); refreshGrayBlocks(); }}
-                title="전용 블록으로 변환되지 못해 회색(raw)으로 남은 부분"
+                title="Parts left as gray (raw) blocks that could not convert to dedicated blocks"
               >
                 Logs{grayBlocks.length ? ` (${grayBlocks.length})` : ''}
               </button>
@@ -846,8 +846,8 @@ for i in range(4):
                   {uploadedMedia.length > 0 && (
                     <div className="uploaded-media">
                       <div className="uploaded-media-head">
-                        <span><i className="fa-solid fa-photo-film"></i> 업로드한 미디어 ({uploadedMedia.length})</span>
-                        <button className="btn btn-secondary btn-xs" onClick={() => setUploadedMedia([])}>비우기</button>
+                        <span><i className="fa-solid fa-photo-film"></i> Uploaded Media ({uploadedMedia.length})</span>
+                        <button className="btn btn-secondary btn-xs" onClick={() => setUploadedMedia([])}>Clear</button>
                       </div>
                       <div className="uploaded-media-grid">
                         {uploadedMedia.map((m, i) => (
@@ -889,19 +889,19 @@ for i in range(4):
               {activeAuxTab === 'gray' && (
                 <div className="gray-blocks-panel">
                   <div className="gray-blocks-head">
-                    <span>회색(미변환) 블록: <b>{grayBlocks.length}</b>개</span>
+                    <span>Gray (unconverted) blocks: <b>{grayBlocks.length}</b></span>
                     <button className="btn btn-secondary btn-sm" onClick={refreshGrayBlocks}>
-                      <i className="fa-solid fa-rotate"></i> 새로고침
+                      <i className="fa-solid fa-rotate"></i> Refresh
                     </button>
                   </div>
                   {grayBlocks.length === 0 ? (
                     <div className="gray-blocks-empty">
-                      전용 블록으로 변환되지 않은 부분이 없습니다. Convert 후 여기서 확인하세요.
+                      No unconverted parts. Check here after Convert.
                     </div>
                   ) : (
                     <ul className="gray-blocks-list">
                       {grayBlocks.map((g) => (
-                        <li key={g.id} className="gray-block-item" onClick={() => jumpToGray(g.id)} title="클릭하면 해당 블록으로 이동">
+                        <li key={g.id} className="gray-block-item" onClick={() => jumpToGray(g.id)} title="Click to jump to the block">
                           <span className="gray-block-kind">{g.kind}</span>
                           <code className="gray-block-text">{g.text}</code>
                         </li>
@@ -952,12 +952,12 @@ for i in range(4):
                   className="btn btn-primary btn-sm"
                   id="btn-run-shell"
                   onClick={handleRunShell}
-                  title="로컬 파이썬(쉘)에서 실제로 실행 — cv2/imshow 출력은 별도 파이썬 창으로 열립니다"
+                  title="Run for real in local Python (shell) — cv2/imshow output opens in a separate Python window"
                 >
-                  <i className="fa-solid fa-play"></i> 실행
+                  <i className="fa-solid fa-play"></i> Run
                 </button>
                 <label className="btn btn-secondary btn-sm" htmlFor="cv-image-upload" style={{ cursor: 'pointer' }}>
-                  <i className="fa-solid fa-upload"></i> 이미지
+                  <i className="fa-solid fa-upload"></i> Image
                   <input
                     id="cv-image-upload"
                     type="file"
