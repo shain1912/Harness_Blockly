@@ -24,7 +24,9 @@ const KEYWORDS = [
   'del', 'global', 'nonlocal', 'yield', 'from',
   'is', // [W3] identity operator keyword (OP-09)
   // [W1] Exceptions & context managers (EXC-01..12). 'as'/'from' already added above.
-  'try', 'except', 'finally', 'raise', 'with', 'assert'
+  'try', 'except', 'finally', 'raise', 'with', 'assert',
+  // [W5] Async (ASY-01..04): async def / await / async for / async with.
+  'async', 'await'
 ];
 
 class Token {
@@ -671,6 +673,16 @@ class WithNode extends ASTNode {
   }
 }
 
+// [W5] `await <expr>` — an expression that unwraps an awaitable. Valid only inside an
+// `async def`; we parse it structurally and round-trip the `await ` prefix losslessly.
+class AwaitNode extends ASTNode {
+  constructor(value, line) {
+    super(line);
+    this.type = 'Await';
+    this.value = value;
+  }
+}
+
 // [W4] Dict literal: {"a": 1, "b": 2}, {}
 class DictNode extends ASTNode {
   constructor(keys, values, line) {
@@ -878,6 +890,10 @@ class Parser {
           return this.parseAssert();
         case 'with':
           return this.parseWith();
+        // [W5] async def / async for / async with — parse the inner compound statement
+        // and tag it isAsync. astToPython re-emits the `async ` prefix losslessly.
+        case 'async':
+          return this.parseAsync();
       }
     }
 
@@ -895,6 +911,10 @@ class Parser {
       const next = this.peek();
       if (next && next.type === TokenType.KEYWORD && next.value === 'def') {
         return this.parseFunctionDef(decorators);
+      }
+      // [W5] @deco over an async def
+      if (next && next.type === TokenType.KEYWORD && next.value === 'async') {
+        return this.parseAsync(decorators);
       }
       if (next && next.type === TokenType.KEYWORD && next.value === 'class') {
         return this.parseClassDef(decorators);
@@ -1150,6 +1170,25 @@ class Parser {
     this.expect(TokenType.NEWLINE, undefined, 'Expected newline after with statement');
     const body = this.parseSuite();
     return new WithNode(items, body, tok.line);
+  }
+
+  // [W5] `async` prefix on a def / for / with. Delegates to the existing parser for that
+  // compound statement, then tags the node isAsync so astToPython re-emits `async `.
+  parseAsync(decorators) {
+    this.expect(TokenType.KEYWORD, 'async');
+    const next = this.peek();
+    let node;
+    if (next && next.type === TokenType.KEYWORD && next.value === 'def') {
+      node = this.parseFunctionDef(decorators || []);
+    } else if (next && next.type === TokenType.KEYWORD && next.value === 'for') {
+      node = this.parseFor();
+    } else if (next && next.type === TokenType.KEYWORD && next.value === 'with') {
+      node = this.parseWith();
+    } else {
+      throw new SyntaxError('Expected "def", "for", or "with" after "async"');
+    }
+    node.isAsync = true;
+    return node;
   }
 
   parseIf() {
@@ -1631,6 +1670,12 @@ class Parser {
   }
 
   parseUnary() {
+    // [W5] `await <expr>` prefix — binds like a unary operator over its operand.
+    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'await') {
+      const tok = this.next();
+      const operand = this.parseUnary();
+      return new AwaitNode(operand, tok.line);
+    }
     // [W3] added bitwise NOT `~` as a unary prefix (OP-11), alongside - and +.
     if (this.peek() && this.peek().type === TokenType.SYMBOL && (this.peek().value === '-' || this.peek().value === '+' || this.peek().value === '~')) {
       const op = this.next().value;
@@ -2117,7 +2162,8 @@ function astToPython(node, indentLevel = 0) {
       
     case 'For':
       // [W4] targetToPython renders tuple targets unparenthesized (for k, v in ...)
-      const forHead = `${indent}for ${targetToPython(node.target)} in ${astToPython(node.iter)}:`;
+      // [W5] `async for` re-emits the async prefix.
+      const forHead = `${indent}${node.isAsync ? 'async ' : ''}for ${targetToPython(node.target)} in ${astToPython(node.iter)}:`;
       const forBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
       return `${forHead}\n${forBody || (indent + '    pass')}`;
       
@@ -2282,7 +2328,8 @@ function astToPython(node, indentLevel = 0) {
       
     case 'FunctionDef': {
       const decoratorLines = (node.decorators || []).map(d => `${indent}@${astToPython(d)}`).join('\n');
-      const sig = `${indent}def ${node.name}(${node.params.join(', ')}):`;
+      // [W5] `async def` re-emits the async prefix.
+      const sig = `${indent}${node.isAsync ? 'async ' : ''}def ${node.name}(${node.params.join(', ')}):`;
       const fnBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
       const prefix = decoratorLines ? decoratorLines + '\n' : '';
       return `${prefix}${sig}\n${fnBody || (indent + '    pass')}`;
@@ -2291,6 +2338,10 @@ function astToPython(node, indentLevel = 0) {
       return node.value === null ? `${indent}return` : `${indent}return ${astToPython(node.value)}`;
     case 'Lambda':
       return `lambda ${node.params.join(', ')}: ${astToPython(node.body)}`;
+
+    // [W5] `await <expr>` — re-emit the prefix losslessly.
+    case 'Await':
+      return `${indent}await ${astToPython(node.value)}`;
 
     case 'ClassDef': {
       const decoratorLines = (node.decorators || []).map(d => `${indent}@${astToPython(d)}`).join('\n');
@@ -2394,7 +2445,7 @@ function astToPython(node, indentLevel = 0) {
         if (it.asName) s += ` as ${it.asName}`;
         return s;
       }).join(', ');
-      const withHead = `${indent}with ${itemsStr}:`;
+      const withHead = `${indent}${node.isAsync ? 'async ' : ''}with ${itemsStr}:`;
       const withBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
       return `${withHead}\n${withBody || (indent + '    pass')}`;
     }
