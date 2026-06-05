@@ -5,6 +5,9 @@ export default function LibraryManager({
   installedBlocks,
   aiThoughts,
   isAbstracting,
+  pipPkg = '',
+  onPipPkgChange,
+  onPipInstallShell,
 }) {
   const [selectedLib, setSelectedLib] = useState('cv2');
   const [customPrompt, setCustomPrompt] = useState('import tensorflow as tf\nmodel = tf.keras.Sequential()\nmodel.compile(optimizer="adam")\nmodel.fit(x, y)');
@@ -27,7 +30,25 @@ export default function LibraryManager({
 
       <div className="library-body">
 
-        {/* pip install lives in the OpenCV/Shell panel now (real local pip). */}
+        {/* ── pip install (real local shell pip) ───────────── */}
+        <div className="form-group">
+          <label htmlFor="pip-pkg-input">pip install — 라이브러리 설치</label>
+          <form
+            className="pip-form"
+            onSubmit={(e) => { e.preventDefault(); onPipInstallShell && onPipInstallShell(); }}
+          >
+            <span className="pip-label">pip install</span>
+            <input
+              id="pip-pkg-input"
+              className="pip-input"
+              type="text"
+              value={pipPkg}
+              onChange={(e) => onPipPkgChange && onPipPkgChange(e.target.value)}
+              placeholder="예: pillow, numpy, mediapipe ..."
+            />
+            <button type="submit" className="btn btn-primary btn-sm" disabled={!pipPkg.trim()}>설치</button>
+          </form>
+        </div>
 
         {/* ── AI Block Abstraction ────────────────────────── */}
         <div className="form-group">

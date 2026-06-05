@@ -49,7 +49,7 @@ export default function App() {
   // Tabs layout variables
   const [activeEditorTab, setActiveEditorTab] = useState('blockly');
   const [activeAuxTab, setActiveAuxTab] = useState('stage');
-  const [isDarkTheme, setIsDarkTheme] = useState(true);
+  const [isDarkTheme, setIsDarkTheme] = useState(false); // default = Claude cream (light)
 
   // Synchronization refs
   const workspaceRef = useRef(null);
@@ -746,10 +746,10 @@ for i in range(4):
     setLogs(prev => [...prev, '[System] Cleaned trailing spaces and formatted editor lines.']);
   };
 
-  // Theme Toggler
+  // Theme Toggler — default is the Claude cream canvas; toggle flips to the in-brand dark navy.
   const toggleTheme = () => {
     setIsDarkTheme(!isDarkTheme);
-    document.body.classList.toggle('light-theme');
+    document.body.classList.toggle('theme-dark');
     
     // Refresh workspace layout safely
     if (workspaceRef.current) {
@@ -793,21 +793,21 @@ for i in range(4):
                 className={`tab-btn ${activeAuxTab === 'stage' ? 'active' : ''}`}
                 onClick={() => setActiveAuxTab('stage')}
               >
-                Interactive Stage
+                Stage
               </button>
               <button
                 id="tab-btn-variables"
                 className={`tab-btn ${activeAuxTab === 'variables' ? 'active' : ''}`}
                 onClick={() => setActiveAuxTab('variables')}
               >
-                Variables Watch
+                Variable
               </button>
               <button
                 id="tab-btn-logs"
                 className={`tab-btn ${activeAuxTab === 'logs' ? 'active' : ''}`}
                 onClick={() => setActiveAuxTab('logs')}
               >
-                Logs Terminal
+                Terminal
               </button>
               <button
                 id="tab-btn-gray"
@@ -815,14 +815,14 @@ for i in range(4):
                 onClick={() => { setActiveAuxTab('gray'); refreshGrayBlocks(); }}
                 title="전용 블록으로 변환되지 못해 회색(raw)으로 남은 부분"
               >
-                회색 블록{grayBlocks.length ? ` (${grayBlocks.length})` : ''}
+                Logs{grayBlocks.length ? ` (${grayBlocks.length})` : ''}
               </button>
               <button
                 id="tab-btn-ai"
                 className={`tab-btn ${activeAuxTab === 'ai' ? 'active' : ''}`}
                 onClick={() => setActiveAuxTab('ai')}
               >
-                AI Abstractions
+                AI
               </button>
             </div>
             <div className="tab-content-wrapper">
@@ -852,65 +852,6 @@ for i in range(4):
               )}
               {activeAuxTab === 'ai' && (
                 <div className="ai-tab-scroll">
-                  {/* OpenCV image workflow — real shell run, image upload, pip install, imshow output */}
-                  <div className="cv-image-card">
-                    <div className="panel-header">
-                      <div className="panel-title-group">
-                        <i className="fa-solid fa-image icon-cyan"></i>
-                        <h3>이미지 / OpenCV 출력</h3>
-                      </div>
-                      <div className="panel-actions" style={{ gap: 8 }}>
-                        <button
-                          className="btn btn-primary btn-sm"
-                          id="btn-run-shell"
-                          onClick={handleRunShell}
-                          title="로컬 파이썬(쉘)에서 실제로 실행 — 진짜 cv2/웹캠/imshow 창"
-                        >
-                          <i className="fa-solid fa-terminal"></i> 실제 실행 (Shell)
-                        </button>
-                        <label className="btn btn-teal btn-sm" htmlFor="cv-image-upload" style={{ cursor: 'pointer' }}>
-                          <i className="fa-solid fa-upload"></i> 이미지 업로드
-                          <input
-                            id="cv-image-upload"
-                            type="file"
-                            accept="image/*"
-                            style={{ display: 'none' }}
-                            onChange={(e) => handleImageUpload(e.target.files && e.target.files[0])}
-                          />
-                        </label>
-                      </div>
-                    </div>
-                    <form
-                      className="pip-form"
-                      style={{ margin: '6px 0' }}
-                      onSubmit={(e) => { e.preventDefault(); handlePipInstallShell(); }}
-                    >
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600, opacity: 0.8 }}>pip install</span>
-                      <input
-                        className="pip-input"
-                        type="text"
-                        value={pipPkg}
-                        onChange={(e) => setPipPkg(e.target.value)}
-                        placeholder="예: pillow, numpy, mediapipe ..."
-                      />
-                      <button type="submit" className="btn btn-secondary btn-sm" disabled={!pipPkg.trim()}>설치</button>
-                    </form>
-                    <div className="cv-image-body">
-                      {cv2Images.length === 0 ? (
-                        <div className="cv-image-placeholder">
-                          이미지를 업로드하고 OpenCV 예제를 Run 하면 처리 결과가 여기 표시됩니다.
-                          {uploadedImageName ? ` (업로드됨: ${uploadedImageName})` : ''}
-                        </div>
-                      ) : (
-                        cv2Images.map((im, i) => (
-                          <figure key={i} className="cv-image-figure">
-                            <img src={im.dataUrl} alt={im.title} className="cv-image-out" />
-                            <figcaption>{im.title}</figcaption>
-                          </figure>
-                        ))
-                      )}
-                    </div>
-                  </div>
                   <LibraryManager
                     onAbstract={handleAbstractLibrary}
                     onPipInstall={handlePipInstall}
@@ -919,6 +860,9 @@ for i in range(4):
                     isAbstracting={isAbstracting}
                     pyodideReady={pyodideReady}
                     pyodideLoading={pyodideLoading}
+                    pipPkg={pipPkg}
+                    onPipPkgChange={setPipPkg}
+                    onPipInstallShell={handlePipInstallShell}
                   />
                 </div>
               )}
@@ -975,13 +919,34 @@ for i in range(4):
               >
                 <i className="fa-solid fa-wand-magic-sparkles"></i> Desugared Code Normalizer
               </button>
-              <button 
+              <button
                 id="tab-btn-ast"
                 className={`tab-btn ${activeEditorTab === 'ast' ? 'active' : ''}`}
                 onClick={() => setActiveEditorTab('ast')}
               >
                 <i className="fa-solid fa-diagram-project"></i> AST Parser Tree
               </button>
+              {/* Run (real shell) + image upload — output opens in a separate Python window */}
+              <div className="editor-tab-actions">
+                <button
+                  className="btn btn-primary btn-sm"
+                  id="btn-run-shell"
+                  onClick={handleRunShell}
+                  title="로컬 파이썬(쉘)에서 실제로 실행 — cv2/imshow 출력은 별도 파이썬 창으로 열립니다"
+                >
+                  <i className="fa-solid fa-play"></i> 실행
+                </button>
+                <label className="btn btn-secondary btn-sm" htmlFor="cv-image-upload" style={{ cursor: 'pointer' }}>
+                  <i className="fa-solid fa-upload"></i> 이미지
+                  <input
+                    id="cv-image-upload"
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleImageUpload(e.target.files && e.target.files[0])}
+                  />
+                </label>
+              </div>
             </div>
             
             <div className="editor-content-wrapper" style={{ height: 'calc(100% - 48px)' }}>
