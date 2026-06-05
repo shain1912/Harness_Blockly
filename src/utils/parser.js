@@ -1795,11 +1795,28 @@ class Parser {
       if (tok.value === 'lambda') {
         this.next();
         const params = [];
-        if (this.peek() && this.peek().type === TokenType.IDENTIFIER) {
-          params.push(this.next().value);
+        // A lambda param is `name`, `name=default`, `*args`, or `**kwargs`. Defaults are
+        // captured as source ("name=<expr>") so they round-trip; library callbacks use them.
+        const parseLambdaParam = () => {
+          let prefix = '';
+          if (this.match(TokenType.SYMBOL, '**')) prefix = '**';
+          else if (this.match(TokenType.SYMBOL, '*')) prefix = '*';
+          const id = this.expect(TokenType.IDENTIFIER, undefined, 'Expected parameter name in lambda').value;
+          if (!prefix && this.match(TokenType.SYMBOL, '=')) {
+            const def = this.parseExpression();
+            return `${id}=${astToPython(def)}`;
+          }
+          return prefix + id;
+        };
+        const startsParam = () => {
+          const p = this.peek();
+          return p && (p.type === TokenType.IDENTIFIER ||
+            (p.type === TokenType.SYMBOL && (p.value === '*' || p.value === '**')));
+        };
+        if (startsParam()) {
+          params.push(parseLambdaParam());
           while (this.match(TokenType.SYMBOL, ',')) {
-            const p = this.expect(TokenType.IDENTIFIER, undefined, 'Expected parameter name in lambda');
-            params.push(p.value);
+            params.push(parseLambdaParam());
           }
         }
         this.expect(TokenType.SYMBOL, ':', 'Expected ":" in lambda expression');
@@ -3999,11 +4016,13 @@ function convertExpressionToBlock(node) {
     }
 
     case 'Lambda':
-      // Use raw_expression to preserve lambda as callable (not string literal)
+      // Dedicated lambda_func block: PARAMS field (comma-joined param sources) + BODY
+      // expression input. Common in library code (df.apply, map/filter, sorted(key=...)).
       return {
-        "type": "raw_expression",
+        "type": "lambda_func",
         "id": makeBlockId(),
-        "fields": { "EXPR": astToPython(node) }
+        "fields": { "PARAMS": (node.params || []).join(', ') },
+        "inputs": { "BODY": { "block": convertExpressionToBlock(node.body) } }
       };
 
     case 'Ternary':
@@ -4607,6 +4626,31 @@ Blockly.Python['method_call'] = function(block) {
   return [`${recv}.${method}(${args.join(', ')})`, Blockly.Python.ORDER_FUNCTION_CALL];
 };
 if (Blockly.Python.forBlock) Blockly.Python.forBlock['method_call'] = Blockly.Python['method_call'];
+
+// Lambda expression: lambda <params>: <body>. PARAMS is an editable text field holding the
+// comma-separated parameter sources (incl. defaults / *args); BODY is the expression input.
+// Pervasive in library code — df.apply(lambda x: ...), map/filter, sorted(key=lambda ...).
+Blockly.Blocks['lambda_func'] = {
+  init: function() {
+    this.appendValueInput('BODY')
+        .setCheck(null)
+        .appendField('lambda')
+        .appendField(new Blockly.FieldTextInput(''), 'PARAMS')
+        .appendField(':');
+    this.setInputsInline(true);
+    this.setOutput(true, null);
+    this.setColour('#FF6680');
+    this.setTooltip('Lambda: lambda params: expression');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['lambda_func'] = function(block) {
+  const params = (block.getFieldValue('PARAMS') || '').trim();
+  const body = Blockly.Python.valueToCode(block, 'BODY', Blockly.Python.ORDER_NONE) || 'None';
+  const code = `lambda${params ? ' ' + params : ''}: ${body}`;
+  return [code, Blockly.Python.ORDER_LAMBDA !== undefined ? Blockly.Python.ORDER_LAMBDA : Blockly.Python.ORDER_NONE];
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['lambda_func'] = Blockly.Python['lambda_func'];
 
 // [Demo] String concatenation a + b — untyped inputs so strings/text blocks connect
 // (math_arithmetic's Number-typed inputs would coerce strings to 0). Chains nest via B.
