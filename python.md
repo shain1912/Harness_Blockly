@@ -21,11 +21,13 @@ Measured over all **182** catalog rows.
 | Bucket | Count | % of 182 |
 |--------|-------|----------|
 | ✅ Matched (dedicated block) | 158 | 86.8% |
-| 🟡 Partial (`raw` fallback) | 5 | 2.7% |
-| ❌ Missing | 19 | 10.4% |
+| 🟡 Partial (`raw` fallback) | 9 | 4.9% |
+| ❌ Missing | 15 | 8.2% |
 
-- **block-convertible %** = (matched + partial) / total = (158 + 5) / 182 = **89.6%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
+- **block-convertible %** = (matched + partial) / total = (158 + 9) / 182 = **91.8%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
 - **dedicated-block %** = matched / total = 158 / 182 = **86.8%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+
+> **Update (W5 async/await):** `async def` / `await` / `async for` / `async with` (ASY-01..04) were every-row parse errors (whole section ❌). They now parse and round-trip **losslessly at the Python level**, moving the 4 rows ❌→🟡 (block-convertible 89.6%→91.8%; no more crash on async code). They are not yet ✅ because the block view drops the `async` qualifier (def/for/with) and `await` uses the `raw_expression` fallback — encoding `async`/`await` in the blocks is the follow-up to reach dedicated ✅.
 
 > **Update (method_call routing):** any `receiver.method(args)` call that no specialized path claims now emits the dedicated **`method_call`** block instead of a gray `raw_*` lump. That flipped **17** rows (all `str/dict/set/tuple` type methods, every `module.func(...)` stdlib call, and `for k, v in d.items()`) from 🟡→✅, raising dedicated-block coverage **77.5% → 86.8%**. The 5 remaining 🟡 are non-call constructs: lambda, docstring bodies, multi-`with`, and bare `range()`.
 
@@ -45,16 +47,15 @@ Measured over all **182** catalog rows.
 | 10. Built-in Functions (BIF) | 20 | 19 | 1 | 0 |
 | 11. Built-in Type Methods (MTH) | 5 | 5 | 0 | 0 |
 | 12. Standard Library Modules (STD) | 20 | 19 | 0 | 1 |
-| 13. Async (ASY) | 4 | 0 | 0 | 4 |
+| 13. Async (ASY) | 4 | 0 | 4 | 0 |
 | 14. Comments & Misc (MSC) | 6 | 2 | 1 | 3 |
-| **Total** | **182** | **158** | **5** | **19** |
+| **Total** | **182** | **158** | **9** | **15** |
 
 **Weakest sections** (most ❌ missing — these are genuine parse errors, the real remaining gaps):
 
-1. **Async (ASY)** — 0/4. `async def` / `await` / `async for` / `async with` are not tokenized (the `async`/`await` keywords are unknown), so every row is a parse error.
-2. **Control Flow (CF)** — 12/16; the `for/else`, `while/else`, and `match/case` (+ patterns) constructs are parse errors (4 missing).
-3. **Comments & Misc (MSC)** — 2/6; line continuation `\`, semicolon-separated statements, and 3.12 `type` aliases are parse errors.
-4. **Literals/Assignment edge cases** — complex literal `3+4j`, bytes `b"..."`, annotated/walrus assignment (a handful of ❌ across LIT/ASG).
+1. **Control Flow (CF)** — 12/16; the `for/else`, `while/else`, and `match/case` (+ patterns) constructs are parse errors (4 missing).
+2. **Comments & Misc (MSC)** — 2/6; line continuation `\`, semicolon-separated statements, and 3.12 `type` aliases are parse errors.
+3. **Literals/Assignment edge cases** — complex literal `3+4j`, bytes `b"..."`, annotated/walrus assignment (a handful of ❌ across LIT/ASG).
 
 ---
 
@@ -344,10 +345,10 @@ Each is a `Call` to a known builtin. Grouped for mapping.
 
 | ID | Construct | Example | Block? |
 |----|-----------|---------|--------|
-| ASY-01 | `async def` | `async def f():` | ❌ parse error (async def) |
-| ASY-02 | `await` | `await coro()` | ❌ parse error (await) |
-| ASY-03 | `async for` | `async for x in ait:` | ❌ parse error (async for) |
-| ASY-04 | `async with` | `async with cm() as x:` | ❌ parse error (async with) |
+| ASY-01 | `async def` | `async def f():` | 🟡 `procedures_def*` — [W5] parses & round-trips losslessly (Python level); the dedicated def block does not yet encode the `async` qualifier (block→code drops it). |
+| ASY-02 | `await` | `await coro()` | 🟡 raw — [W5] parses & round-trips losslessly; `await <expr>` falls to the lossless `raw_expression` fallback (no dedicated await block yet). |
+| ASY-03 | `async for` | `async for x in ait:` | 🟡 `for_each_custom` — [W5] parses & round-trips losslessly; the for block does not yet encode `async`. |
+| ASY-04 | `async with` | `async with cm() as x:` | 🟡 `with_statement` — [W5] parses & round-trips losslessly; the with block does not yet encode `async`. |
 
 ---
 
