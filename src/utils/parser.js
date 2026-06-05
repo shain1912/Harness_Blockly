@@ -1239,7 +1239,21 @@ class Parser {
     this.expect(TokenType.SYMBOL, ':', 'Expected ":" after while condition');
     this.expect(TokenType.NEWLINE, undefined, 'Expected newline after while statement');
     const body = this.parseSuite();
-    return new WhileNode(test, body, tok.line);
+    const node = new WhileNode(test, body, tok.line);
+    node.orelse = this.parseLoopElse(); // [W6] optional while/else (CF-11)
+    return node;
+  }
+
+  // [W6] Parse an optional `else:` suite trailing a for/while loop. Returns [] if absent.
+  // The loop-else runs only when the loop finishes without hitting `break`.
+  parseLoopElse() {
+    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'else') {
+      this.next();
+      this.expect(TokenType.SYMBOL, ':', 'Expected ":" after loop-else');
+      this.expect(TokenType.NEWLINE, undefined, 'Expected newline after loop-else');
+      return this.parseSuite();
+    }
+    return [];
   }
 
   parseFor() {
@@ -1249,12 +1263,14 @@ class Parser {
 
     this.expect(TokenType.KEYWORD, 'in', 'Expected "in" keyword in for-loop');
     const iter = this.parseExpression();
-    
+
     this.expect(TokenType.SYMBOL, ':', 'Expected ":" after loop expression');
     this.expect(TokenType.NEWLINE, undefined, 'Expected newline after for statement');
-    
+
     const body = this.parseSuite();
-    return new ForNode(target, iter, body, tok.line);
+    const node = new ForNode(target, iter, body, tok.line);
+    node.orelse = this.parseLoopElse(); // [W6] optional for/else (CF-08)
+    return node;
   }
 
   parseFunctionDef(decorators) {
@@ -2160,17 +2176,27 @@ function astToPython(node, indentLevel = 0) {
     case 'AugAssign':
       return `${indent}${astToPython(node.target)} ${node.op} ${astToPython(node.value)}`;
       
-    case 'For':
+    case 'For': {
       // [W4] targetToPython renders tuple targets unparenthesized (for k, v in ...)
       // [W5] `async for` re-emits the async prefix.
       const forHead = `${indent}${node.isAsync ? 'async ' : ''}for ${targetToPython(node.target)} in ${astToPython(node.iter)}:`;
       const forBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
-      return `${forHead}\n${forBody || (indent + '    pass')}`;
+      // [W6] for/else clause (CF-08)
+      const forElse = (node.orelse && node.orelse.length)
+        ? `\n${indent}else:\n${node.orelse.map(s => astToPython(s, indentLevel + 1)).join('\n')}`
+        : '';
+      return `${forHead}\n${forBody || (indent + '    pass')}${forElse}`;
+    }
       
-    case 'While':
+    case 'While': {
       const whileHead = `${indent}while ${astToPython(node.test)}:`;
       const whileBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
-      return `${whileHead}\n${whileBody || (indent + '    pass')}`;
+      // [W6] while/else clause (CF-11)
+      const whileElse = (node.orelse && node.orelse.length)
+        ? `\n${indent}else:\n${node.orelse.map(s => astToPython(s, indentLevel + 1)).join('\n')}`
+        : '';
+      return `${whileHead}\n${whileBody || (indent + '    pass')}${whileElse}`;
+    }
       
     case 'If':
       const ifHead = `${indent}if ${astToPython(node.test)}:`;
@@ -2853,6 +2879,24 @@ function convertStatementToBlock(node) {
 
     case 'For': {
       const asyncFields = node.isAsync ? { "ASYNC_LABEL": "async " } : {}; // [W5]
+      // [W6] for/else (CF-08): no standard/repeat loop block has an else branch, so route any
+      // for-with-else (tuple or not, range or not) to the dedicated for_else block. TARGET is a
+      // text field that holds simple names AND tuple targets ("k, v") for a lossless head.
+      if (node.orelse && node.orelse.length) {
+        const block = {
+          "type": "for_else",
+          "id": makeBlockId(),
+          "fields": { "TARGET": targetToPython(node.target), ...asyncFields },
+          "inputs": {
+            "ITER": { "block": convertExpressionToBlock(node.iter) }
+          }
+        };
+        const doBlock = convertStatementListToBlock(node.body);
+        if (doBlock) block.inputs["DO"] = { "block": doBlock };
+        const elseBlock = convertStatementListToBlock(node.orelse);
+        if (elseBlock) block.inputs["ELSE"] = { "block": elseBlock };
+        return block;
+      }
       // [W4] Tuple target (for k, v in ...) -> custom for_unpack block.
       if (node.target && node.target.type === 'Tuple') {
         const targetStr = node.target.elts.map(e => astToPython(e)).join(', ');
@@ -2956,6 +3000,22 @@ function convertStatementToBlock(node) {
     }
 
     case 'While': {
+      // [W6] while/else (CF-11): controls_whileUntil has no else branch — route to the
+      // dedicated while_else block when an else clause is present.
+      if (node.orelse && node.orelse.length) {
+        const block = {
+          "type": "while_else",
+          "id": makeBlockId(),
+          "inputs": {
+            "BOOL": { "block": convertExpressionToBlock(node.test) }
+          }
+        };
+        const doBlock = convertStatementListToBlock(node.body);
+        if (doBlock) block.inputs["DO"] = { "block": doBlock };
+        const elseBlock = convertStatementListToBlock(node.orelse);
+        if (elseBlock) block.inputs["ELSE"] = { "block": elseBlock };
+        return block;
+      }
       return {
         "type": "controls_whileUntil",
         "id": makeBlockId(),
@@ -4802,6 +4862,63 @@ Blockly.Python['for_each_custom'] = function(block) {
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['for_each_custom'] = Blockly.Python['for_each_custom'];
+}
+
+// [W6] for/else (CF-08): a for-each loop with an `else:` branch that runs when the loop
+// completes without break. TARGET holds a simple name or a tuple target ("k, v").
+Blockly.Blocks['for_else'] = {
+  init: function() {
+    this.appendValueInput('ITER').setCheck(null)
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL') // [W5] async for/else
+        .appendField('for')
+        .appendField(new Blockly.FieldTextInput('item'), 'TARGET')
+        .appendField('in');
+    this.appendStatementInput('DO').setCheck(null).appendField('do');
+    this.appendStatementInput('ELSE').setCheck(null).appendField('else');
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#5ba55b');
+    this.setTooltip('for <target> in <iterable>: ... else: ... (else runs if no break)');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['for_else'] = function(block) {
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || '';
+  const target = block.getFieldValue('TARGET') || 'item';
+  const iter = Blockly.Python.valueToCode(block, 'ITER', Blockly.Python.ORDER_NONE) || '[]';
+  let body = Blockly.Python.statementToCode(block, 'DO');
+  if (!body) body = (Blockly.Python.INDENT || '    ') + 'pass\n';
+  let elseBody = Blockly.Python.statementToCode(block, 'ELSE');
+  if (!elseBody) elseBody = (Blockly.Python.INDENT || '    ') + 'pass\n';
+  return `${asyncPrefix}for ${target} in ${iter}:\n${body}else:\n${elseBody}`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['for_else'] = Blockly.Python['for_else'];
+}
+
+// [W6] while/else (CF-11): a while loop with an `else:` branch that runs on normal completion.
+Blockly.Blocks['while_else'] = {
+  init: function() {
+    this.appendValueInput('BOOL').setCheck(null).appendField('while');
+    this.appendStatementInput('DO').setCheck(null).appendField('do');
+    this.appendStatementInput('ELSE').setCheck(null).appendField('else');
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#5ba55b');
+    this.setTooltip('while <cond>: ... else: ... (else runs if no break)');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['while_else'] = function(block) {
+  const cond = Blockly.Python.valueToCode(block, 'BOOL', Blockly.Python.ORDER_NONE) || 'True';
+  let body = Blockly.Python.statementToCode(block, 'DO');
+  if (!body) body = (Blockly.Python.INDENT || '    ') + 'pass\n';
+  let elseBody = Blockly.Python.statementToCode(block, 'ELSE');
+  if (!elseBody) elseBody = (Blockly.Python.INDENT || '    ') + 'pass\n';
+  return `while ${cond}:\n${body}else:\n${elseBody}`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['while_else'] = Blockly.Python['while_else'];
 }
 
 // [Demo] keyword argument: name=value (a real editable block, not a raw lump).
