@@ -792,6 +792,20 @@ class Parser {
     return this.tokens[this.cursor++];
   }
 
+  // [W5] True if the cursor is at the start of a comprehension for-clause — either `for`
+  // or an async comprehension's `async for` (PEP 530). Lets every comprehension entry point
+  // accept `[x async for x in ait]` without duplicating the two-token lookahead.
+  _atCompFor() {
+    const t = this.peek();
+    if (!t || t.type !== TokenType.KEYWORD) return false;
+    if (t.value === 'for') return true;
+    if (t.value === 'async') {
+      const n = this.tokens[this.cursor + 1];
+      return !!(n && n.type === TokenType.KEYWORD && n.value === 'for');
+    }
+    return false;
+  }
+
   match(type, value) {
     const tok = this.peek();
     if (!tok) return false;
@@ -1765,7 +1779,7 @@ class Parser {
       return { type: 'Keyword', name: expr.id, value: this.parseExpression(), line: expr.line };
     }
     // bare generator expression argument:  func(x for x in xs)
-    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    if (this._atCompFor()) { // [W5] also matches `async for` (async comprehension)
       const generators = this.parseComprehensionClauses();
       return new GenExpNode(expr, generators, expr.line);
     }
@@ -1900,7 +1914,7 @@ class Parser {
     const first = this.parseExpression();
 
     // Generator expression: (elt for target in iter ...)
-    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    if (this._atCompFor()) { // [W5] also matches `async for` (async comprehension)
       const generators = this.parseComprehensionClauses();
       this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing generator expression');
       return new GenExpNode(first, generators, startTok.line);
@@ -1940,7 +1954,7 @@ class Parser {
       const firstVal = this.parseExpression();
 
       // Dict comprehension: {k: v for ...}
-      if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+      if (this._atCompFor()) { // [W5] also matches `async for`
         const generators = this.parseComprehensionClauses();
         this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing dict comprehension');
         return new DictCompNode(first, firstVal, generators, startTok.line);
@@ -1965,7 +1979,7 @@ class Parser {
     }
 
     // Set comprehension: {x for ...}
-    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    if (this._atCompFor()) { // [W5] also matches `async for` (async comprehension)
       const generators = this.parseComprehensionClauses();
       this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing set comprehension');
       return new SetCompNode(first, generators, startTok.line);
@@ -1995,7 +2009,7 @@ class Parser {
     const first = this.parseExpression();
 
     // Check for List Comprehension: [elt for target in iter ...]
-    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    if (this._atCompFor()) { // [W5] also matches `async for` (async list comprehension)
       // [W4] support multiple "for" clauses (nested) and multiple "if" filters
       const generators = this.parseComprehensionClauses();
       this.expect(TokenType.SYMBOL, ']', 'Expected closing bracket "]" in list comprehension');
@@ -2030,7 +2044,10 @@ class Parser {
   // Assumes the cursor is positioned on the first "for" keyword.
   parseComprehensionClauses() {
     const generators = [];
-    while (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    while (this._atCompFor()) {
+      // [W5] optional `async` before `for` -> async comprehension clause (PEP 530)
+      let isAsync = false;
+      if (this.peek().value === 'async') { this.next(); isAsync = true; }
       const forTok = this.next(); // consume 'for'
       const target = this.parseCompTarget();
       this.expect(TokenType.KEYWORD, 'in', 'Expected "in" keyword in comprehension');
@@ -2041,7 +2058,9 @@ class Parser {
         this.next(); // consume 'if'
         ifs.push(this.parseLogicalOr());
       }
-      generators.push(new ComprehensionNode(target, iter, ifs, forTok.line));
+      const comp = new ComprehensionNode(target, iter, ifs, forTok.line);
+      comp.isAsync = isAsync;
+      generators.push(comp);
     }
     return generators;
   }
@@ -2121,7 +2140,8 @@ function comprehensionClausesToPython(generators) {
   if (!generators || generators.length === 0) return '';
   return generators.map(g => {
     const ifsStr = (g.ifs || []).map(c => ` if ${astToPython(c)}`).join('');
-    return ` for ${targetToPython(g.target)} in ${astToPython(g.iter)}${ifsStr}`;
+    const forKw = g.isAsync ? ' async for' : ' for'; // [W5] async comprehension (PEP 530)
+    return `${forKw} ${targetToPython(g.target)} in ${astToPython(g.iter)}${ifsStr}`;
   }).join('');
 }
 

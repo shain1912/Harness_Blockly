@@ -40,3 +40,24 @@ test.describe('async/await support (ASY-01..04, pure Node)', () => {
     });
   }
 });
+
+// [W5] async comprehensions (PEP 530): `async for` clause inside list/set/dict/gen
+// comprehensions, and `await` as the element expression.
+const COMP_CASES = [
+  'data = [x async for x in stream()]',
+  'vals = [await f(x) async for x in ait()]',
+  'd = {k: v async for k, v in apairs()}',
+  's = {x async for x in ait()}',
+  'g = (x async for x in ait())',
+];
+
+test.describe('async comprehensions (PEP 530, pure Node)', () => {
+  for (const code of COMP_CASES) {
+    test(`"${code}" round-trips losslessly without a raw lump`, () => {
+      const { py, types } = analyze(code);
+      expect(norm(py)).toBe(norm(code));
+      expect(types).not.toContain('raw_statement');
+      expect(types).not.toContain('raw_expression');
+    });
+  }
+});
