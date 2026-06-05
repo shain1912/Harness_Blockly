@@ -31,12 +31,12 @@ export default function Stage({
     let animationId;
 
     const render = () => {
-      // 1. Clear background grid
-      ctx.fillStyle = '#0b0f19'; // dark theme background
+      // 1. Clear background grid — warm cream canvas (Claude theme)
+      ctx.fillStyle = '#faf9f5';
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
       // Draw Cartesian coordinate grid lines
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
+      ctx.strokeStyle = 'rgba(20, 20, 19, 0.05)';
       ctx.lineWidth = 1;
       for (let x = 40; x < canvasWidth; x += 40) {
         ctx.beginPath();
@@ -52,7 +52,7 @@ export default function Stage({
       }
 
       // Draw Center Axes
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)';
+      ctx.strokeStyle = 'rgba(93, 184, 166, 0.35)';
       ctx.beginPath();
       ctx.moveTo(canvasWidth / 2, 0);
       ctx.lineTo(canvasWidth / 2, canvasHeight);
@@ -89,22 +89,22 @@ export default function Stage({
         ctx.fill();
       }
 
-      // Draw futuristic metallic spaceship polygon
-      ctx.strokeStyle = '#06b6d4';
+      // Draw the sprite — warm coral→teal, tuned for the cream canvas
+      ctx.strokeStyle = '#cc785c';
       ctx.lineWidth = 2;
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = '#06b6d4';
-      
+      ctx.shadowBlur = 6;
+      ctx.shadowColor = 'rgba(204, 120, 92, 0.45)';
+
       ctx.beginPath();
       ctx.moveTo(12, 0); // Head nose cone
       ctx.lineTo(-10, -10); // Left wing
       ctx.lineTo(-6, 0); // Tail hull
       ctx.lineTo(-10, 10); // Right wing
       ctx.closePath();
-      
+
       const shipGrad = ctx.createLinearGradient(-10, 0, 12, 0);
-      shipGrad.addColorStop(0, '#a855f7');
-      shipGrad.addColorStop(1, '#06b6d4');
+      shipGrad.addColorStop(0, '#cc785c');
+      shipGrad.addColorStop(1, '#5db8a6');
       ctx.fillStyle = shipGrad;
       ctx.fill();
       ctx.stroke();

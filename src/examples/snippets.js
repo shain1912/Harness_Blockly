@@ -102,7 +102,7 @@ const DEMO_SNIPPETS = [
   // not stdout, so expectedStdout is empty (the test asserts render + no error).
   {
     id: 'cv-gray', title: 'OpenCV: 그레이스케일', category: 'OpenCV', desugar: true, execute: true,
-    code: 'import cv2\nimg = cv2.imread("test.jpg")\ngray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)\ncv2.imshow("gray", gray)',
+    code: 'import cv2\nimg = cv2.imread("test.jpg")\ngray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)\ncv2.imshow("gray", gray)\ncv2.waitKey(1000)\ncv2.destroyAllWindows()',
     expectedStdout: [],
   },
   {
