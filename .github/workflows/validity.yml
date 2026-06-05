@@ -1,0 +1,25 @@
+# P4 validity harness — the 1:1 lossless contract is a merge gate.
+#
+# Runs the pure-Node round-trip corpora (Layer 1: Invariant-1) plus the macro template
+# and idempotence checks (Layers 2-3) on every push / PR. These specs don't navigate a
+# page, so they need only the Playwright runner + a browser binary — no backend, no AI keys.
+name: validity
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  validity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: 1:1 validity gate (core corpora + macro layers)
+        run: npm run test:validity -- --reporter=line --workers=4
