@@ -29,6 +29,7 @@ export default function App() {
   // OpenCV image output (from real cv2.imshow) + uploaded image name
   const [cv2Images, setCv2Images] = useState([]);
   const [uploadedImageName, setUploadedImageName] = useState(null);
+  const [uploadedMedia, setUploadedMedia] = useState([]); // thumbnails of uploaded media, shown under the Stage
 
   // Gray (raw_statement/raw_expression) blocks — parts that didn't map to a dedicated block.
   const [grayBlocks, setGrayBlocks] = useState([]);
@@ -461,6 +462,7 @@ for i in range(4):
         if (resp.ok) { const d = await resp.json(); shellNote = ` (Shell 실행에서도 cv2.imread("${d.savedAs}") 사용 가능)`; }
       } catch (_) { /* backend may be off — browser Run still works */ }
       setCv2Images([{ title: `업로드: ${file.name}`, dataUrl }]);
+      setUploadedMedia((prev) => [{ name: file.name, dataUrl }, ...prev.filter((m) => m.name !== file.name)].slice(0, 12));
       setLogs((prev) => [...prev, `[이미지] "${file.name}" 업로드됨 — cv2.imread("${file.name}")로 사용하세요.${shellNote}`]);
     } catch (e) {
       setLogs((prev) => [...prev, `[이미지 업로드 오류] ${e.message || e}`]);
@@ -827,19 +829,37 @@ for i in range(4):
             </div>
             <div className="tab-content-wrapper">
               {activeAuxTab === 'stage' && (
-                <Stage
-                  spriteState={spriteState}
-                  drawnLines={drawnLines}
-                  isRunning={isRunning}
-                  isPaused={isPaused}
-                  onRun={handleRunExecution}
-                  onPause={handlePauseExecution}
-                  onStep={handleStepExecution}
-                  onStop={handleStopExecution}
-                  onClearCanvas={() => setDrawnLines([])}
-                  runSpeed={runSpeed}
-                  onSpeedChange={setRunSpeed}
-                />
+                <div className="stage-tab-scroll">
+                  <Stage
+                    spriteState={spriteState}
+                    drawnLines={drawnLines}
+                    isRunning={isRunning}
+                    isPaused={isPaused}
+                    onRun={handleRunExecution}
+                    onPause={handlePauseExecution}
+                    onStep={handleStepExecution}
+                    onStop={handleStopExecution}
+                    onClearCanvas={() => setDrawnLines([])}
+                    runSpeed={runSpeed}
+                    onSpeedChange={setRunSpeed}
+                  />
+                  {uploadedMedia.length > 0 && (
+                    <div className="uploaded-media">
+                      <div className="uploaded-media-head">
+                        <span><i className="fa-solid fa-photo-film"></i> 업로드한 미디어 ({uploadedMedia.length})</span>
+                        <button className="btn btn-secondary btn-xs" onClick={() => setUploadedMedia([])}>비우기</button>
+                      </div>
+                      <div className="uploaded-media-grid">
+                        {uploadedMedia.map((m, i) => (
+                          <figure key={i} className="uploaded-media-item" title={m.name}>
+                            <img src={m.dataUrl} alt={m.name} />
+                            <figcaption>{m.name}</figcaption>
+                          </figure>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
               {activeAuxTab === 'variables' && (
                 <VariableWatch variables={variables} />

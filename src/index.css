@@ -652,7 +652,7 @@ body {
 /* High Fidelity Code Editor Container */
 .code-editor-wrapper {
   display: flex;
-  background: #060911;
+  background: var(--canvas);
   font-family: var(--font-mono);
   font-size: 0.85rem;
   line-height: 1.5;
@@ -661,6 +661,7 @@ body {
   min-height: 0;
   overflow: hidden;
 }
+body.theme-dark .code-editor-wrapper { background: var(--surface-dark); }
 
 /* Edit area wraps pre + textarea so they perfectly overlap */
 .edit-area {
@@ -682,7 +683,7 @@ body {
   white-space: pre;
   overflow: hidden;
   pointer-events: none;
-  color: #a5f3fc;
+  color: var(--text-primary);
   background: transparent;
   border: none;
   z-index: 1;
@@ -690,7 +691,6 @@ body {
   word-break: normal;
   tab-size: 4;
 }
-.light-theme .highlight-layer { color: #0f172a; }
 
 /* Transparent editable textarea sits on top */
 .code-textarea {
@@ -698,7 +698,7 @@ body {
   inset: 0;
   background: transparent !important;
   color: transparent !important;
-  caret-color: #e2e8f0;
+  caret-color: var(--coral);
   border: none;
   padding: 0.5rem;
   font-family: var(--font-mono);
@@ -713,50 +713,49 @@ body {
   word-spacing: normal;
   word-break: normal;
 }
-.light-theme .code-textarea { caret-color: #0f172a; }
-
-.light-theme .code-editor-wrapper {
-  background: #ffffff;
-}
 
 .line-numbers {
   padding: 0.5rem 0.75rem;
   text-align: right;
   color: var(--text-muted);
-  background: rgba(0, 0, 0, 0.25);
-  border-right: 1px solid var(--border-card);
+  background: var(--surface-soft);
+  border-right: 1px solid var(--hairline);
   user-select: none;
 }
 
 /* #python-code → replaced by .code-textarea overlay */
 
-/* Prism token colours (dark theme) — !important to beat Prism's own theme resets */
-.highlight-layer .token.keyword             { color: #e879f9 !important; font-weight: 700; }
-.highlight-layer .token.builtin             { color: #4ade80 !important; }
+/* Prism token colours — LIGHT theme by default (readable warm-ink on cream).
+   !important to beat Prism's own theme resets. */
+.highlight-layer .token.keyword             { color: #a9583e !important; font-weight: 600; } /* coral-dark */
+.highlight-layer .token.builtin             { color: #0d7d6b !important; }                   /* teal */
 .highlight-layer .token.string,
-.highlight-layer .token.string-interpolation{ color: #fbbf24 !important; }
-.highlight-layer .token.triple-quoted-string{ color: #fcd34d !important; }
-.highlight-layer .token.comment             { color: #6b7280 !important; font-style: italic; }
-.highlight-layer .token.number              { color: #67e8f9 !important; }
-.highlight-layer .token.operator            { color: #f9a8d4 !important; }
-.highlight-layer .token.punctuation         { color: #94a3b8 !important; }
-.highlight-layer .token.function            { color: #38bdf8 !important; }
-.highlight-layer .token.class-name          { color: #c4b5fd !important; }
-.highlight-layer .token.decorator           { color: #fb923c !important; }
-.highlight-layer .token.boolean             { color: #86efac !important; }
+.highlight-layer .token.string-interpolation{ color: #9a6a00 !important; }                   /* amber */
+.highlight-layer .token.triple-quoted-string{ color: #9a6a00 !important; }
+.highlight-layer .token.comment             { color: #8e8b82 !important; font-style: italic; }
+.highlight-layer .token.number              { color: #1d4ed8 !important; }
+.highlight-layer .token.operator            { color: #b5485f !important; }
+.highlight-layer .token.punctuation         { color: #6c6a64 !important; }
+.highlight-layer .token.function            { color: #0369a1 !important; }
+.highlight-layer .token.class-name          { color: #6d28d9 !important; }
+.highlight-layer .token.decorator           { color: #c2410c !important; }
+.highlight-layer .token.boolean             { color: #0d7d6b !important; }
 /* default unclassed text */
-.highlight-layer                            { color: #e2e8f0; }
+.highlight-layer                            { color: var(--text-primary); }
 
-/* Light theme overrides */
-.light-theme .highlight-layer .token.keyword    { color: #7c3aed !important; }
-.light-theme .highlight-layer .token.builtin    { color: #059669 !important; }
-.light-theme .highlight-layer .token.string     { color: #b45309 !important; }
-.light-theme .highlight-layer .token.comment    { color: #94a3b8 !important; }
-.light-theme .highlight-layer .token.number     { color: #1d4ed8 !important; }
-.light-theme .highlight-layer .token.operator   { color: #be185d !important; }
-.light-theme .highlight-layer .token.function   { color: #0369a1 !important; }
-.light-theme .highlight-layer .token.decorator  { color: #c2410c !important; }
-.light-theme .highlight-layer                   { color: #1e293b; }
+/* Dark-mode (.theme-dark) — vivid tokens on the dark navy code surface */
+body.theme-dark .highlight-layer .token.keyword             { color: #e879f9 !important; }
+body.theme-dark .highlight-layer .token.builtin             { color: #4ade80 !important; }
+body.theme-dark .highlight-layer .token.string,
+body.theme-dark .highlight-layer .token.string-interpolation{ color: #fbbf24 !important; }
+body.theme-dark .highlight-layer .token.triple-quoted-string{ color: #fcd34d !important; }
+body.theme-dark .highlight-layer .token.comment             { color: #8e8b82 !important; }
+body.theme-dark .highlight-layer .token.number              { color: #67e8f9 !important; }
+body.theme-dark .highlight-layer .token.operator            { color: #f9a8d4 !important; }
+body.theme-dark .highlight-layer .token.function            { color: #38bdf8 !important; }
+body.theme-dark .highlight-layer .token.class-name          { color: #c4b5fd !important; }
+body.theme-dark .highlight-layer .token.decorator           { color: #fb923c !important; }
+body.theme-dark .highlight-layer .token.boolean             { color: #86efac !important; }
 
 .editor-footer {
   display: flex;
@@ -1404,8 +1403,8 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 0.4rem 0.75rem;
-  background: rgba(0,0,0,0.15);
-  border-bottom: 1px solid var(--border-card);
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--hairline);
 }
 .card-header h4 {
   font-size: 0.75rem;
@@ -1421,12 +1420,11 @@ body {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   line-height: 1.4;
-  background: #030509;
+  background: var(--canvas);          /* unified with the Python editor surface */
+  color: var(--text-secondary);
   white-space: pre-wrap;
 }
-.light-theme .console-body {
-  background: #f8fafc;
-}
+body.theme-dark .console-body { background: var(--surface-dark); }
 
 .watch-body {
   flex: 1;
@@ -1441,7 +1439,7 @@ body {
 /* legacy alias kept for compatibility */
 .console-log-output {
   flex-grow: 1;
-  background: #030509;
+  background: var(--canvas);
   padding: 0.5rem 0.75rem;
   font-family: var(--font-mono);
   font-size: 0.75rem;
@@ -1474,7 +1472,7 @@ body {
 .variables-grid {
   flex: 1;
   min-height: 0;
-  background: rgba(0,0,0,0.25);
+  background: var(--canvas);
   padding: 0.5rem;
   overflow-y: auto;
   display: flex;
@@ -1607,8 +1605,8 @@ h1, h2, h3 {
   color: var(--text-primary);
 }
 
-/* Stage canvas framed as an in-brand dark navy product surface */
-.canvas-wrapper { background: var(--surface-dark); }
+/* Stage canvas on the warm cream surface (matches the JS canvas fill) */
+.canvas-wrapper { background: var(--canvas); }
 
 /* Neutralize stray neon glows across small elements */
 .icon-teal { filter: none; color: var(--accent-teal); }
@@ -1695,4 +1693,51 @@ select:focus, .pip-input:focus {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* Stage tab: scrollable column hosting the canvas + uploaded media gallery */
+.stage-tab-scroll {
+  height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.25rem;
+}
+.uploaded-media {
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--bg-card);
+  padding: 10px 12px;
+}
+.uploaded-media-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.uploaded-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+.uploaded-media-item { margin: 0; text-align: center; }
+.uploaded-media-item img {
+  width: 100%;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-soft);
+}
+.uploaded-media-item figcaption {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
