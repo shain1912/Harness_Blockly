@@ -3606,6 +3606,26 @@ function convertCallExpression(node, isStatement = false) {
     }
   }
 
+  // Fallback for any remaining `receiver.method(args)` — a module/variable method call
+  // (math.sqrt(4), s.upper(), config.get(...)) that no specialized path claimed and that
+  // wasn't registered as a dynamic library block. Emit the generic method_call block so it
+  // becomes a real, editable block (RECEIVER + METHOD + args) instead of a raw lump, and
+  // round-trips losslessly. (In-browser, known module calls register a dynamic lib block
+  // earlier and return above; this only catches what would otherwise fall to raw.)
+  if (node.func.type === 'Attribute') {
+    const block = {
+      "type": "method_call",
+      "id": makeBlockId(),
+      "extraState": { "itemCount": (node.args || []).length },
+      "fields": { "METHOD": node.func.attr },
+      "inputs": { "RECEIVER": { "block": convertExpressionToBlock(node.func.value) } }
+    };
+    (node.args || []).forEach((arg, i) => {
+      block.inputs[`ARG${i}`] = { "block": convertExpressionToBlock(arg) };
+    });
+    return block;
+  }
+
   return null;
 }
 
