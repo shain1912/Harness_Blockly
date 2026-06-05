@@ -20,12 +20,14 @@ Measured over all **182** catalog rows.
 
 | Bucket | Count | % of 182 |
 |--------|-------|----------|
-| ✅ Matched (dedicated block) | 141 | 77.5% |
-| 🟡 Partial (`raw` fallback) | 22 | 12.1% |
+| ✅ Matched (dedicated block) | 158 | 86.8% |
+| 🟡 Partial (`raw` fallback) | 5 | 2.7% |
 | ❌ Missing | 19 | 10.4% |
 
-- **block-convertible %** = (matched + partial) / total = (141 + 22) / 182 = **89.6%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
-- **dedicated-block %** = matched / total = 141 / 182 = **77.5%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+- **block-convertible %** = (matched + partial) / total = (158 + 5) / 182 = **89.6%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
+- **dedicated-block %** = matched / total = 158 / 182 = **86.8%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+
+> **Update (method_call routing):** any `receiver.method(args)` call that no specialized path claims now emits the dedicated **`method_call`** block instead of a gray `raw_*` lump. That flipped **17** rows (all `str/dict/set/tuple` type methods, every `module.func(...)` stdlib call, and `for k, v in d.items()`) from 🟡→✅, raising dedicated-block coverage **77.5% → 86.8%**. The 5 remaining 🟡 are non-call constructs: lambda, docstring bodies, multi-`with`, and bare `range()`.
 
 ### Per-section breakdown
 
@@ -35,25 +37,24 @@ Measured over all **182** catalog rows.
 | 2. Variables & Assignment (ASG) | 11 | 9 | 0 | 2 |
 | 3. Operators & Expressions (OP) | 21 | 19 | 1 | 1 |
 | 4. Comprehensions & Generators (CMP) | 7 | 7 | 0 | 0 |
-| 5. Control Flow (CF) | 16 | 11 | 1 | 4 |
+| 5. Control Flow (CF) | 16 | 12 | 0 | 4 |
 | 6. Functions (FN) | 18 | 15 | 1 | 2 |
 | 7. Classes & OOP (CLS) | 15 | 15 | 0 | 0 |
 | 8. Exceptions & Context (EXC) | 13 | 12 | 1 | 0 |
 | 9. Modules & Imports (IMP) | 9 | 9 | 0 | 0 |
 | 10. Built-in Functions (BIF) | 20 | 19 | 1 | 0 |
-| 11. Built-in Type Methods (MTH) | 5 | 1 | 4 | 0 |
-| 12. Standard Library Modules (STD) | 20 | 7 | 12 | 1 |
+| 11. Built-in Type Methods (MTH) | 5 | 5 | 0 | 0 |
+| 12. Standard Library Modules (STD) | 20 | 19 | 0 | 1 |
 | 13. Async (ASY) | 4 | 0 | 0 | 4 |
 | 14. Comments & Misc (MSC) | 6 | 2 | 1 | 3 |
-| **Total** | **182** | **141** | **22** | **19** |
+| **Total** | **182** | **158** | **5** | **19** |
 
-**Weakest sections** (most ❌ missing or lowest dedicated-block coverage):
+**Weakest sections** (most ❌ missing — these are genuine parse errors, the real remaining gaps):
 
-1. **Async (ASY)** — 0/4 matched. `async def` / `await` / `async for` / `async with` are not tokenized at all (the `async`/`await` keywords are unknown), so every row is a parse error.
-2. **Standard Library Modules (STD)** — only 7/20 matched; 12/20 fall back to `raw` because dotted-attribute *calls* like `math.sqrt(4)`, `random.randint(...)`, `re.match(...)` have no dedicated block (bare attribute *reads* like `sys.argv` do match).
-3. **Comments & Misc (MSC)** — 2/6 matched; line continuation `\`, semicolon-separated statements, and 3.12 `type` aliases are all parse errors.
-4. **Control Flow (CF)** — 11/16; the `for/else`, `while/else`, and `match/case` (+ patterns) constructs are parse errors (4 missing).
-5. **Built-in Type Methods (MTH)** — only 1/5 matched (`list.append` → `list_append_custom`); all other str/list/dict/set/tuple method calls are `raw` fallbacks.
+1. **Async (ASY)** — 0/4. `async def` / `await` / `async for` / `async with` are not tokenized (the `async`/`await` keywords are unknown), so every row is a parse error.
+2. **Control Flow (CF)** — 12/16; the `for/else`, `while/else`, and `match/case` (+ patterns) constructs are parse errors (4 missing).
+3. **Comments & Misc (MSC)** — 2/6; line continuation `\`, semicolon-separated statements, and 3.12 `type` aliases are parse errors.
+4. **Literals/Assignment edge cases** — complex literal `3+4j`, bytes `b"..."`, annotated/walrus assignment (a handful of ❌ across LIT/ASG).
 
 ---
 
@@ -175,7 +176,7 @@ These are **standard Blockly library blocks** shipped in `blocks_compressed.js` 
 | CF-04 | `for` over iterable | `for x in xs:` | ✅ for_each_custom |
 | CF-05 | `for` over range | `for i in range(n):` | ✅ for_each_custom (range) |
 | CF-06 | `for` w/ enumerate | `for i, x in enumerate(xs):` | ✅ for_unpack (enumerate) |
-| CF-07 | `for` w/ unpacking | `for k, v in d.items():` | 🟡 raw (d.items unpack) |
+| CF-07 | `for` w/ unpacking | `for k, v in d.items():` | ✅ method_call |
 | CF-08 | `for / else` | `for x in xs: ... else: ...` | ❌ parse error (for/else) |
 | CF-09 | `while` | `while c:` | ✅ controls_whileUntil |
 | CF-10 | `while True` (infinite) | `while True:` | ✅ controls_whileUntil (while True) |
@@ -304,11 +305,11 @@ Each is a `Call` to a known builtin. Grouped for mapping.
 
 | ID | Type | Methods | Block? |
 |----|------|---------|--------|
-| MTH-01 | str | `upper lower strip split join replace find startswith endswith format zfill title capitalize count` | 🟡 raw (str methods) |
+| MTH-01 | str | `upper lower strip split join replace find startswith endswith format zfill title capitalize count` | ✅ method_call |
 | MTH-02 | list | `append extend insert remove pop clear index count sort reverse copy` | ✅ list_append_custom (append); other list methods raw |
-| MTH-03 | dict | `keys values items get pop update setdefault clear copy` | 🟡 raw (dict methods) |
-| MTH-04 | set | `add remove discard union intersection difference issubset issuperset` | 🟡 raw (set methods) |
-| MTH-05 | tuple | `count index` | 🟡 raw (tuple methods) |
+| MTH-03 | dict | `keys values items get pop update setdefault clear copy` | ✅ method_call |
+| MTH-04 | set | `add remove discard union intersection difference issubset issuperset` | ✅ method_call |
+| MTH-05 | tuple | `count index` | ✅ method_call |
 
 ---
 
@@ -316,26 +317,26 @@ Each is a `Call` to a known builtin. Grouped for mapping.
 
 | ID | Module | Common API | Block? |
 |----|--------|-----------|--------|
-| STD-01 | `math` | `sqrt floor ceil pi e sin cos tan log pow factorial gcd` | 🟡 raw (math.*) |
-| STD-02 | `random` | `random randint choice shuffle uniform sample seed` | 🟡 raw (random.*) |
-| STD-03 | `json` | `loads dumps load dump` | 🟡 raw (json.*) |
-| STD-04 | `datetime` | `datetime.now date timedelta strftime` | 🟡 raw (datetime.*) |
-| STD-05 | `time` | `time sleep perf_counter` | 🟡 raw (time.*) |
-| STD-06 | `os` | `getcwd listdir path.join environ mkdir remove` | 🟡 raw (os.*) |
+| STD-01 | `math` | `sqrt floor ceil pi e sin cos tan log pow factorial gcd` | ✅ method_call |
+| STD-02 | `random` | `random randint choice shuffle uniform sample seed` | ✅ method_call |
+| STD-03 | `json` | `loads dumps load dump` | ✅ method_call |
+| STD-04 | `datetime` | `datetime.now date timedelta strftime` | ✅ method_call |
+| STD-05 | `time` | `time sleep perf_counter` | ✅ method_call |
+| STD-06 | `os` | `getcwd listdir path.join environ mkdir remove` | ✅ method_call |
 | STD-07 | `sys` | `argv exit path stdout` | ✅ attribute_access (sys.argv) |
 | STD-08 | `collections` | `Counter defaultdict OrderedDict deque namedtuple` | ✅ func_call (Counter) |
-| STD-09 | `itertools` | `chain combinations permutations product count cycle groupby` | 🟡 raw (itertools.*) |
-| STD-10 | `functools` | `reduce lru_cache partial wraps` | 🟡 raw (functools.*) |
-| STD-11 | `re` | `match search findall sub split compile` | 🟡 raw (re.*) |
+| STD-09 | `itertools` | `chain combinations permutations product count cycle groupby` | ✅ method_call |
+| STD-10 | `functools` | `reduce lru_cache partial wraps` | ✅ method_call |
+| STD-11 | `re` | `match search findall sub split compile` | ✅ method_call |
 | STD-12 | `string` | `ascii_letters digits punctuation` | ✅ attribute_access (string.ascii_letters) |
-| STD-13 | `statistics` | `mean median mode stdev` | 🟡 raw (statistics.*) |
+| STD-13 | `statistics` | `mean median mode stdev` | ✅ method_call |
 | STD-14 | `decimal` / `fractions` | `Decimal Fraction` | ✅ func_call (Decimal) |
 | STD-15 | `pathlib` | `Path` | ✅ func_call (Path) |
-| STD-16 | `csv` | `reader writer DictReader` | 🟡 raw (csv.*) |
+| STD-16 | `csv` | `reader writer DictReader` | ✅ method_call |
 | STD-17 | `dataclasses` | `dataclass field` | ✅ class_def (@dataclass) |
 | STD-18 | `typing` | `List Dict Optional Union Any` | ❌ parse error (typing annotation) |
 | STD-19 | `enum` | `Enum auto` | ✅ variables_get (Enum bare name) |
-| STD-20 | `copy` | `copy deepcopy` | 🟡 raw (copy.*) |
+| STD-20 | `copy` | `copy deepcopy` | ✅ method_call |
 
 ---
 
