@@ -1,11 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 
-export default function BlocklyEditor({ 
-  onCodeChange, 
-  onSnapshotChange, 
-  initialSnapshot, 
-  isSyncingFromCode, 
-  workspaceRef 
+export default function BlocklyEditor({
+  onCodeChange,
+  onSnapshotChange,
+  initialSnapshot,
+  isSyncingFromCode,
+  workspaceRef,
 }) {
   const containerRef = useRef(null);
 
@@ -18,17 +18,17 @@ export default function BlocklyEditor({
       return window.Blockly.Theme.defineTheme('scratch_light', {
         'base': base,
         'componentStyles': {
-          'workspaceBackgroundColour': '#f8fafc',
+          'workspaceBackgroundColour': '#faf9f5',
           'toolboxBackgroundColour': '#ffffff',
-          'toolboxForegroundColour': '#334155',
-          'flyoutBackgroundColour': '#f1f5f9',
-          'flyoutForegroundColour': '#334155',
+          'toolboxForegroundColour': '#3d3d3a',
+          'flyoutBackgroundColour': '#f5f0e8',
+          'flyoutForegroundColour': '#3d3d3a',
           'flyoutOpacity': 1,
-          'scrollbarColour': '#cbd5e1',
-          'scrollbarOpacity': 0.6,
-          'insertionMarkerColour': '#334155',
+          'scrollbarColour': '#e6dfd8',
+          'scrollbarOpacity': 0.8,
+          'insertionMarkerColour': '#cc785c',
           'insertionMarkerOpacity': 0.3,
-          'cursorColour': '#334155'
+          'cursorColour': '#cc785c'
         },
         'blockStyles': {
           'logic_blocks': { 'colourPrimary': '#4C97FF' },
@@ -70,6 +70,19 @@ export default function BlocklyEditor({
     workspaceRef.current = ws;
     window.__blocklyWorkspace = ws;
 
+    // MakeCode-style toolbox: paint each category label in its own colour-bar hue.
+    // Blockly puts the category colour on the row's left border (inline); copy it to the
+    // label text so the palette reads like MakeCode (colored bar + colored label).
+    const paintToolboxLabels = () => {
+      const cats = containerRef.current?.querySelectorAll('.blocklyToolboxCategory') || [];
+      cats.forEach((cat) => {
+        const hue = getComputedStyle(cat).borderLeftColor;
+        const label = cat.querySelector('.blocklyToolboxCategoryLabel');
+        if (label && hue) label.style.color = hue;
+      });
+    };
+    const paintTimer = setTimeout(paintToolboxLabels, 250);
+
     // Load initial snapshot if provided
     if (initialSnapshot) {
       try {
@@ -104,6 +117,7 @@ export default function BlocklyEditor({
 
     // Cleanup
     return () => {
+      clearTimeout(paintTimer);
       ws.removeChangeListener(changeListener);
       ws.dispose();
       workspaceRef.current = null;
@@ -120,7 +134,7 @@ export default function BlocklyEditor({
           <i className="fa-solid fa-cubes icon-purple"></i>
           <h3>Visual Block Workspace</h3>
         </div>
-        <div id="sync-indicator" className="badge badge-success">
+        <div id="sync-indicator" className="badge badge-success" title="Block ↔ Python 동기화됨">
           <i className="fa-solid fa-rotate"></i> Synchronized
         </div>
       </div>

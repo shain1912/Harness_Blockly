@@ -1,51 +1,88 @@
-/* index.css - Premium Cyberpunk Space Dark Styling System */
+/* index.css — Claude warm-canvas editorial system (per DESIGN.md).
+   Cream canvas + warm-ink text + coral primary + hairline borders, flat color-block
+   depth (shadows rare), serif display headlines over a humanist sans body. The legacy
+   --neon-* token names are kept but REMAPPED to Claude tones so older rules stay tasteful. */
 
-/* Root Core CSS Tokens & Variables */
+/* Root Core CSS Tokens & Variables — Claude light (default) */
 :root {
-  --bg-app: radial-gradient(circle at 50% 50%, #0e111d 0%, #05070c 100%);
-  --bg-panel: rgba(13, 17, 28, 0.7);
-  --bg-card: rgba(22, 28, 45, 0.45);
-  --border-glow: rgba(168, 85, 247, 0.25);
-  --border-neon: rgba(6, 182, 212, 0.3);
-  --border-card: rgba(255, 255, 255, 0.06);
-  
-  /* Vibrant Palettes */
-  --neon-cyan: #06b6d4;
-  --neon-purple: #a855f7;
-  --neon-pink: #ec4899;
-  --neon-teal: #14b8a6;
-  --neon-yellow: #eab308;
-  --neon-green: #22c55e;
-  
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  
-  --active-highlight: rgba(168, 85, 247, 0.15);
-  --font-sans: 'Outfit', sans-serif;
-  --font-mono: 'Fira Code', monospace;
-  
-  --shadow-neon: 0 0 15px rgba(6, 182, 212, 0.15);
-  --shadow-neon-purple: 0 0 15px rgba(168, 85, 247, 0.15);
-  --transition-speed: 0.25s;
+  /* Surfaces */
+  --canvas: #faf9f5;            /* tinted cream page floor */
+  --surface-soft: #f5f0e8;
+  --surface-card: #efe9de;      /* one step darker than canvas */
+  --surface-cream-strong: #e8e0d2;
+  --surface-dark: #181715;      /* dark navy product surface */
+  --surface-dark-elevated: #252320;
+  --surface-dark-soft: #1f1e1b;
+
+  --bg-app: #faf9f5;            /* solid cream — no gradient */
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;           /* white card on cream */
+
+  /* Hairlines (borders feel like one elevation step, not ink lines) */
+  --hairline: #e6dfd8;
+  --hairline-soft: #ebe6df;
+  --border-glow: #e6dfd8;
+  --border-neon: #e6dfd8;
+  --border-card: #e6dfd8;
+
+  /* Brand + accents (legacy neon names remapped to Claude tones) */
+  --coral: #cc785c;
+  --coral-active: #a9583e;
+  --coral-disabled: #e6dfd8;
+  --accent-teal: #5db8a6;
+  --accent-amber: #e8a55a;
+  --neon-cyan: #5db8a6;
+  --neon-purple: #cc785c;
+  --neon-pink: #cc785c;
+  --neon-teal: #5db8a6;
+  --neon-yellow: #d4a017;
+  --neon-green: #5db872;
+
+  /* Text */
+  --text-primary: #141413;      /* ink */
+  --text-secondary: #3d3d3a;    /* body */
+  --text-muted: #6c6a64;        /* muted */
+  --on-dark: #faf9f5;
+  --on-dark-soft: #a09d96;
+
+  /* Semantic */
+  --success: #5db872;
+  --warning: #d4a017;
+  --error: #c64545;
+
+  --active-highlight: rgba(204, 120, 92, 0.10); /* coral wash */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'Cormorant Garamond', 'EB Garamond', Garamond, 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+
+  --shadow-neon: 0 1px 3px rgba(20, 20, 19, 0.06);
+  --shadow-neon-purple: 0 1px 3px rgba(20, 20, 19, 0.06);
+  --shadow-card: 0 1px 2px rgba(20, 20, 19, 0.05);
+  --transition-speed: 0.18s;
 }
 
-/* Light Theme Mode override tokens */
-body.light-theme {
-  --bg-app: radial-gradient(circle at 50% 50%, #f8fafc 0%, #e2e8f0 100%);
-  --bg-panel: rgba(241, 245, 249, 0.85);
-  --bg-card: rgba(255, 255, 255, 0.9);
-  --border-glow: rgba(168, 85, 247, 0.15);
-  --border-neon: rgba(14, 165, 233, 0.2);
-  --border-card: rgba(0, 0, 0, 0.08);
-  
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  
-  --active-highlight: rgba(14, 165, 233, 0.08);
-  --shadow-neon: 0 4px 12px rgba(14, 165, 233, 0.08);
-  --shadow-neon-purple: 0 4px 12px rgba(168, 85, 247, 0.08);
+/* In-brand dark mode — flips cream surfaces to Claude dark navy (toggle adds .theme-dark) */
+body.theme-dark {
+  --canvas: #181715;
+  --bg-app: #181715;
+  --bg-panel: #1f1e1b;
+  --bg-card: #1f1e1b;
+  --surface-card: #252320;
+  --surface-cream-strong: #252320;
+  --hairline: #34322d;
+  --hairline-soft: #2b2926;
+  --border-glow: #34322d;
+  --border-neon: #34322d;
+  --border-card: #34322d;
+
+  --text-primary: #faf9f5;
+  --text-secondary: #cfccc4;
+  --text-muted: #a09d96;
+
+  --active-highlight: rgba(204, 120, 92, 0.18);
+  --shadow-neon: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-neon-purple: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 /* General Layout & Core Styles */
@@ -251,44 +288,42 @@ body {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--neon-purple), #8b5cf6);
-  color: white;
-  box-shadow: var(--shadow-neon-purple);
+  background: var(--coral);
+  color: #fff;
+  box-shadow: none;
 }
 .btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 0 20px rgba(168, 85, 247, 0.4);
+  background: var(--coral-active);
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--border-card);
+  background: var(--canvas);
+  border-color: var(--hairline);
   color: var(--text-primary);
 }
 .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-card);
 }
 
 .btn-teal {
-  background: linear-gradient(135deg, var(--neon-teal), #0d9488);
-  color: white;
-  box-shadow: 0 0 15px rgba(20, 184, 166, 0.25);
+  background: var(--accent-teal);
+  color: #fff;
+  box-shadow: none;
 }
 .btn-teal:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 0 20px rgba(20, 184, 166, 0.4);
+  filter: brightness(0.95);
 }
 
 .btn-action {
   padding: 0.4rem 0.8rem;
   font-size: 0.8rem;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--canvas);
   color: var(--text-secondary);
-  border: 1px solid var(--border-card);
+  border: 1px solid var(--hairline);
 }
 .btn-action:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-card);
   color: var(--text-primary);
 }
 .btn-action:disabled {
@@ -406,22 +441,20 @@ body {
   flex-grow: 1;
 }
 
-/* Glassmorphism Panel Cards */
+/* Flat color-block panel cards (Claude: depth from surface contrast, not shadow) */
 .stage-card, .blockly-card, .editor-card, .ast-card, .desugar-card, .library-card, .console-card, .watch-card, .bottom-tools-card {
   background: var(--bg-card);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid var(--border-card);
+  border: 1px solid var(--hairline);
   border-radius: 12px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-card);
   transition: border-color var(--transition-speed);
 }
 
 .stage-card:hover, .blockly-card:hover, .editor-card:hover, .ast-card:hover, .desugar-card:hover, .library-card:hover, .console-card:hover, .watch-card:hover, .bottom-tools-card:hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--text-muted);
 }
 
 /* Tab Card Layout Containers (Unstyled as cards to avoid nesting) */
@@ -486,8 +519,8 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.65rem 1rem;
-  border-bottom: 1px solid var(--border-card);
-  background: rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid var(--hairline);
+  background: var(--surface-soft);
 }
 
 .panel-title-group {
@@ -499,17 +532,19 @@ body {
   font-size: 1rem;
 }
 .panel-title-group h3 {
-  font-size: 0.9rem;
-  font-weight: 600;
-  letter-spacing: 0.5px;
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+  font-weight: 500;
+  letter-spacing: -0.2px;
+  color: var(--text-primary);
 }
 
-/* Neon color utility classes for headers */
-.icon-cyan { color: var(--neon-cyan); filter: drop-shadow(0 0 5px rgba(6,182,212,0.4)); }
-.icon-purple { color: var(--neon-purple); filter: drop-shadow(0 0 5px rgba(168,85,247,0.4)); }
-.icon-yellow { color: var(--neon-yellow); filter: drop-shadow(0 0 5px rgba(234,179,8,0.4)); }
-.icon-green { color: var(--neon-green); filter: drop-shadow(0 0 5px rgba(34,197,94,0.4)); }
-.icon-pink { color: var(--neon-pink); filter: drop-shadow(0 0 5px rgba(236,72,153,0.4)); }
+/* Accent icon utilities — flat Claude tones, no neon glow */
+.icon-cyan { color: var(--accent-teal); }
+.icon-purple { color: var(--coral); }
+.icon-yellow { color: var(--accent-amber); }
+.icon-green { color: var(--success); }
+.icon-pink { color: var(--coral); }
 .icon-teal { color: var(--neon-teal); filter: drop-shadow(0 0 5px rgba(20,184,166,0.4)); }
 
 /* Interactive Stage Styles */
@@ -727,23 +762,23 @@ body {
   display: flex;
   justify-content: space-between;
   padding: 0.35rem 0.8rem;
-  background: rgba(0,0,0,0.2);
-  border-top: 1px solid var(--border-card);
+  background: var(--surface-soft);
+  border-top: 1px solid var(--hairline);
   font-size: 0.7rem;
   color: var(--text-muted);
 }
-/* Demo example picker in the Python editor header */
+/* Demo example picker in the Python editor header — cream field to match the canvas */
 .example-picker {
-  background: var(--bg-elevated, #1b2333);
-  color: var(--text-primary, #e6edf3);
-  border: 1px solid var(--border-color, #30363d);
-  border-radius: 6px;
-  padding: 4px 8px;
+  background: var(--canvas);
+  color: var(--text-primary);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 6px 10px;
   font-size: 0.8rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
 }
-.example-picker:hover { border-color: var(--neon-blue, #58a6ff); }
+.example-picker:hover { border-color: var(--coral); }
 
 /* OpenCV image upload + output panel */
 .cv-image-card {
@@ -799,24 +834,25 @@ body {
 .gray-blocks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .gray-block-item {
   display: flex; align-items: center; gap: 8px;
-  background: #2b2b2b; border: 1px solid #444; border-radius: 6px;
+  background: var(--surface-card); border: 1px solid var(--hairline); border-radius: 8px;
   padding: 6px 8px; cursor: pointer;
 }
-.gray-block-item:hover { border-color: var(--neon-blue, #58a6ff); background: #333; }
+.gray-block-item:hover { border-color: var(--coral); background: var(--surface-cream-strong); }
 .gray-block-kind {
   flex: 0 0 auto; font-size: 0.68rem; font-weight: 700;
-  background: #555; color: #ddd; border-radius: 4px; padding: 1px 6px;
+  background: var(--surface-cream-strong); color: var(--text-secondary); border-radius: 4px; padding: 1px 6px;
 }
-.gray-block-text { font-size: 0.78rem; color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gray-block-text { font-size: 0.78rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .syntax-status {
   font-weight: 600;
+  white-space: nowrap;
 }
 .syntax-status.valid {
-  color: var(--neon-green);
+  color: var(--success);
 }
 .syntax-status.invalid {
-  color: var(--neon-pink);
+  color: var(--error);
 }
 
 /* AST body — scrollable wrapper used by ASTTreeView */
@@ -963,7 +999,7 @@ body {
   color: var(--text-primary);
 }
 .tab-btn.active {
-  color: var(--neon-pink);
+  color: var(--coral);
 }
 .tab-btn.active::after {
   content: '';
@@ -972,8 +1008,8 @@ body {
   left: 0;
   right: 0;
   height: 2px;
-  background: var(--neon-pink);
-  box-shadow: 0 0 8px var(--neon-pink);
+  background: var(--coral);
+  border-radius: 2px;
 }
 
 .tab-content {
@@ -1552,4 +1588,111 @@ input:checked + .slider:before {
   50% {
     box-shadow: 0 0 20px rgba(6, 182, 212, 0.45);
   }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Claude warm-canvas polish layer (per DESIGN.md). Appended last so it wins
+   over legacy cyberpunk rules at equal specificity. Editorial serif headlines,
+   flat surfaces, coral accents, glows neutralized.
+   ════════════════════════════════════════════════════════════════════════ */
+h1, h2, h3 {
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+.box-title, .ai-panel-title {
+  font-family: var(--font-serif);
+  letter-spacing: -0.2px;
+  color: var(--text-primary);
+}
+
+/* Stage canvas framed as an in-brand dark navy product surface */
+.canvas-wrapper { background: var(--surface-dark); }
+
+/* Neutralize stray neon glows across small elements */
+.icon-teal { filter: none; color: var(--accent-teal); }
+.tab-btn.active::after { box-shadow: none; }
+.pulse-glow { animation: none; }
+
+/* Inputs / selects → cream field + hairline + coral focus ring */
+input[type="text"], input[type="number"], textarea, select, .pip-input {
+  background: var(--canvas);
+  color: var(--text-primary);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  font-family: var(--font-sans);
+}
+input[type="text"]:focus, input[type="number"]:focus, textarea:focus,
+select:focus, .pip-input:focus {
+  outline: none;
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px rgba(204, 120, 92, 0.15);
+}
+
+/* Badges → cream pill with hairline */
+.badge, .badge-system, .badge-pill {
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--hairline);
+}
+
+/* Selection + muted scrollbar tuned to cream */
+::selection { background: rgba(204, 120, 92, 0.22); }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--hairline); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ════════════════════════════════════════════════════════════════════════
+   MakeCode-style Blockly toolbox palette — taller category rows with a chunky
+   colored accent bar, humanist-sans labels, soft hover/selected fills on cream.
+   (Blockly injects inline styles, so these need !important.)
+   ════════════════════════════════════════════════════════════════════════ */
+.blocklyToolbox, .blocklyToolboxDiv {
+  background: #ffffff !important;
+  border-right: 1px solid var(--hairline);
+  padding: 0 !important;
+}
+.blocklyToolboxCategory {
+  min-height: 52px !important;
+  display: flex !important;
+  align-items: center;
+  border-radius: 0 !important;
+  border-left-width: 14px !important;        /* thick MakeCode colour bar (Blockly sets the hue inline) */
+  border-bottom: 1px solid var(--hairline-soft);
+  margin: 0 !important;
+  padding: 8px 16px !important;
+  transition: background 0.12s ease;
+}
+.blocklyToolboxCategoryContainer:hover > .blocklyToolboxCategory {
+  background: var(--surface-soft) !important;
+}
+.blocklyToolboxCategoryContainer[aria-selected="true"] > .blocklyToolboxCategory {
+  background: var(--surface-cream-strong) !important;
+}
+.blocklyToolboxCategoryIcon { width: 0 !important; margin: 0 !important; }
+.blocklyToolboxCategoryLabel {
+  font-family: var(--font-sans) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.1px;
+  /* text colour is set per-category by JS to match the colour bar (MakeCode signature) */
+}
+/* Flyout drawer on warm cream */
+.blocklyFlyoutBackground { fill: #f5f0e8 !important; }
+
+/* Header action clusters laid out horizontally */
+.panel-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Right-panel tab bar: push the run/upload buttons to the right edge */
+.editor-tab-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
