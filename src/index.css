@@ -751,21 +751,17 @@ body {
   border: 1px solid var(--border-color, #30363d);
   border-radius: 10px;
   padding: 10px 12px;
-  margin-top: 10px;
   flex-shrink: 0;
 }
-.cv-image-card.collapsed { padding-bottom: 10px; }
-/* Collapse chevron in the image/OpenCV card header */
-.collapse-toggle {
-  background: transparent;
-  border: none;
-  color: var(--text-muted, #8b949e);
-  cursor: pointer;
-  padding: 2px 6px 2px 0;
-  font-size: 0.85rem;
-  line-height: 1;
+/* AI Abstractions tab: OpenCV image card stacked above the library manager, scrollable. */
+.ai-tab-scroll {
+  height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.25rem;
 }
-.collapse-toggle:hover { color: var(--text-primary, #e6edf3); }
 .cv-image-body {
   display: flex;
   flex-wrap: wrap;
