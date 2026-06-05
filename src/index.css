@@ -343,13 +343,37 @@ body {
   width: 100%;
 }
 
-/* Layout Grid Structure */
+/* AST Parser Tree tab: relocated global controls (Auto Desugar + theme toggle). */
+.ast-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border-card);
+}
+.ast-controls-row .toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.ast-controls-row .toggle-group input { margin: 0; cursor: pointer; }
+.ast-controls-row .theme-btn { padding: 0.35rem 0.55rem; }
+
+/* Layout Grid Structure — full height now that the top header bar is gone. */
 .dashboard-grid, .app-grid {
   display: grid;
   grid-template-columns: 380px 1fr;
   gap: 1rem;
   padding: 1rem;
-  height: calc(100vh - 64px);
+  height: 100vh;
   min-height: 0; /* Important for grid item content overflow scroll */
   box-sizing: border-box;
 }
@@ -411,6 +435,7 @@ body {
 .tab-card {
   flex: 1;
   gap: 0.5rem;
+  min-height: 240px; /* keep the Logs Terminal usable even when the cv card is expanded */
 }
 
 .editor-tab-card {
@@ -727,7 +752,20 @@ body {
   border-radius: 10px;
   padding: 10px 12px;
   margin-top: 10px;
+  flex-shrink: 0;
 }
+.cv-image-card.collapsed { padding-bottom: 10px; }
+/* Collapse chevron in the image/OpenCV card header */
+.collapse-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-muted, #8b949e);
+  cursor: pointer;
+  padding: 2px 6px 2px 0;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.collapse-toggle:hover { color: var(--text-primary, #e6edf3); }
 .cv-image-body {
   display: flex;
   flex-wrap: wrap;
