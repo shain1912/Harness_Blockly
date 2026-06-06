@@ -2,12 +2,10 @@
 // await_expr/await_stmt blocks survive serialize -> load -> workspaceToCode, so the block
 // view regenerates `async`/`await` (not just the Python-level AST round-trip).
 //
-// Targets port 3001 directly: port 3000 is occupied by an unrelated server in this env, so
-// the Playwright webServer reuse points at the wrong app. Run `npm run dev` (it lands on 3001
-// when 3000 is taken) before this spec, or adjust APP_URL.
+// Targets the Vite dev server on :3000 (Playwright's webServer auto-starts `npm run dev`).
 const { test, expect } = require('@playwright/test');
 
-const APP_URL = 'http://localhost:3001/';
+const APP_URL = 'http://localhost:3000/';
 
 const CASES = [
   ['async def + bare await', 'async def fetch():\n    await get()', ['async def fetch(', 'await get()']],

@@ -1,8 +1,8 @@
 // [W6] Block->code round-trip for for/else & while/else: the for_else / while_else blocks
-// must regenerate the `else:` branch on block->code. Targets :3001 (see async_blocks_browser).
+// must regenerate the `else:` branch on block->code. Targets the Vite dev server on :3000.
 const { test, expect } = require('@playwright/test');
 
-const APP_URL = 'http://localhost:3001/';
+const APP_URL = 'http://localhost:3000/';
 
 const CASES = [
   ['for/else', 'for x in items:\n    print(x)\nelse:\n    done()', ['for x in items:', 'else:', 'done()']],
