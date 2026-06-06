@@ -454,6 +454,29 @@ class LibraryAbstractionEngine {
     return JSON.parse(json);
   }
 
+  // [Phase 1, 1.3] End-to-end: introspect the library (real API facts) -> ask the AI for a
+  // purpose-specific subset grounded in those facts -> register the result through the
+  // oracle gate. Introspection failure degrades gracefully (AI works from the name alone).
+  async synthesizeFromPrompt(libName, purpose, pyodide) {
+    let facts = null;
+    try { facts = await this.introspectModule(libName, pyodide); } catch (e) { facts = null; }
+    const resp = await fetch('/api/ai-abstract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ libName, facts, purpose }),
+    });
+    const data = await resp.json();
+    if (!data || !data.success) throw new Error((data && data.error) || 'ai-abstract failed');
+    // Seed constants from introspection too, so the lib_const dropdown is rich even if the
+    // AI omits them.
+    const P = (typeof window !== 'undefined') ? window.BlockPyParser : null;
+    if (facts && Array.isArray(facts.constants) && facts.constants.length && P && typeof P.addLibConstSeeds === 'function') {
+      P.addLibConstSeeds(libName, facts.constants);
+    }
+    const result = this.registerAiBlocks(libName, data.blocks || []);
+    return { ...result, thoughts: data.thoughts || [], facts };
+  }
+
   // Abstract library dynamically based on select or custom imports
   async runAbstraction(libKey, customCode = '') {
     const chatSim = document.getElementById('ai-chat-sim');

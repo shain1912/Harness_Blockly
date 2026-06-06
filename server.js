@@ -166,11 +166,12 @@ Rules (strict):
 
 // ─── 3. AI Library Abstraction: MiniMax designs visual blocks for a library ───
 app.post('/api/ai-abstract', async (req, res) => {
-  const { libName, customCode } = req.body;
+  const { libName, customCode, facts, purpose } = req.body;
   if (!libName) return res.status(400).json({ error: 'libName is required' });
 
-  // Check built-in presets first (no AI cost)
-  if (libName !== 'custom') {
+  // Check built-in presets first (no AI cost). Skip when the caller supplies introspection
+  // facts or a purpose — those drive a grounded, purpose-specific subset via the AI.
+  if (libName !== 'custom' && !facts && !purpose) {
     const preset = BlockPyAbstraction.AI_PRESETS[libName];
     if (preset) {
       return res.json({ success: true, libName, thoughts: preset.thoughts, blocks: preset.blocks });
@@ -205,9 +206,17 @@ Rules:
 - hasOutput = true if the call returns a value, false if it's a statement.
 - Choose distinct, pleasant hex colours for visual variety.
 - Limit to the 6-10 most important operations.
-- Never include function definition blocks or comment blocks.`;
+- Never include function definition blocks or comment blocks.
+- GROUNDING: when an "Actual public API" list is provided, use ONLY function names and argument names that appear in it — never invent signatures. Prefer the real argument names.
+- PURPOSE: when a purpose is provided, select ONLY the subset of operations relevant to that purpose.`;
 
-    const userContent = `Library: ${libName}${customCode ? `\nSample usage:\n${customCode}` : ''}`;
+    // [1.3] Ground the prompt with the library's real API (from Pyodide introspection) and
+    // the user's stated purpose, so the AI selects a correct, purpose-specific subset.
+    const factsBlock = facts
+      ? `\n\nActual public API (use ONLY these — do not invent):\nFunctions: ${(facts.functions || []).map(f => `${f.name}(${(f.params || []).join(', ')})`).join(', ') || '(none)'}\nConstants: ${(facts.constants || []).join(', ') || '(none)'}`
+      : '';
+    const purposeBlock = purpose ? `\n\nThe user wants to use this library for: ${purpose}` : '';
+    const userContent = `Library: ${libName}${customCode ? `\nSample usage:\n${customCode}` : ''}${factsBlock}${purposeBlock}`;
 
     const { thinkingText, responseText } = await callMiniMax(systemPrompt, userContent, { maxTokens: 1500 });
 
