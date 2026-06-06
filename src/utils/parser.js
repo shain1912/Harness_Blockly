@@ -2614,6 +2614,40 @@ function makeBlockId() {
   return `block_id_${blockIdCounter++}_${Math.random().toString(36).substring(2, 7)}`;
 }
 
+// [Feature B] Names that refer to imported modules in the program being converted. A
+// non-called attribute rooted here (cv2.COLOR_BGR2GRAY, cv2.data.haarcascades) is a library
+// constant/member → routed to the dedicated lib_const dropdown block. Set per astToBlockly run.
+let _importedModules = new Set();
+function collectImportedModules(node, set = new Set()) {
+  if (!node || typeof node !== 'object') return set;
+  if (node.type === 'Import' && Array.isArray(node.names)) {
+    for (const n of node.names) {
+      const ref = n.as || n.name;
+      if (ref) set.add(ref);
+      if (n.name) set.add(String(n.name).split('.')[0]); // root of `import os.path`
+    }
+  }
+  for (const k in node) {
+    const v = node[k];
+    if (Array.isArray(v)) v.forEach(c => collectImportedModules(c, set));
+    else if (v && typeof v === 'object') collectImportedModules(v, set);
+  }
+  return set;
+}
+
+// If `node` is a non-called attribute chain rooted at an imported module, return
+// { lib, path } (e.g. cv2.data.haarcascades -> { lib:'cv2', path:'data.haarcascades' }),
+// else null.
+function moduleConstPath(node) {
+  const parts = [];
+  let cur = node;
+  while (cur && cur.type === 'Attribute') { parts.unshift(cur.attr); cur = cur.value; }
+  if (cur && cur.type === 'Name' && parts.length && _importedModules.has(cur.id)) {
+    return { lib: cur.id, path: parts.join('.') };
+  }
+  return null;
+}
+
 function collectVariables(node, varsSet = new Set()) {
   if (!node) return varsSet;
 
@@ -2829,6 +2863,7 @@ function astToBlockly(astNode) {
   }
 
   blockIdCounter = 0;
+  _importedModules = collectImportedModules(astNode); // [Feature B] for lib_const routing
   const blocks = [];
 
   // FunctionDef/ClassDef blocks don't support next connections — place them separately
@@ -4498,7 +4533,20 @@ function convertExpressionToBlock(node) {
         }
       };
 
-    case 'Attribute':
+    case 'Attribute': {
+      // [Feature B] A non-called attribute rooted at an imported module is a library
+      // constant/member (cv2.COLOR_BGR2GRAY, cv2.data.haarcascades) -> lib_const dropdown.
+      const mc = moduleConstPath(node);
+      if (mc) {
+        // extraState is the source of truth: loadExtraState runs before fields are applied,
+        // so the CONST dropdown's option generator already includes this exact value (even
+        // when it isn't in the seed list) and setValue won't be rejected.
+        return {
+          "type": "lib_const",
+          "id": makeBlockId(),
+          "extraState": { "lib": mc.lib, "const": mc.path }
+        };
+      }
       // obj.attr  ->  custom attribute_access block (OBJECT value + NAME field)
       return {
         "type": "attribute_access",
@@ -4512,6 +4560,7 @@ function convertExpressionToBlock(node) {
           }
         }
       };
+    }
 
     // [W8] Ellipsis literal `...` (LIT-12)
     case 'Ellipsis':
@@ -5553,6 +5602,70 @@ Blockly.Python['attribute_access'] = function(block) {
   const name = block.getFieldValue('NAME') || 'attr';
   return [`${object}.${name}`, Blockly.Python.ORDER_MEMBER];
 };
+// [Feature B Phase 1] Library constant / member as a dropdown (cv2.COLOR_BGR2GRAY,
+// cv2.data.haarcascades). LIB is a serializable label; CONST is a dynamic-options dropdown
+// seeded with common constants for the library, always including the current value so any
+// constant round-trips. lib + const live in extraState (the source of truth).
+const LIB_CONST_SEEDS = {
+  cv2: [
+    'COLOR_BGR2GRAY', 'COLOR_RGB2GRAY', 'COLOR_GRAY2BGR', 'COLOR_BGR2RGB', 'COLOR_BGR2HSV',
+    'IMREAD_COLOR', 'IMREAD_GRAYSCALE', 'RETR_EXTERNAL', 'RETR_TREE',
+    'CHAIN_APPROX_SIMPLE', 'CHAIN_APPROX_NONE', 'data.haarcascades',
+  ],
+};
+function libConstOptions() {
+  const block = this.getSourceBlock && this.getSourceBlock();
+  const lib = block ? (block.getFieldValue('LIB') || block.libName_ || '') : '';
+  const cur = block ? (block.constValue_ || '') : '';
+  const seed = (LIB_CONST_SEEDS[lib] || []).slice();
+  const opts = [];
+  if (cur && seed.indexOf(cur) === -1) opts.push([cur, cur]);
+  for (const c of seed) opts.push([c, c]);
+  if (!opts.length) opts.push([cur || ' ', cur || ' ']);
+  return opts;
+}
+Blockly.Blocks['lib_const'] = {
+  libName_: '',
+  constValue_: '',
+  init: function() {
+    this.libName_ = '';
+    this.constValue_ = '';
+    const LabelField = Blockly.FieldLabelSerializable || Blockly.FieldTextInput;
+    this.appendDummyInput()
+        .appendField(new LabelField(''), 'LIB')
+        .appendField('.')
+        .appendField(new Blockly.FieldDropdown(libConstOptions), 'CONST');
+    this.setOutput(true, null);
+    this.setInputsInline(true);
+    this.setColour('#06b6d4');
+    this.setTooltip('A library constant / member (e.g. cv2.COLOR_BGR2GRAY)');
+    this.setHelpUrl('');
+  },
+  saveExtraState: function () {
+    return { lib: this.getFieldValue('LIB') || this.libName_ || '', const: this.getFieldValue('CONST') || this.constValue_ || '' };
+  },
+  loadExtraState: function (state) {
+    this.libName_ = (state && state.lib) || '';
+    this.constValue_ = (state && state.const) || '';
+    if (this.getField('LIB')) this.setFieldValue(this.libName_, 'LIB');
+    const f = this.getField('CONST');
+    if (f) {
+      // FieldDropdown caches its generated options from init (when constValue_ was empty),
+      // and setValue validates against that stale cache. Force a regeneration first so the
+      // current value (incl. non-seed constants like data.haarcascades) is a valid option.
+      if (typeof f.getOptions === 'function') { try { f.getOptions(false); } catch (e) {} }
+      this.setFieldValue(this.constValue_, 'CONST');
+    }
+  },
+};
+Blockly.Python['lib_const'] = function (block) {
+  const lib = block.getFieldValue('LIB') || block.libName_ || '';
+  const c = block.getFieldValue('CONST') || block.constValue_ || '';
+  const order = (typeof Blockly.Python.ORDER_MEMBER === 'number') ? Blockly.Python.ORDER_MEMBER : 0;
+  return [lib ? `${lib}.${c}` : c, order];
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['lib_const'] = Blockly.Python['lib_const'];
+
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['attribute_access'] = Blockly.Python['attribute_access'];
 }
