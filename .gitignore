@@ -11,3 +11,6 @@ playwright-report/
 # Scratch reference screenshots pasted during development
 image.png
 image copy*.png
+
+# Verification-loop scratch output (driver screenshots + JSON)
+tmp/
