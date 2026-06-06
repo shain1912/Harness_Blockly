@@ -344,6 +344,20 @@ class LibraryAbstractionEngine {
     return { ok: true, type: blockType, validation };
   }
 
+  // [Phase 1] Plan candidate specs through the oracle gate, then register the survivors as
+  // real blocks. Returns { registered: type[], repaired: type[], rejected: {type,error}[] }.
+  synthesizeBlocks(specs, repair) {
+    const P = (typeof window !== 'undefined') ? window.BlockPyParser : null;
+    const plan = planSynthesis(specs, P, repair);
+    const registered = [];
+    for (const spec of plan.toRegister) {
+      const res = this.registerMacroBlock(spec, P);
+      if (res && res.ok) registered.push(res.type);
+      else plan.rejected.push({ type: spec.type, error: 'registration failed' });
+    }
+    return { registered, repaired: plan.repaired.map(s => s.type), rejected: plan.rejected };
+  }
+
   // Abstract library dynamically based on select or custom imports
   async runAbstraction(libKey, customCode = '') {
     const chatSim = document.getElementById('ai-chat-sim');
