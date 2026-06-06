@@ -206,6 +206,20 @@ class Tokenizer {
         continue;
       }
 
+      // [W8] Explicit line continuation (MSC-04): a backslash immediately before a newline
+      // joins the two physical lines into one logical line. Consume both, emit no NEWLINE,
+      // and keep isLineStart false so the continued line is not treated as fresh indentation.
+      if (char === '\\') {
+        const nxt = this.source[this.cursor + 1];
+        if (nxt === '\n' || nxt === '\r') {
+          this.nextChar(); // consume '\'
+          if (this.peekChar() === '\r') { this.nextChar(); if (this.peekChar() === '\n') this.nextChar(); }
+          else this.nextChar(); // consume newline
+          this.isLineStart = false;
+          continue;
+        }
+      }
+
       // Handle Comments
       if (char === '#') {
         let commentText = '';
@@ -287,6 +301,15 @@ class Tokenizer {
         const startCol = this.col;
         this.nextChar(); this.nextChar();
         this.tokens.push(new Token(TokenType.SYMBOL, sym, this.line, startCol));
+        continue;
+      }
+
+      // [W8] Semicolon separates simple statements on one physical line (MSC-05). Blockly
+      // has no semicolon — the statements become separate blocks — so emit a NEWLINE (a
+      // statement boundary) but stay on the same physical line (don't touch isLineStart).
+      if (char === ';') {
+        this.nextChar();
+        if (this.bracketDepth === 0) this.tokens.push(new Token(TokenType.NEWLINE, '\n', this.line, this.col));
         continue;
       }
 
