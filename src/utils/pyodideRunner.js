@@ -152,6 +152,9 @@ export async function initPyodide(onStatus) {
     await _ensurePyodideScript();
 
     const pyodide = await window.loadPyodide({ indexURL: PYODIDE_INDEX });
+    // [1.2] Expose the live runtime so the abstraction engine can introspect imported
+    // libraries (introspectModule) after a run, enriching their generated blocks.
+    if (typeof window !== 'undefined') window.__pyodide = pyodide;
 
     onStatus && onStatus('[Pyodide] Loading micropip...');
     await pyodide.loadPackage('micropip');

@@ -530,6 +530,44 @@ for i in range(4):
     }
   };
 
+  // [1.2 live] After a run, introspect each imported module in the live Pyodide runtime and
+  // register enriched blocks (real arg names + constant dropdown). Best-effort, capped so a
+  // huge library API can't flood the palette — that's exactly the case the AI purpose-prompt
+  // (1.3) is for. Logs counts so the user can verify introspection actually fired.
+  const introspectImportedModules = async (src) => {
+    const engine = abstractionEngineRef.current || window.__blockpyEngine;
+    const py = (typeof window !== 'undefined') ? window.__pyodide : null;
+    if (!engine || !py || typeof engine.introspectModule !== 'function') return;
+    const mods = new Set();
+    let m;
+    const reImport = /^\s*import\s+([a-zA-Z_]\w*)/gm;
+    const reFrom = /^\s*from\s+([a-zA-Z_]\w*)\s+import/gm;
+    while ((m = reImport.exec(src))) mods.add(m[1]);
+    while ((m = reFrom.exec(src))) mods.add(m[1]);
+    const CAP = 60;
+    for (const mod of mods) {
+      try {
+        const facts = await engine.introspectModule(mod, py);
+        const total = (facts.functions || []).length + (facts.classes || []).length;
+        if (total > CAP) {
+          setLogs(prev => [...prev, `[Introspect] ${mod}: large API (${total} members) — skipped auto-registration. Use the AI purpose-prompt to pick a subset.`]);
+          continue;
+        }
+        const res = engine.registerFromFacts(facts);
+        setLogs(prev => [...prev, `[Introspect] ${mod}: ${res.functions.length} functions, ${res.constants} constants → blocks enriched.`]);
+        if (engine.activeBlocks && engine.activeBlocks.length) {
+          setInstalledBlocks(prev => {
+            const known = new Set(prev.map(b => b.type));
+            const added = engine.activeBlocks.filter(b => !known.has(b.type));
+            return added.length ? [...prev, ...added] : prev;
+          });
+        }
+      } catch (e) {
+        setLogs(prev => [...prev, `[Introspect] ${mod}: skipped (${String(e.message || e).slice(0, 60)})`]);
+      }
+    }
+  };
+
   // ── Run: Pyodide real Python execution ────────────────────────────────────────
   const handleRunExecution = async () => {
     if (isPaused) {
@@ -589,6 +627,10 @@ for i in range(4):
         setHighlightedLine(null);
         if (!err) {
           setLogs(prev => [...prev, '[Python] Execution completed.']);
+          // [1.2 live] After a successful run, introspect each imported module in the live
+          // Pyodide runtime and enrich its generated blocks (real arg names + constant
+          // dropdown). Best-effort + non-blocking; logs results so the user can verify.
+          introspectImportedModules(code);
         }
       }
     });

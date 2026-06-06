@@ -192,6 +192,15 @@ const DEMO_SNIPPETS = [
   // Demonstrates: micropip-install + automatic block conversion + run for a library
   // BlockPy has no preset for. humanize is pure-Python and installs in Pyodide.
   {
+    // [1.2 live] Run this, then watch the Logs: after "Execution completed" a
+    // "[Introspect] textwrap: N functions..." line appears — the engine introspected the
+    // live module and enriched its blocks with REAL arg names (textwrap.shorten(text, width)).
+    // Convert afterwards to see the dedicated, labeled textwrap blocks. (stdlib → no pip.)
+    id: 'lib-introspect-textwrap', title: 'Live Introspection: textwrap', category: 'Libraries', desugar: true, execute: true,
+    code: 'import textwrap\ntext = "BlockPy makes Python into blocks"\nprint(textwrap.shorten(text, width=18))',
+    expectedStdout: ['BlockPy'],
+  },
+  {
     id: 'lib-humanize', title: 'Unseen Library: humanize', category: 'Libraries', desugar: true, execute: true,
     code: 'import humanize\nprint(humanize.intcomma(1234567))\nprint(humanize.ordinal(21))\nprint(humanize.naturalsize(1048576))',
     expectedStdout: ['1,234,567', '21st', '1.0 MB'],
