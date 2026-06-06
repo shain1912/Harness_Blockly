@@ -5613,6 +5613,14 @@ const LIB_CONST_SEEDS = {
     'CHAIN_APPROX_SIMPLE', 'CHAIN_APPROX_NONE', 'data.haarcascades',
   ],
 };
+// [Phase 1, 1.2] Merge introspected constant names into a library's dropdown seed (deduped),
+// so Pyodide introspection enriches the lib_const dropdown for that library.
+function addLibConstSeeds(lib, names) {
+  if (!lib || !Array.isArray(names)) return;
+  const cur = LIB_CONST_SEEDS[lib] || (LIB_CONST_SEEDS[lib] = []);
+  for (const n of names) { if (n && cur.indexOf(n) === -1) cur.push(n); }
+}
+function getLibConstSeeds(lib) { return (LIB_CONST_SEEDS[lib] || []).slice(); }
 function libConstOptions() {
   const block = this.getSourceBlock && this.getSourceBlock();
   const lib = block ? (block.getFieldValue('LIB') || block.libName_ || '') : '';
@@ -6626,6 +6634,8 @@ const BlockPyParser = {
   Parser,
   astToPython,
   astToBlockly,
+  addLibConstSeeds,   // [1.2] enrich lib_const dropdown from introspection
+  getLibConstSeeds,
   ProgramNode,
   AssignNode,
   AnnAssignNode,

@@ -377,6 +377,55 @@ class LibraryAbstractionEngine {
     return { registered, repaired: plan.repaired.map(s => s.type), rejected: plan.rejected };
   }
 
+  // [Phase 1, 1.2] Register blocks from introspection facts: each function/class becomes a
+  // registerBlock call block with REAL arg names (replacing generic param_N), and the
+  // constants seed the lib_const dropdown for that library. Plain `lib.func(args)` calls are
+  // sound by form, so these need no oracle gate. Returns { functions: type[], constants: n }.
+  registerFromFacts(facts) {
+    const { functions, constants } = apiFactsToSpecs(facts);
+    const P = (typeof window !== 'undefined') ? window.BlockPyParser : null;
+    const registered = [];
+    for (const f of functions) {
+      const colour = f.lib === 'cv2' ? '#06b6d4' : '#009688';
+      const type = this.registerBlock(f.lib, f.func, f.args, f.hasOutput, colour, f.title);
+      registered.push(type);
+      if (!this.activeBlocks.some((b) => b.type === type)) {
+        this.activeBlocks.push({ type, title: f.title, hasOutput: f.hasOutput, func: f.func, args: f.args });
+      }
+    }
+    if (constants.length && P && typeof P.addLibConstSeeds === 'function') {
+      P.addLibConstSeeds(facts.module, constants);
+    }
+    return { functions: registered, constants: constants.length };
+  }
+
+  // [Phase 1, 1.2] Run a Python introspection probe in Pyodide for an imported module and
+  // return API facts { module, functions:[{name,params}], classes:[...], constants:[...] }.
+  // C-extension callables without a signature degrade to params:[] (still registered).
+  async introspectModule(moduleName, pyodide) {
+    const py = pyodide || (typeof window !== 'undefined' ? window.__pyodide : null);
+    if (!py) throw new Error('introspectModule: pyodide not available');
+    const probe = [
+      'import json, inspect, importlib',
+      'def _bp_introspect(modname):',
+      '    m = importlib.import_module(modname)',
+      '    funcs, classes, consts = [], [], []',
+      '    for n in dir(m):',
+      "        if n.startswith('_'): continue",
+      '        try: obj = getattr(m, n)',
+      '        except Exception: continue',
+      '        try: params = [p for p in inspect.signature(obj).parameters]',
+      '        except Exception: params = []',
+      '        if inspect.isclass(obj): classes.append({"name": n, "params": params})',
+      '        elif callable(obj): funcs.append({"name": n, "params": params})',
+      '        elif isinstance(obj, (int, float, str, bool)): consts.append(n)',
+      '    return json.dumps({"module": modname, "functions": funcs, "classes": classes, "constants": consts})',
+      `_bp_introspect(${JSON.stringify(moduleName)})`,
+    ].join('\n');
+    const json = await py.runPythonAsync(probe);
+    return JSON.parse(json);
+  }
+
   // Abstract library dynamically based on select or custom imports
   async runAbstraction(libKey, customCode = '') {
     const chatSim = document.getElementById('ai-chat-sim');
