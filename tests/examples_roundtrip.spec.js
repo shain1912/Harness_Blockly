@@ -10,7 +10,10 @@ test.describe('demo snippets — AST round-trip is lossless', () => {
   for (const sn of DEMO_SNIPPETS) {
     test(`${sn.category}/${sn.id} round-trips`, () => {
       const ast = new P.Parser(new P.Tokenizer(sn.code).tokenize()).parse();
-      expect(norm(P.astToPython(ast))).toBe(norm(sn.code));
+      // Some constructs normalize on round-trip (a semicolon splits into newlines, a `\`
+      // continuation joins lines) — there's no Blockly syntax for them. Such snippets
+      // declare a `canonical` form: the exact Python the round-trip must produce.
+      expect(norm(P.astToPython(ast))).toBe(norm(sn.canonical || sn.code));
     });
   }
 });
