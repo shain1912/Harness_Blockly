@@ -278,7 +278,8 @@ class Tokenizer {
       // [W3] 2-char ops — added: ** // << >> %= &= |= ^= (OP-02/04/11, ASG-05)
       const twoCharOps = [
         '+=', '-=', '*=', '/=', '==', '!=', '<=', '>=',
-        '**', '//', '<<', '>>', '%=', '&=', '|=', '^='
+        '**', '//', '<<', '>>', '%=', '&=', '|=', '^=',
+        '->' // [W7] return annotation arrow (FN-08)
       ];
       const nextTwo = this.source.slice(this.cursor, this.cursor + 2);
       if (twoCharOps.includes(nextTwo)) {
@@ -336,6 +337,18 @@ class AssignNode extends ASTNode {
     this.type = 'Assign';
     this.target = target; // NameNode
     this.value = value;   // ExpressionNode
+  }
+}
+
+// [W7] Annotated assignment (ASG-06): `x: int`, `x: int = 5`. annotation is the
+// rendered type string; value is null for a bare declaration.
+class AnnAssignNode extends ASTNode {
+  constructor(target, annotation, value, line) {
+    super(line);
+    this.type = 'AnnAssign';
+    this.target = target;         // NameNode
+    this.annotation = annotation; // string (rendered type expression)
+    this.value = value;           // ExpressionNode or null
   }
 }
 
@@ -1325,10 +1338,18 @@ class Parser {
       }
       this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing parameter list');
     }
+    // [W7] optional return annotation  -> <expr>  (FN-08)
+    let returns = null;
+    if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '->') {
+      this.next();
+      returns = astToPython(this.parseExpression());
+    }
     this.expect(TokenType.SYMBOL, ':', 'Expected ":" after function signature');
     this.expect(TokenType.NEWLINE, undefined, 'Expected newline after function signature');
     const body = this.parseSuite();
-    return new FunctionDefNode(nameId.value, params, body, decorators || [], tok.line);
+    const fn = new FunctionDefNode(nameId.value, params, body, decorators || [], tok.line);
+    if (returns !== null) fn.returns = returns;
+    return fn;
   }
 
   parseReturn() {
@@ -1428,6 +1449,20 @@ class Parser {
     }
 
     if (tok && tok.type === TokenType.SYMBOL) {
+      // [W7] annotated assignment (ASG-06): `x: int = 5`, plus attribute targets
+      // `self.data: List[float] = data` (ubiquitous in __init__). Restricted to Name /
+      // Attribute targets at statement top level, so it never collides with slice /
+      // dict-literal ':'.
+      if (tok.value === ':' && (expr.type === 'Name' || expr.type === 'Attribute')) {
+        this.next(); // consume ':'
+        const annotation = astToPython(this.parseExpression());
+        let value = null;
+        if (this.peek() && this.peek().type === TokenType.SYMBOL && this.peek().value === '=') {
+          this.next();
+          value = this.parseAssignValue();
+        }
+        return new AnnAssignNode(this.toAssignTarget(expr), annotation, value, expr.line);
+      }
       if (tok.value === '=') {
         // [W4] support chained multiple targets: a = b = 0
         const targets = [this.toAssignTarget(expr)];
@@ -2210,6 +2245,14 @@ function astToPython(node, indentLevel = 0) {
       return `${indent}${tgtStr} = ${valStr}`;
     }
       
+    case 'AnnAssign': {
+      // [W7] annotated assignment (ASG-06): `x: int` or `x: int = 5`
+      const base = `${indent}${astToPython(node.target)}: ${node.annotation}`;
+      return node.value !== null && node.value !== undefined
+        ? `${base} = ${astToPython(node.value)}`
+        : base;
+    }
+
     case 'AugAssign':
       return `${indent}${astToPython(node.target)} ${node.op} ${astToPython(node.value)}`;
       
@@ -2391,8 +2434,9 @@ function astToPython(node, indentLevel = 0) {
       
     case 'FunctionDef': {
       const decoratorLines = (node.decorators || []).map(d => `${indent}@${astToPython(d)}`).join('\n');
-      // [W5] `async def` re-emits the async prefix.
-      const sig = `${indent}${node.isAsync ? 'async ' : ''}def ${node.name}(${node.params.join(', ')}):`;
+      // [W5] `async def` re-emits the async prefix. [W7] `-> T` return annotation (FN-08).
+      const ret = node.returns ? ` -> ${node.returns}` : '';
+      const sig = `${indent}${node.isAsync ? 'async ' : ''}def ${node.name}(${node.params.join(', ')})${ret}:`;
       const fnBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
       const prefix = decoratorLines ? decoratorLines + '\n' : '';
       return `${prefix}${sig}\n${fnBody || (indent + '    pass')}`;
@@ -2541,6 +2585,10 @@ function collectVariables(node, varsSet = new Set()) {
       collectVariables(node.target, varsSet);
       collectVariables(node.value, varsSet);
       break;
+    case 'AnnAssign': // [W7] annotated assignment registers its target as a variable
+      collectVariables(node.target, varsSet);
+      if (node.value) collectVariables(node.value, varsSet);
+      break;
     case 'AugAssign':
       collectVariables(node.target, varsSet);
       collectVariables(node.value, varsSet);
@@ -2667,9 +2715,14 @@ function collectVariables(node, varsSet = new Set()) {
       break;
     case 'FunctionDef':
       // Walk params + body so variables_get blocks inside methods resolve correctly.
+      // [W7] strip annotation / default / *-prefix to register the bare name: a param
+      // string like "a: int = 3" must register the variable "a", not "a: int = 3", or a
+      // `return a` inside the body finds no matching variable.
       if (node.params && Array.isArray(node.params)) {
         for (const p of node.params) {
-          if (typeof p === 'string' && !['True', 'False', 'None'].includes(p)) varsSet.add(p);
+          if (typeof p !== 'string') continue;
+          const bare = p.replace(/^\*+/, '').split(/[:=]/)[0].trim();
+          if (bare && !['True', 'False', 'None'].includes(bare)) varsSet.add(bare);
         }
       }
       for (const stmt of (node.body || [])) collectVariables(stmt, varsSet);
@@ -2809,6 +2862,21 @@ function convertStatementToBlock(node) {
           "VALUE": { "block": convertExpressionToBlock(node.value) }
         }
       };
+    }
+
+    // [W7] annotated assignment (ASG-06) -> dedicated ann_assign block (lossless).
+    case 'AnnAssign': {
+      const varName = node.target.type === 'Name' ? node.target.id : astToPython(node.target);
+      const block = {
+        "type": "ann_assign",
+        "id": makeBlockId(),
+        "fields": { "VAR": varName, "ANNOTATION": node.annotation },
+        "inputs": {}
+      };
+      if (node.value !== null && node.value !== undefined) {
+        block.inputs["VALUE"] = { "block": convertExpressionToBlock(node.value) };
+      }
+      return block;
     }
 
     case 'Assign': {
@@ -3119,7 +3187,8 @@ function convertStatementToBlock(node) {
     case 'FunctionDef': {
       // [W5] async def has no async-aware procedures_def* hat block; route it through the
       // connectable method_def block, which carries the async marker losslessly.
-      if (node.isAsync) return functionDefToMethodBlock(node);
+      // [W7] same for a return annotation — procedures_def* has no return-type slot.
+      if (node.isAsync || node.returns) return functionDefToMethodBlock(node);
       const body = node.body;
       const lastStmt = body[body.length - 1];
       const hasReturn = lastStmt && lastStmt.type === 'Return';
@@ -3478,6 +3547,7 @@ function functionDefToMethodBlock(stmt) {
     block.fields.DECORATORS = stmt.decorators.map(d => '@' + astToPython(d)).join('\n');
   }
   if (stmt.isAsync) block.fields.ASYNC_LABEL = 'async '; // [W5] async def
+  if (stmt.returns) block.fields.RETURNS = ' -> ' + stmt.returns; // [W7] return annotation (FN-08)
   const bodyBlock = convertStatementListToBlock(stmt.body);
   if (bodyBlock) block.inputs.BODY = { "block": bodyBlock };
   return block;
@@ -4614,7 +4684,11 @@ Blockly.Blocks['method_def'] = {
         .appendField(new Blockly.FieldTextInput("method"), "NAME")
         .appendField("(")
         .appendField(new Blockly.FieldTextInput("self"), "PARAMS")
-        .appendField("):");
+        .appendField(")")
+        // [W7] return annotation — empty for no annotation, " -> str" otherwise.
+        // Serializable text so it round-trips; procedures_def* has no return-type slot.
+        .appendField(new Blockly.FieldTextInput(""), "RETURNS")
+        .appendField(":");
     this.appendStatementInput("BODY").setCheck(null).appendField("do");
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
@@ -4628,11 +4702,41 @@ Blockly.Python['method_def'] = function(block) {
   const name = block.getFieldValue('NAME');
   const params = block.getFieldValue('PARAMS') || '';
   const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || ''; // [W5] "async " or ""
+  const returns = block.getFieldValue('RETURNS') || ''; // [W7] " -> str" or ""
   const body = Blockly.Python.statementToCode(block, 'BODY') || '    pass\n';
-  return `${decoLines}${asyncPrefix}def ${name}(${params}):\n${body}`;
+  return `${decoLines}${asyncPrefix}def ${name}(${params})${returns}:\n${body}`;
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['method_def'] = Blockly.Python['method_def'];
+}
+
+// [W7] Annotated assignment (ASG-06): `x: int` or `x: int = 5`. VAR + ANNOTATION are
+// text fields; VALUE is an optional input (omit it for a bare `x: int` declaration).
+Blockly.Blocks['ann_assign'] = {
+  init: function() {
+    this.appendValueInput('VALUE')
+        .setCheck(null)
+        .appendField(new Blockly.FieldTextInput('x'), 'VAR')
+        .appendField(':')
+        .appendField(new Blockly.FieldTextInput('int'), 'ANNOTATION')
+        .appendField('=');
+    this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#5b80a5');
+    this.setTooltip('Annotated assignment: name: type = value (value optional)');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['ann_assign'] = function(block) {
+  const varName = block.getFieldValue('VAR') || 'x';
+  const annotation = block.getFieldValue('ANNOTATION') || '';
+  const value = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE);
+  const head = `${varName}: ${annotation}`;
+  return (value ? `${head} = ${value}` : head) + '\n';
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['ann_assign'] = Blockly.Python['ann_assign'];
 }
 
 // Raw Python statement block — used as fallback for statements that can't map to built-in blocks
@@ -6186,6 +6290,7 @@ const BlockPyParser = {
   astToBlockly,
   ProgramNode,
   AssignNode,
+  AnnAssignNode,
   AugAssignNode,
   ForNode,
   WhileNode,
