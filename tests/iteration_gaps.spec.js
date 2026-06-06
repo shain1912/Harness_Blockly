@@ -21,10 +21,10 @@ const CASES = [
   // Ellipsis
   ['ellipsis assign', 'x = ...', 'ellipsis_literal'],
   ['ellipsis variadic tuple annotation', 'from typing import Tuple\ndef f() -> Tuple[int, ...]:\n    return ()', 'method_def'],
-  ['ellipsis annotated value', 't: tuple = ...', 'ann_assign'],
+  ['ellipsis annotated value', 't: tuple = ...', 'var_assign'],
   // Subscript-target annotated assignment
-  ['subscript-target ann-assign', 'a[i]: int = 5', 'ann_assign'],
-  ['nested subscript-target ann-assign', 'grid[0]: float = 0.0', 'ann_assign'],
+  ['subscript-target ann-assign', 'a[i]: int = 5', 'var_assign'],
+  ['nested subscript-target ann-assign', 'grid[0]: float = 0.0', 'var_assign'],
   // range() in expression position
   ['range stop', 'r = range(5)', 'range_value'],
   ['range start-stop', 'r = range(2, 10)', 'range_value'],

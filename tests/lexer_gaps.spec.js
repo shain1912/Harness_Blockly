@@ -32,7 +32,7 @@ test.describe('lexer gaps (line continuation, semicolon — pure Node)', () => {
   test('semicolon separates two statements (MSC-05)', () => {
     const { py, types } = analyze('a = 1; b = 2');
     expect(py).toBe('a = 1\nb = 2');
-    expect(types).toContain('variables_set');
+    expect(types).toContain('var_assign');
     expect(types).not.toContain('raw_statement');
   });
 

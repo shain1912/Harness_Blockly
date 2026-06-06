@@ -2908,12 +2908,13 @@ function convertStatementToBlock(node) {
       };
     }
 
-    // [W7] annotated assignment (ASG-06) -> dedicated ann_assign block (lossless).
+    // [Feature A] annotated assignment (ASG-06) -> var_assign with the type toggle ON.
     case 'AnnAssign': {
       const varName = node.target.type === 'Name' ? node.target.id : astToPython(node.target);
       const block = {
-        "type": "ann_assign",
+        "type": "var_assign",
         "id": makeBlockId(),
+        "extraState": { "hasType": true },
         "fields": { "VAR": varName, "ANNOTATION": node.annotation },
         "inputs": {}
       };
@@ -2965,20 +2966,16 @@ function convertStatementToBlock(node) {
         };
       }
 
-      // Handle variable assignment: e.g. x = 10
+      // [Feature A] Simple `name = value` -> var_assign with the type toggle OFF (no
+      // annotation). A unified block so the user can opt into a type hint with +type.
       const targetName = node.target.type === 'Name' ? node.target.id : 'x';
       return {
-        "type": "variables_set",
+        "type": "var_assign",
         "id": makeBlockId(),
-        "fields": {
-          "VAR": {
-            "id": targetName
-          }
-        },
+        "extraState": { "hasType": false },
+        "fields": { "VAR": targetName },
         "inputs": {
-          "VALUE": {
-            "block": convertExpressionToBlock(node.value)
-          }
+          "VALUE": { "block": convertExpressionToBlock(node.value) }
         }
       };
     }
@@ -3591,7 +3588,10 @@ function functionDefToMethodBlock(stmt) {
     block.fields.DECORATORS = stmt.decorators.map(d => '@' + astToPython(d)).join('\n');
   }
   if (stmt.isAsync) block.fields.ASYNC_LABEL = 'async '; // [W5] async def
-  if (stmt.returns) block.fields.RETURNS = ' -> ' + stmt.returns; // [W7] return annotation (FN-08)
+  if (stmt.returns) { // [W7/A] return annotation (FN-08) — toggle the field on
+    block.extraState = { hasReturn: true };
+    block.fields.RETURNS = ' -> ' + stmt.returns;
+  }
   const bodyBlock = convertStatementListToBlock(stmt.body);
   if (bodyBlock) block.inputs.BODY = { "block": bodyBlock };
   return block;
@@ -4729,28 +4729,66 @@ if (Blockly.Python.forBlock) {
 // class_def BODY or another def's body. Params are a flat text field (lossless: defaults,
 // *args/**kwargs, type annotations all survive as text). Decorators emit as @-lines above.
 Blockly.Blocks['method_def'] = {
+  hasReturn_: false, // [Feature A] return annotation is opt-in (+return)
   init: function() {
+    this.hasReturn_ = false;
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#8b5cf6");
+    this.setTooltip("Defines a function/method (nestable) — press + to add a -> return type");
+    this.updateShape_();
+  },
+  saveExtraState: function() { return { hasReturn: this.hasReturn_ }; },
+  loadExtraState: function(state) { this.hasReturn_ = !!(state && state.hasReturn); this.updateShape_(); },
+  // Toggle the `-> type` return annotation, preserving all signature fields + the body.
+  changeReturn_: function(on) {
+    if (this.hasReturn_ === on) return;
+    const snap = {
+      DECORATORS: this.getField('DECORATORS') ? this.getFieldValue('DECORATORS') : '',
+      ASYNC_LABEL: this.getField('ASYNC_LABEL') ? this.getFieldValue('ASYNC_LABEL') : '',
+      NAME: this.getFieldValue('NAME'),
+      PARAMS: this.getFieldValue('PARAMS'),
+      RETURNS: this.getField('RETURNS') ? this.getFieldValue('RETURNS') : '',
+    };
+    const bodyInput = this.getInput('BODY');
+    const bodyConn = bodyInput && bodyInput.connection && bodyInput.connection.targetConnection;
+    const group = (Blockly.Events && Blockly.Events.getGroup && Blockly.Events.getGroup()) || false;
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(true);
+    this.hasReturn_ = on;
+    this.updateShape_();
+    this.setFieldValue(snap.DECORATORS, 'DECORATORS');
+    this.setFieldValue(snap.ASYNC_LABEL, 'ASYNC_LABEL');
+    this.setFieldValue(snap.NAME, 'NAME');
+    this.setFieldValue(snap.PARAMS, 'PARAMS');
+    if (on && this.getField('RETURNS')) this.setFieldValue(snap.RETURNS || ' -> str', 'RETURNS');
+    if (bodyConn) { const bi = this.getInput('BODY'); try { bi.connection.connect(bodyConn); } catch (e) {} }
+    if (this.rendered && typeof this.render === 'function') this.render();
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(group);
+  },
+  updateShape_: function() {
+    for (const inp of this.inputList.slice()) this.removeInput(inp.name);
     const DecoField = Blockly.FieldMultilineInput || Blockly.FieldTextInput;
-    this.appendDummyInput('DECO')
-        .appendField(new DecoField(''), 'DECORATORS');
-    this.appendDummyInput()
-        // [W5] async marker — empty for a plain def, "async " for an async def. A
-        // serializable label so it round-trips without adding UI noise to sync defs.
+    this.appendDummyInput('DECO').appendField(new DecoField(''), 'DECORATORS');
+    const sig = this.appendDummyInput('SIG')
+        // [W5] async marker — empty for a plain def, "async " for an async def.
         .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL')
         .appendField("def")
         .appendField(new Blockly.FieldTextInput("method"), "NAME")
         .appendField("(")
         .appendField(new Blockly.FieldTextInput("self"), "PARAMS")
-        .appendField(")")
-        // [W7] return annotation — empty for no annotation, " -> str" otherwise.
-        // Serializable text so it round-trips; procedures_def* has no return-type slot.
-        .appendField(new Blockly.FieldTextInput(""), "RETURNS")
-        .appendField(":");
+        .appendField(")");
+    // [Feature A] return annotation only when toggled on; the field value carries the
+    // full " -> type" suffix (procedures_def* has no return-type slot).
+    if (this.hasReturn_) sig.appendField(new Blockly.FieldTextInput(" -> str"), "RETURNS");
+    sig.appendField(":");
+    if (Blockly.FieldImage) {
+      const svg = this.hasReturn_ ? ARITY_MINUS_SVG : ARITY_PLUS_SVG;
+      sig.appendField(new Blockly.FieldImage(svg, 18, 18, this.hasReturn_ ? '-return' : '+return', function () {
+        const b = this.getSourceBlock && this.getSourceBlock();
+        if (b) b.changeReturn_(!b.hasReturn_);
+      }), 'RET_BTN');
+    }
     this.appendStatementInput("BODY").setCheck(null).appendField("do");
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour("#8b5cf6");
-    this.setTooltip("Defines a function/method (nestable)");
   }
 };
 Blockly.Python['method_def'] = function(block) {
@@ -4794,6 +4832,73 @@ Blockly.Python['ann_assign'] = function(block) {
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['ann_assign'] = Blockly.Python['ann_assign'];
+}
+
+// [Feature A] Unified assignment block with an OPTIONAL type annotation toggled by a
+// +type / -type button (the type hint is opt-in, matching Python where it's optional).
+// Supersedes ann_assign and the built-in variables_set for simple `name = value` and
+// `name: type = value` (the VAR field is plain text, so it also holds attribute / subscript
+// targets like self.x or a[i]). hasType_ is serialized so the toggle round-trips.
+Blockly.Blocks['var_assign'] = {
+  hasType_: false,
+  init: function() {
+    this.hasType_ = false;
+    this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#5b80a5');
+    this.setTooltip('Assignment with an optional type hint — press + to add `: type`');
+    this.setHelpUrl('');
+    this.updateShape_();
+  },
+  saveExtraState: function() { return { hasType: this.hasType_ }; },
+  loadExtraState: function(state) { this.hasType_ = !!(state && state.hasType); this.updateShape_(); },
+  // Toggle the annotation on/off, preserving the VAR/ANNOTATION text and the VALUE child.
+  changeType_: function(on) {
+    if (this.hasType_ === on) return;
+    const var0 = this.getFieldValue('VAR');
+    const ann0 = this.getField('ANNOTATION') ? this.getFieldValue('ANNOTATION') : '';
+    const valInput = this.getInput('VALUE');
+    const valConn = valInput && valInput.connection && valInput.connection.targetConnection;
+    const group = (Blockly.Events && Blockly.Events.getGroup && Blockly.Events.getGroup()) || false;
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(true);
+    this.hasType_ = on;
+    this.updateShape_();
+    if (var0 != null) this.setFieldValue(var0, 'VAR');
+    if (on && ann0) this.setFieldValue(ann0, 'ANNOTATION');
+    if (valConn) { const vi = this.getInput('VALUE'); try { vi.connection.connect(valConn); } catch (e) {} }
+    if (this.rendered && typeof this.render === 'function') this.render();
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(group);
+  },
+  updateShape_: function() {
+    for (const inp of this.inputList.slice()) this.removeInput(inp.name);
+    const row = this.appendValueInput('VALUE').setCheck(null);
+    row.appendField(new Blockly.FieldTextInput('x'), 'VAR');
+    if (this.hasType_) {
+      row.appendField(':').appendField(new Blockly.FieldTextInput('int'), 'ANNOTATION');
+    }
+    row.appendField('=');
+    const self = this;
+    const svg = this.hasType_ ? ARITY_MINUS_SVG : ARITY_PLUS_SVG;
+    const alt = this.hasType_ ? '-type' : '+type';
+    if (Blockly.FieldImage) {
+      this.appendDummyInput('TYPETOGGLE')
+          .appendField(new Blockly.FieldImage(svg, 18, 18, alt, function () {
+            const b = this.getSourceBlock && this.getSourceBlock();
+            if (b) b.changeType_(!b.hasType_);
+          }), 'TYPE_BTN');
+    }
+  }
+};
+Blockly.Python['var_assign'] = function(block) {
+  const varName = block.getFieldValue('VAR') || 'x';
+  const annotation = block.hasType_ ? (block.getFieldValue('ANNOTATION') || '') : '';
+  const value = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE);
+  const head = annotation ? `${varName}: ${annotation}` : varName;
+  return (value ? `${head} = ${value}` : head) + '\n';
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['var_assign'] = Blockly.Python['var_assign'];
 }
 
 // [W8] Ellipsis literal `...` (LIT-12) — a value block. Common in type stubs / variadic
