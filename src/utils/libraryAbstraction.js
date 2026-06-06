@@ -129,6 +129,25 @@ function validateMacroTemplate(spec, parser) {
   }
 }
 
+// [Phase 1, Work-Unit 1.2] Normalize Pyodide introspection facts into our two existing
+// registration shapes. Functions/classes -> registerBlock specs (real arg names replace
+// generic param_N; a plain `lib.func(args)` call is sound by form, so no oracle gate is
+// needed for these). Constants -> a name list to seed the lib_const dropdown. Skips dunder
+// (__x__) and private (_x) members. Pure — no Pyodide, no Blockly.
+//   facts: { module, functions:[{name,params}], classes:[{name,params}], constants:[string] }
+//   returns: { functions:[{lib,func,args,hasOutput,title}], constants:[string] }
+function apiFactsToSpecs(facts) {
+  const lib = (facts && facts.module) || '';
+  const isPublic = (n) => typeof n === 'string' && n && !n.startsWith('_');
+  const fnOf = (f) => ({ lib, func: f.name, args: Array.isArray(f.params) ? f.params.slice() : [], hasOutput: true, title: `${lib}.${f.name}` });
+  const functions = []
+    .concat((facts && facts.functions) || [], (facts && facts.classes) || [])
+    .filter((f) => f && isPublic(f.name))
+    .map(fnOf);
+  const constants = ((facts && facts.constants) || []).filter(isPublic);
+  return { functions, constants };
+}
+
 // [Phase 1] Oracle-gated synthesis planner (pure — no Blockly). For each candidate spec,
 // gate it through the lossless round-trip oracle (validateMacroTemplate). Specs that pass
 // are queued for registration; specs that fail get ONE optional repair attempt; still-
@@ -531,7 +550,8 @@ const BlockPyAbstraction = {
   expandMacroTemplate,
   sampleValuesFor,
   validateMacroTemplate,
-  planSynthesis
+  planSynthesis,
+  apiFactsToSpecs
 };
 
 if (typeof window !== 'undefined') {
