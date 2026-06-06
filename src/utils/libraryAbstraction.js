@@ -399,6 +399,34 @@ class LibraryAbstractionEngine {
     return { functions: registered, constants: constants.length };
   }
 
+  // [Phase 1, 1.3] Register blocks from an AI /api/ai-abstract response. A plain call block
+  // ({func,args,hasOutput,colour,title}) registers via registerBlock — `lib.func(args)` is
+  // sound by form, no gate needed. A macro block ({type,slots,pythonTemplate}) is routed
+  // through the oracle-gated synthesizeBlocks so hallucinated multi-line templates are
+  // rejected. Returns { registered: type[], rejected: {type,error}[] }.
+  registerAiBlocks(libName, blocks) {
+    const registered = [];
+    const rejected = [];
+    const macros = [];
+    for (const b of blocks || []) {
+      if (b && b.pythonTemplate) { macros.push(b); continue; }
+      if (b && b.func) {
+        const colour = b.colour || (libName === 'cv2' ? '#06b6d4' : '#009688');
+        const type = this.registerBlock(libName, b.func, b.args || [], !!b.hasOutput, colour, b.title || `${libName}.${b.func}`);
+        registered.push(type);
+        if (!this.activeBlocks.some((a) => a.type === type)) {
+          this.activeBlocks.push({ type, title: b.title || `${libName}.${b.func}`, hasOutput: !!b.hasOutput, func: b.func, args: b.args || [] });
+        }
+      }
+    }
+    if (macros.length) {
+      const r = this.synthesizeBlocks(macros);
+      registered.push(...r.registered);
+      rejected.push(...r.rejected);
+    }
+    return { registered, rejected };
+  }
+
   // [Phase 1, 1.2] Run a Python introspection probe in Pyodide for an imported module and
   // return API facts { module, functions:[{name,params}], classes:[...], constants:[...] }.
   // C-extension callables without a signature degrade to params:[] (still registered).
