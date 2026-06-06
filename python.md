@@ -20,12 +20,16 @@ Measured over all **182** catalog rows.
 
 | Bucket | Count | % of 182 |
 |--------|-------|----------|
-| ✅ Matched (dedicated block) | 158 | 86.8% |
+| ✅ Matched (dedicated block) | 164 | 90.1% |
 | 🟡 Partial (`raw` fallback) | 5 | 2.7% |
-| ❌ Missing | 19 | 10.4% |
+| ❌ Missing | 13 | 7.1% |
 
-- **block-convertible %** = (matched + partial) / total = (158 + 5) / 182 = **89.6%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
-- **dedicated-block %** = matched / total = 158 / 182 = **86.8%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+- **block-convertible %** = (matched + partial) / total = (164 + 5) / 182 = **92.9%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
+- **dedicated-block %** = matched / total = 164 / 182 = **90.1%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+
+> **Update (W6 loop-else):** `for/else` (CF-08) and `while/else` (CF-11) were parse errors (the trailing `else` was a stray token). They now parse, round-trip losslessly, and get dedicated `for_else` / `while_else` blocks with an `else` statement input (2 rows ❌→✅, dedicated-block 89.0%→90.1%). `async for/else` is covered too (the `for_else` block carries `ASYNC_LABEL`). Verified Node (`tests/loop_else.spec.js`) + real-workspace block→code (`tests/loop_else_browser.spec.js`).
+
+> **Update (W5 async/await):** `async def` / `await` / `async for` / `async with` (ASY-01..04) were every-row parse errors (whole section ❌). They now have **full bidirectional dedicated blocks** (4 rows ❌→✅, dedicated-block 86.8%→89.0%): a serializable `ASYNC_LABEL` marker on `method_def`/`for_each_custom`/`for_unpack`/`with_statement` carries the `async` qualifier, and `await` gets dedicated `await_expr` (value) / `await_stmt` (statement) blocks. Verified Python→AST→Python lossless (`tests/async_support.spec.js`) **and** Python→blocks→Python via a real workspace (`tests/async_blocks_browser.spec.js`, 5 cases) — the block view regenerates `async`/`await`. Async comprehensions (PEP 530 — `[x async for x in ait]` across list/set/dict/gen, plus `await` as the element) also parse & round-trip losslessly.
 
 > **Update (method_call routing):** any `receiver.method(args)` call that no specialized path claims now emits the dedicated **`method_call`** block instead of a gray `raw_*` lump. That flipped **17** rows (all `str/dict/set/tuple` type methods, every `module.func(...)` stdlib call, and `for k, v in d.items()`) from 🟡→✅, raising dedicated-block coverage **77.5% → 86.8%**. The 5 remaining 🟡 are non-call constructs: lambda, docstring bodies, multi-`with`, and bare `range()`.
 
@@ -37,7 +41,7 @@ Measured over all **182** catalog rows.
 | 2. Variables & Assignment (ASG) | 11 | 9 | 0 | 2 |
 | 3. Operators & Expressions (OP) | 21 | 19 | 1 | 1 |
 | 4. Comprehensions & Generators (CMP) | 7 | 7 | 0 | 0 |
-| 5. Control Flow (CF) | 16 | 12 | 0 | 4 |
+| 5. Control Flow (CF) | 16 | 14 | 0 | 2 |
 | 6. Functions (FN) | 18 | 15 | 1 | 2 |
 | 7. Classes & OOP (CLS) | 15 | 15 | 0 | 0 |
 | 8. Exceptions & Context (EXC) | 13 | 12 | 1 | 0 |
@@ -45,31 +49,30 @@ Measured over all **182** catalog rows.
 | 10. Built-in Functions (BIF) | 20 | 19 | 1 | 0 |
 | 11. Built-in Type Methods (MTH) | 5 | 5 | 0 | 0 |
 | 12. Standard Library Modules (STD) | 20 | 19 | 0 | 1 |
-| 13. Async (ASY) | 4 | 0 | 0 | 4 |
+| 13. Async (ASY) | 4 | 4 | 0 | 0 |
 | 14. Comments & Misc (MSC) | 6 | 2 | 1 | 3 |
-| **Total** | **182** | **158** | **5** | **19** |
+| **Total** | **182** | **164** | **5** | **13** |
 
 **Weakest sections** (most ❌ missing — these are genuine parse errors, the real remaining gaps):
 
-1. **Async (ASY)** — 0/4. `async def` / `await` / `async for` / `async with` are not tokenized (the `async`/`await` keywords are unknown), so every row is a parse error.
-2. **Control Flow (CF)** — 12/16; the `for/else`, `while/else`, and `match/case` (+ patterns) constructs are parse errors (4 missing).
-3. **Comments & Misc (MSC)** — 2/6; line continuation `\`, semicolon-separated statements, and 3.12 `type` aliases are parse errors.
-4. **Literals/Assignment edge cases** — complex literal `3+4j`, bytes `b"..."`, annotated/walrus assignment (a handful of ❌ across LIT/ASG).
+1. **Control Flow (CF)** — 14/16; only `match/case` (+ patterns) remain parse errors (2 missing). `for/else`/`while/else` done in W6.
+2. **Comments & Misc (MSC)** — 2/6; line continuation `\`, semicolon-separated statements, and 3.12 `type` aliases are parse errors.
+3. **Literals/Assignment edge cases** — complex literal `3+4j`, bytes `b"..."`, annotated/walrus assignment (a handful of ❌ across LIT/ASG).
 
 ---
 
 ## Palette vs Parser gap
 
-The toolbox/palette in `index.html` (`<block type=...>`, **87** entries) and the set of blocks the parser actually *emits/defines* in `parser.js` (**60** custom blocks) are different sets. Two asymmetries:
+The toolbox/palette in `index.html` (`<block type=...>`, **87** entries) and the set of blocks the parser actually *emits/defines* in `parser.js` (**62** custom blocks) are different sets. Two asymmetries:
 
-### A. Blocks DEFINED in parser.js but NOT in the palette (14)
+### A. Blocks DEFINED in parser.js but NOT in the palette (18)
 
-`binary_op  class_def  double_starred_arg  for_each_custom  for_unpack  function_return  keyword_arg  method_call  method_def  raw_expression  raw_statement  slice_expr  starred_arg  unpack_assign`
+`await_expr  await_stmt  binary_op  class_def  double_starred_arg  for_each_custom  for_else  for_unpack  function_return  keyword_arg  method_call  method_def  raw_expression  raw_statement  slice_expr  starred_arg  unpack_assign  while_else`
 
 These are all **convert-only / output-only blocks** — produced by the Python→block converter (`astToBlockly`) but deliberately not draggable from the palette:
 
 - **(a) Structural / sub-blocks emitted only as children of a larger construct** — you don't drag these standalone; the converter builds them while parsing real code:
-  `class_def`, `method_def`, `method_call` (class bodies/`super()`), `function_return` (bare `return`), `for_each_custom` + `for_unpack` (for-loops, incl. enumerate/tuple targets), `unpack_assign` (`a, b = ...`), `slice_expr` (the `1:5` inside a subscript), `binary_op` (a generic op node), and the call-argument sub-blocks `keyword_arg`, `starred_arg`, `double_starred_arg` (the `a=1`, `*args`, `**kwargs` pieces inside a `func_call`). Dragging these from a palette without their parent context would be meaningless.
+  `class_def`, `method_def`, `method_call` (class bodies/`super()`), `function_return` (bare `return`), `for_each_custom` + `for_unpack` (for-loops, incl. enumerate/tuple targets), `unpack_assign` (`a, b = ...`), `slice_expr` (the `1:5` inside a subscript), `binary_op` (a generic op node), `await_expr` / `await_stmt` (the `await <expr>` value/statement pieces inside an async def), and the call-argument sub-blocks `keyword_arg`, `starred_arg`, `double_starred_arg` (the `a=1`, `*args`, `**kwargs` pieces inside a `func_call`). Dragging these from a palette without their parent context would be meaningless.
 - **(b) Gray fallback blocks** — `raw_statement` and `raw_expression` are intentionally palette-excluded: they exist only so unconvertible code (e.g. `math.sqrt(...)`, a lambda, a docstring body) still has *some* block representation. Offering them in the palette would invite users to hand-author "escape-hatch" blocks, defeating the 1:1 design.
 
 (Note: `subscript_get` / `subscript_set` ARE in both the palette and the parser, so they are not part of this gap.)
@@ -177,10 +180,10 @@ These are **standard Blockly library blocks** shipped in `blocks_compressed.js` 
 | CF-05 | `for` over range | `for i in range(n):` | ✅ for_each_custom (range) |
 | CF-06 | `for` w/ enumerate | `for i, x in enumerate(xs):` | ✅ for_unpack (enumerate) |
 | CF-07 | `for` w/ unpacking | `for k, v in d.items():` | ✅ method_call |
-| CF-08 | `for / else` | `for x in xs: ... else: ...` | ❌ parse error (for/else) |
+| CF-08 | `for / else` | `for x in xs: ... else: ...` | ✅ `for_else` — [W6] dedicated block with `else` input; full bidirectional round-trip (also `async for/else`). |
 | CF-09 | `while` | `while c:` | ✅ controls_whileUntil |
 | CF-10 | `while True` (infinite) | `while True:` | ✅ controls_whileUntil (while True) |
-| CF-11 | `while / else` | `while c: ... else: ...` | ❌ parse error (while/else) |
+| CF-11 | `while / else` | `while c: ... else: ...` | ✅ `while_else` — [W6] dedicated block with `else` input; full bidirectional round-trip. |
 | CF-12 | `break` | `break` | ✅ controls_flow_statements (break) |
 | CF-13 | `continue` | `continue` | ✅ controls_flow_statements (continue) |
 | CF-14 | `pass` | `pass` | ✅ controls_pass |
@@ -344,10 +347,10 @@ Each is a `Call` to a known builtin. Grouped for mapping.
 
 | ID | Construct | Example | Block? |
 |----|-----------|---------|--------|
-| ASY-01 | `async def` | `async def f():` | ❌ parse error (async def) |
-| ASY-02 | `await` | `await coro()` | ❌ parse error (await) |
-| ASY-03 | `async for` | `async for x in ait:` | ❌ parse error (async for) |
-| ASY-04 | `async with` | `async with cm() as x:` | ❌ parse error (async with) |
+| ASY-01 | `async def` | `async def f():` | ✅ `method_def` — [W5] `ASYNC_LABEL` marker carries `async`; full bidirectional round-trip. |
+| ASY-02 | `await` | `await coro()` | ✅ `await_expr` / `await_stmt` — [W5] dedicated value & statement blocks; emit `await <expr>`. |
+| ASY-03 | `async for` | `async for x in ait:` | ✅ `for_each_custom` / `for_unpack` — [W5] `ASYNC_LABEL` marker carries `async`. |
+| ASY-04 | `async with` | `async with cm() as x:` | ✅ `with_statement` — [W5] `ASYNC_LABEL` marker carries `async`. |
 
 ---
 

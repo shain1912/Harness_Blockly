@@ -24,7 +24,9 @@ const KEYWORDS = [
   'del', 'global', 'nonlocal', 'yield', 'from',
   'is', // [W3] identity operator keyword (OP-09)
   // [W1] Exceptions & context managers (EXC-01..12). 'as'/'from' already added above.
-  'try', 'except', 'finally', 'raise', 'with', 'assert'
+  'try', 'except', 'finally', 'raise', 'with', 'assert',
+  // [W5] Async (ASY-01..04): async def / await / async for / async with.
+  'async', 'await'
 ];
 
 class Token {
@@ -671,6 +673,16 @@ class WithNode extends ASTNode {
   }
 }
 
+// [W5] `await <expr>` — an expression that unwraps an awaitable. Valid only inside an
+// `async def`; we parse it structurally and round-trip the `await ` prefix losslessly.
+class AwaitNode extends ASTNode {
+  constructor(value, line) {
+    super(line);
+    this.type = 'Await';
+    this.value = value;
+  }
+}
+
 // [W4] Dict literal: {"a": 1, "b": 2}, {}
 class DictNode extends ASTNode {
   constructor(keys, values, line) {
@@ -780,6 +792,20 @@ class Parser {
     return this.tokens[this.cursor++];
   }
 
+  // [W5] True if the cursor is at the start of a comprehension for-clause — either `for`
+  // or an async comprehension's `async for` (PEP 530). Lets every comprehension entry point
+  // accept `[x async for x in ait]` without duplicating the two-token lookahead.
+  _atCompFor() {
+    const t = this.peek();
+    if (!t || t.type !== TokenType.KEYWORD) return false;
+    if (t.value === 'for') return true;
+    if (t.value === 'async') {
+      const n = this.tokens[this.cursor + 1];
+      return !!(n && n.type === TokenType.KEYWORD && n.value === 'for');
+    }
+    return false;
+  }
+
   match(type, value) {
     const tok = this.peek();
     if (!tok) return false;
@@ -878,6 +904,10 @@ class Parser {
           return this.parseAssert();
         case 'with':
           return this.parseWith();
+        // [W5] async def / async for / async with — parse the inner compound statement
+        // and tag it isAsync. astToPython re-emits the `async ` prefix losslessly.
+        case 'async':
+          return this.parseAsync();
       }
     }
 
@@ -895,6 +925,10 @@ class Parser {
       const next = this.peek();
       if (next && next.type === TokenType.KEYWORD && next.value === 'def') {
         return this.parseFunctionDef(decorators);
+      }
+      // [W5] @deco over an async def
+      if (next && next.type === TokenType.KEYWORD && next.value === 'async') {
+        return this.parseAsync(decorators);
       }
       if (next && next.type === TokenType.KEYWORD && next.value === 'class') {
         return this.parseClassDef(decorators);
@@ -1152,6 +1186,25 @@ class Parser {
     return new WithNode(items, body, tok.line);
   }
 
+  // [W5] `async` prefix on a def / for / with. Delegates to the existing parser for that
+  // compound statement, then tags the node isAsync so astToPython re-emits `async `.
+  parseAsync(decorators) {
+    this.expect(TokenType.KEYWORD, 'async');
+    const next = this.peek();
+    let node;
+    if (next && next.type === TokenType.KEYWORD && next.value === 'def') {
+      node = this.parseFunctionDef(decorators || []);
+    } else if (next && next.type === TokenType.KEYWORD && next.value === 'for') {
+      node = this.parseFor();
+    } else if (next && next.type === TokenType.KEYWORD && next.value === 'with') {
+      node = this.parseWith();
+    } else {
+      throw new SyntaxError('Expected "def", "for", or "with" after "async"');
+    }
+    node.isAsync = true;
+    return node;
+  }
+
   parseIf() {
     const tok = this.expect(TokenType.KEYWORD, 'if');
     const test = this.parseExpression();
@@ -1200,7 +1253,21 @@ class Parser {
     this.expect(TokenType.SYMBOL, ':', 'Expected ":" after while condition');
     this.expect(TokenType.NEWLINE, undefined, 'Expected newline after while statement');
     const body = this.parseSuite();
-    return new WhileNode(test, body, tok.line);
+    const node = new WhileNode(test, body, tok.line);
+    node.orelse = this.parseLoopElse(); // [W6] optional while/else (CF-11)
+    return node;
+  }
+
+  // [W6] Parse an optional `else:` suite trailing a for/while loop. Returns [] if absent.
+  // The loop-else runs only when the loop finishes without hitting `break`.
+  parseLoopElse() {
+    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'else') {
+      this.next();
+      this.expect(TokenType.SYMBOL, ':', 'Expected ":" after loop-else');
+      this.expect(TokenType.NEWLINE, undefined, 'Expected newline after loop-else');
+      return this.parseSuite();
+    }
+    return [];
   }
 
   parseFor() {
@@ -1210,12 +1277,14 @@ class Parser {
 
     this.expect(TokenType.KEYWORD, 'in', 'Expected "in" keyword in for-loop');
     const iter = this.parseExpression();
-    
+
     this.expect(TokenType.SYMBOL, ':', 'Expected ":" after loop expression');
     this.expect(TokenType.NEWLINE, undefined, 'Expected newline after for statement');
-    
+
     const body = this.parseSuite();
-    return new ForNode(target, iter, body, tok.line);
+    const node = new ForNode(target, iter, body, tok.line);
+    node.orelse = this.parseLoopElse(); // [W6] optional for/else (CF-08)
+    return node;
   }
 
   parseFunctionDef(decorators) {
@@ -1631,6 +1700,12 @@ class Parser {
   }
 
   parseUnary() {
+    // [W5] `await <expr>` prefix — binds like a unary operator over its operand.
+    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'await') {
+      const tok = this.next();
+      const operand = this.parseUnary();
+      return new AwaitNode(operand, tok.line);
+    }
     // [W3] added bitwise NOT `~` as a unary prefix (OP-11), alongside - and +.
     if (this.peek() && this.peek().type === TokenType.SYMBOL && (this.peek().value === '-' || this.peek().value === '+' || this.peek().value === '~')) {
       const op = this.next().value;
@@ -1704,7 +1779,7 @@ class Parser {
       return { type: 'Keyword', name: expr.id, value: this.parseExpression(), line: expr.line };
     }
     // bare generator expression argument:  func(x for x in xs)
-    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    if (this._atCompFor()) { // [W5] also matches `async for` (async comprehension)
       const generators = this.parseComprehensionClauses();
       return new GenExpNode(expr, generators, expr.line);
     }
@@ -1856,7 +1931,7 @@ class Parser {
     const first = this.parseExpression();
 
     // Generator expression: (elt for target in iter ...)
-    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    if (this._atCompFor()) { // [W5] also matches `async for` (async comprehension)
       const generators = this.parseComprehensionClauses();
       this.expect(TokenType.SYMBOL, ')', 'Expected ")" closing generator expression');
       return new GenExpNode(first, generators, startTok.line);
@@ -1896,7 +1971,7 @@ class Parser {
       const firstVal = this.parseExpression();
 
       // Dict comprehension: {k: v for ...}
-      if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+      if (this._atCompFor()) { // [W5] also matches `async for`
         const generators = this.parseComprehensionClauses();
         this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing dict comprehension');
         return new DictCompNode(first, firstVal, generators, startTok.line);
@@ -1921,7 +1996,7 @@ class Parser {
     }
 
     // Set comprehension: {x for ...}
-    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    if (this._atCompFor()) { // [W5] also matches `async for` (async comprehension)
       const generators = this.parseComprehensionClauses();
       this.expect(TokenType.SYMBOL, '}', 'Expected "}" closing set comprehension');
       return new SetCompNode(first, generators, startTok.line);
@@ -1951,7 +2026,7 @@ class Parser {
     const first = this.parseExpression();
 
     // Check for List Comprehension: [elt for target in iter ...]
-    if (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    if (this._atCompFor()) { // [W5] also matches `async for` (async list comprehension)
       // [W4] support multiple "for" clauses (nested) and multiple "if" filters
       const generators = this.parseComprehensionClauses();
       this.expect(TokenType.SYMBOL, ']', 'Expected closing bracket "]" in list comprehension');
@@ -1986,7 +2061,10 @@ class Parser {
   // Assumes the cursor is positioned on the first "for" keyword.
   parseComprehensionClauses() {
     const generators = [];
-    while (this.peek() && this.peek().type === TokenType.KEYWORD && this.peek().value === 'for') {
+    while (this._atCompFor()) {
+      // [W5] optional `async` before `for` -> async comprehension clause (PEP 530)
+      let isAsync = false;
+      if (this.peek().value === 'async') { this.next(); isAsync = true; }
       const forTok = this.next(); // consume 'for'
       const target = this.parseCompTarget();
       this.expect(TokenType.KEYWORD, 'in', 'Expected "in" keyword in comprehension');
@@ -1997,7 +2075,9 @@ class Parser {
         this.next(); // consume 'if'
         ifs.push(this.parseLogicalOr());
       }
-      generators.push(new ComprehensionNode(target, iter, ifs, forTok.line));
+      const comp = new ComprehensionNode(target, iter, ifs, forTok.line);
+      comp.isAsync = isAsync;
+      generators.push(comp);
     }
     return generators;
   }
@@ -2077,7 +2157,8 @@ function comprehensionClausesToPython(generators) {
   if (!generators || generators.length === 0) return '';
   return generators.map(g => {
     const ifsStr = (g.ifs || []).map(c => ` if ${astToPython(c)}`).join('');
-    return ` for ${targetToPython(g.target)} in ${astToPython(g.iter)}${ifsStr}`;
+    const forKw = g.isAsync ? ' async for' : ' for'; // [W5] async comprehension (PEP 530)
+    return `${forKw} ${targetToPython(g.target)} in ${astToPython(g.iter)}${ifsStr}`;
   }).join('');
 }
 
@@ -2132,16 +2213,27 @@ function astToPython(node, indentLevel = 0) {
     case 'AugAssign':
       return `${indent}${astToPython(node.target)} ${node.op} ${astToPython(node.value)}`;
       
-    case 'For':
+    case 'For': {
       // [W4] targetToPython renders tuple targets unparenthesized (for k, v in ...)
-      const forHead = `${indent}for ${targetToPython(node.target)} in ${astToPython(node.iter)}:`;
+      // [W5] `async for` re-emits the async prefix.
+      const forHead = `${indent}${node.isAsync ? 'async ' : ''}for ${targetToPython(node.target)} in ${astToPython(node.iter)}:`;
       const forBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
-      return `${forHead}\n${forBody || (indent + '    pass')}`;
+      // [W6] for/else clause (CF-08)
+      const forElse = (node.orelse && node.orelse.length)
+        ? `\n${indent}else:\n${node.orelse.map(s => astToPython(s, indentLevel + 1)).join('\n')}`
+        : '';
+      return `${forHead}\n${forBody || (indent + '    pass')}${forElse}`;
+    }
       
-    case 'While':
+    case 'While': {
       const whileHead = `${indent}while ${astToPython(node.test)}:`;
       const whileBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
-      return `${whileHead}\n${whileBody || (indent + '    pass')}`;
+      // [W6] while/else clause (CF-11)
+      const whileElse = (node.orelse && node.orelse.length)
+        ? `\n${indent}else:\n${node.orelse.map(s => astToPython(s, indentLevel + 1)).join('\n')}`
+        : '';
+      return `${whileHead}\n${whileBody || (indent + '    pass')}${whileElse}`;
+    }
       
     case 'If':
       const ifHead = `${indent}if ${astToPython(node.test)}:`;
@@ -2299,7 +2391,8 @@ function astToPython(node, indentLevel = 0) {
       
     case 'FunctionDef': {
       const decoratorLines = (node.decorators || []).map(d => `${indent}@${astToPython(d)}`).join('\n');
-      const sig = `${indent}def ${node.name}(${node.params.join(', ')}):`;
+      // [W5] `async def` re-emits the async prefix.
+      const sig = `${indent}${node.isAsync ? 'async ' : ''}def ${node.name}(${node.params.join(', ')}):`;
       const fnBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
       const prefix = decoratorLines ? decoratorLines + '\n' : '';
       return `${prefix}${sig}\n${fnBody || (indent + '    pass')}`;
@@ -2308,6 +2401,10 @@ function astToPython(node, indentLevel = 0) {
       return node.value === null ? `${indent}return` : `${indent}return ${astToPython(node.value)}`;
     case 'Lambda':
       return `lambda ${node.params.join(', ')}: ${astToPython(node.body)}`;
+
+    // [W5] `await <expr>` — re-emit the prefix losslessly.
+    case 'Await':
+      return `${indent}await ${astToPython(node.value)}`;
 
     case 'ClassDef': {
       const decoratorLines = (node.decorators || []).map(d => `${indent}@${astToPython(d)}`).join('\n');
@@ -2411,7 +2508,7 @@ function astToPython(node, indentLevel = 0) {
         if (it.asName) s += ` as ${it.asName}`;
         return s;
       }).join(', ');
-      const withHead = `${indent}with ${itemsStr}:`;
+      const withHead = `${indent}${node.isAsync ? 'async ' : ''}with ${itemsStr}:`;
       const withBody = node.body.map(stmt => astToPython(stmt, indentLevel + 1)).join('\n');
       return `${withHead}\n${withBody || (indent + '    pass')}`;
     }
@@ -2698,11 +2795,22 @@ function convertStatementToBlock(node) {
       // Map sprite methods or standard print calls
       const callBlock = convertCallExpression(node, true);
       if (callBlock) return callBlock;
-      
+
       // If general unsupported call statement, fall back to generic expression block
       return makeGenericCallBlock(node);
     }
-    
+
+    // [W5] bare `await <expr>` statement -> connectable await_stmt block (not a raw lump).
+    case 'Await': {
+      return {
+        "type": "await_stmt",
+        "id": makeBlockId(),
+        "inputs": {
+          "VALUE": { "block": convertExpressionToBlock(node.value) }
+        }
+      };
+    }
+
     case 'Assign': {
       const tgt = node.target;
 
@@ -2807,13 +2915,32 @@ function convertStatementToBlock(node) {
     }
 
     case 'For': {
+      const asyncFields = node.isAsync ? { "ASYNC_LABEL": "async " } : {}; // [W5]
+      // [W6] for/else (CF-08): no standard/repeat loop block has an else branch, so route any
+      // for-with-else (tuple or not, range or not) to the dedicated for_else block. TARGET is a
+      // text field that holds simple names AND tuple targets ("k, v") for a lossless head.
+      if (node.orelse && node.orelse.length) {
+        const block = {
+          "type": "for_else",
+          "id": makeBlockId(),
+          "fields": { "TARGET": targetToPython(node.target), ...asyncFields },
+          "inputs": {
+            "ITER": { "block": convertExpressionToBlock(node.iter) }
+          }
+        };
+        const doBlock = convertStatementListToBlock(node.body);
+        if (doBlock) block.inputs["DO"] = { "block": doBlock };
+        const elseBlock = convertStatementListToBlock(node.orelse);
+        if (elseBlock) block.inputs["ELSE"] = { "block": elseBlock };
+        return block;
+      }
       // [W4] Tuple target (for k, v in ...) -> custom for_unpack block.
       if (node.target && node.target.type === 'Tuple') {
         const targetStr = node.target.elts.map(e => astToPython(e)).join(', ');
         return {
           "type": "for_unpack",
           "id": makeBlockId(),
-          "fields": { "TARGETS": targetStr },
+          "fields": { "TARGETS": targetStr, ...asyncFields },
           "inputs": {
             "LIST": { "block": convertExpressionToBlock(node.iter) },
             "DO": { "block": convertStatementListToBlock(node.body) }
@@ -2826,7 +2953,8 @@ function convertStatementToBlock(node) {
 
       // If iterating range(10) with a single name target: map to repeating loops.
       // (Tuple targets / non-name targets fall through to the generic for_each block.)
-      if (node.iter.type === 'Range' && node.target.type === 'Name') {
+      // [W5] async for can't use repeat/controls_for (no async marker) — force for_each_custom.
+      if (node.iter.type === 'Range' && node.target.type === 'Name' && !node.isAsync) {
         const range = node.iter;
         const startVal = range.start ? range.start.value : 0;
         const stopVal = range.stop ? range.stop.value : 10;
@@ -2900,7 +3028,7 @@ function convertStatementToBlock(node) {
       return {
         "type": "for_each_custom",
         "id": makeBlockId(),
-        "fields": { "TARGET": targetToPython(node.target) },
+        "fields": { "TARGET": targetToPython(node.target), ...asyncFields },
         "inputs": {
           "ITER": { "block": convertExpressionToBlock(node.iter) },
           "DO": { "block": convertStatementListToBlock(node.body) }
@@ -2909,6 +3037,22 @@ function convertStatementToBlock(node) {
     }
 
     case 'While': {
+      // [W6] while/else (CF-11): controls_whileUntil has no else branch — route to the
+      // dedicated while_else block when an else clause is present.
+      if (node.orelse && node.orelse.length) {
+        const block = {
+          "type": "while_else",
+          "id": makeBlockId(),
+          "inputs": {
+            "BOOL": { "block": convertExpressionToBlock(node.test) }
+          }
+        };
+        const doBlock = convertStatementListToBlock(node.body);
+        if (doBlock) block.inputs["DO"] = { "block": doBlock };
+        const elseBlock = convertStatementListToBlock(node.orelse);
+        if (elseBlock) block.inputs["ELSE"] = { "block": elseBlock };
+        return block;
+      }
       return {
         "type": "controls_whileUntil",
         "id": makeBlockId(),
@@ -2973,6 +3117,9 @@ function convertStatementToBlock(node) {
     }
 
     case 'FunctionDef': {
+      // [W5] async def has no async-aware procedures_def* hat block; route it through the
+      // connectable method_def block, which carries the async marker losslessly.
+      if (node.isAsync) return functionDefToMethodBlock(node);
       const body = node.body;
       const lastStmt = body[body.length - 1];
       const hasReturn = lastStmt && lastStmt.type === 'Return';
@@ -3274,7 +3421,8 @@ function convertStatementToBlock(node) {
         "type": "with_statement",
         "id": makeBlockId(),
         "fields": {
-          "AS": first.asName || ''
+          "AS": first.asName || '',
+          ...(node.isAsync ? { "ASYNC_LABEL": "async " } : {}) // [W5] async with
         },
         "inputs": {}
       };
@@ -3329,6 +3477,7 @@ function functionDefToMethodBlock(stmt) {
   if (stmt.decorators && stmt.decorators.length) {
     block.fields.DECORATORS = stmt.decorators.map(d => '@' + astToPython(d)).join('\n');
   }
+  if (stmt.isAsync) block.fields.ASYNC_LABEL = 'async '; // [W5] async def
   const bodyBlock = convertStatementListToBlock(stmt.body);
   if (bodyBlock) block.inputs.BODY = { "block": bodyBlock };
   return block;
@@ -4225,6 +4374,16 @@ function convertExpressionToBlock(node) {
       return block;
     }
 
+    // [W5] await <expr> -> dedicated await_expr block (lossless, not a raw lump)
+    case 'Await':
+      return {
+        "type": "await_expr",
+        "id": makeBlockId(),
+        "inputs": {
+          "VALUE": { "block": convertExpressionToBlock(node.value) }
+        }
+      };
+
     case 'Attribute':
       // obj.attr  ->  custom attribute_access block (OBJECT value + NAME field)
       return {
@@ -4448,6 +4607,9 @@ Blockly.Blocks['method_def'] = {
     this.appendDummyInput('DECO')
         .appendField(new DecoField(''), 'DECORATORS');
     this.appendDummyInput()
+        // [W5] async marker — empty for a plain def, "async " for an async def. A
+        // serializable label so it round-trips without adding UI noise to sync defs.
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL')
         .appendField("def")
         .appendField(new Blockly.FieldTextInput("method"), "NAME")
         .appendField("(")
@@ -4465,8 +4627,9 @@ Blockly.Python['method_def'] = function(block) {
   const decoLines = deco ? deco.split('\n').map(d => d.trim()).join('\n') + '\n' : '';
   const name = block.getFieldValue('NAME');
   const params = block.getFieldValue('PARAMS') || '';
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || ''; // [W5] "async " or ""
   const body = Blockly.Python.statementToCode(block, 'BODY') || '    pass\n';
-  return `${decoLines}def ${name}(${params}):\n${body}`;
+  return `${decoLines}${asyncPrefix}def ${name}(${params}):\n${body}`;
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['method_def'] = Blockly.Python['method_def'];
@@ -4652,6 +4815,41 @@ Blockly.Python['lambda_func'] = function(block) {
 };
 if (Blockly.Python.forBlock) Blockly.Python.forBlock['lambda_func'] = Blockly.Python['lambda_func'];
 
+// [W5] await <expr> — value block (output), valid only inside an async def.
+Blockly.Blocks['await_expr'] = {
+  init: function() {
+    this.appendValueInput('VALUE').setCheck(null).appendField('await');
+    this.setInputsInline(true);
+    this.setOutput(true, null);
+    this.setColour('#8b5cf6');
+    this.setTooltip('await <awaitable> — only valid inside an async def');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['await_expr'] = function(block) {
+  const val = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || '';
+  return [`await ${val}`, Blockly.Python.ORDER_NONE];
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['await_expr'] = Blockly.Python['await_expr'];
+
+// [W5] await <expr> in statement position (bare `await coro()`).
+Blockly.Blocks['await_stmt'] = {
+  init: function() {
+    this.appendValueInput('VALUE').setCheck(null).appendField('await');
+    this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#8b5cf6');
+    this.setTooltip('await <awaitable> as a statement — only valid inside an async def');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['await_stmt'] = function(block) {
+  const val = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE) || '';
+  return `await ${val}\n`;
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['await_stmt'] = Blockly.Python['await_stmt'];
+
 // [Demo] String concatenation a + b — untyped inputs so strings/text blocks connect
 // (math_arithmetic's Number-typed inputs would coerce strings to 0). Chains nest via B.
 Blockly.Blocks['text_concat'] = {
@@ -4706,6 +4904,7 @@ if (Blockly.Python.forBlock) {
 Blockly.Blocks['for_each_custom'] = {
   init: function() {
     this.appendValueInput('ITER').setCheck(null)
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL') // [W5]
         .appendField('for')
         .appendField(new Blockly.FieldTextInput('item'), 'TARGET')
         .appendField('in');
@@ -4719,13 +4918,71 @@ Blockly.Blocks['for_each_custom'] = {
 };
 Blockly.Python['for_each_custom'] = function(block) {
   const target = block.getFieldValue('TARGET') || 'item';
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || ''; // [W5] "async " or ""
   const iter = Blockly.Python.valueToCode(block, 'ITER', Blockly.Python.ORDER_NONE) || '[]';
   let body = Blockly.Python.statementToCode(block, 'DO');
   if (!body) body = (Blockly.Python.INDENT || '    ') + 'pass\n';
-  return `for ${target} in ${iter}:\n${body}`;
+  return `${asyncPrefix}for ${target} in ${iter}:\n${body}`;
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['for_each_custom'] = Blockly.Python['for_each_custom'];
+}
+
+// [W6] for/else (CF-08): a for-each loop with an `else:` branch that runs when the loop
+// completes without break. TARGET holds a simple name or a tuple target ("k, v").
+Blockly.Blocks['for_else'] = {
+  init: function() {
+    this.appendValueInput('ITER').setCheck(null)
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL') // [W5] async for/else
+        .appendField('for')
+        .appendField(new Blockly.FieldTextInput('item'), 'TARGET')
+        .appendField('in');
+    this.appendStatementInput('DO').setCheck(null).appendField('do');
+    this.appendStatementInput('ELSE').setCheck(null).appendField('else');
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#5ba55b');
+    this.setTooltip('for <target> in <iterable>: ... else: ... (else runs if no break)');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['for_else'] = function(block) {
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || '';
+  const target = block.getFieldValue('TARGET') || 'item';
+  const iter = Blockly.Python.valueToCode(block, 'ITER', Blockly.Python.ORDER_NONE) || '[]';
+  let body = Blockly.Python.statementToCode(block, 'DO');
+  if (!body) body = (Blockly.Python.INDENT || '    ') + 'pass\n';
+  let elseBody = Blockly.Python.statementToCode(block, 'ELSE');
+  if (!elseBody) elseBody = (Blockly.Python.INDENT || '    ') + 'pass\n';
+  return `${asyncPrefix}for ${target} in ${iter}:\n${body}else:\n${elseBody}`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['for_else'] = Blockly.Python['for_else'];
+}
+
+// [W6] while/else (CF-11): a while loop with an `else:` branch that runs on normal completion.
+Blockly.Blocks['while_else'] = {
+  init: function() {
+    this.appendValueInput('BOOL').setCheck(null).appendField('while');
+    this.appendStatementInput('DO').setCheck(null).appendField('do');
+    this.appendStatementInput('ELSE').setCheck(null).appendField('else');
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#5ba55b');
+    this.setTooltip('while <cond>: ... else: ... (else runs if no break)');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['while_else'] = function(block) {
+  const cond = Blockly.Python.valueToCode(block, 'BOOL', Blockly.Python.ORDER_NONE) || 'True';
+  let body = Blockly.Python.statementToCode(block, 'DO');
+  if (!body) body = (Blockly.Python.INDENT || '    ') + 'pass\n';
+  let elseBody = Blockly.Python.statementToCode(block, 'ELSE');
+  if (!elseBody) elseBody = (Blockly.Python.INDENT || '    ') + 'pass\n';
+  return `while ${cond}:\n${body}else:\n${elseBody}`;
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['while_else'] = Blockly.Python['while_else'];
 }
 
 // [Demo] keyword argument: name=value (a real editable block, not a raw lump).
@@ -5383,6 +5640,7 @@ Blockly.Blocks['with_statement'] = {
   init: function() {
     this.appendValueInput("CONTEXT")
         .setCheck(null)
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL') // [W5]
         .appendField("with");
     this.appendDummyInput()
         .appendField("as")
@@ -5399,8 +5657,9 @@ Blockly.Blocks['with_statement'] = {
 Blockly.Python['with_statement'] = function(block) {
   const context = Blockly.Python.valueToCode(block, 'CONTEXT', Blockly.Python.ORDER_NONE) || 'open("file")';
   const asName = (block.getFieldValue('AS') || '').trim();
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || ''; // [W5] "async " or ""
   const body = Blockly.Python.statementToCode(block, 'BODY') || '    pass\n';
-  const head = asName ? `with ${context} as ${asName}:` : `with ${context}:`;
+  const head = asName ? `${asyncPrefix}with ${context} as ${asName}:` : `${asyncPrefix}with ${context}:`;
   return `${head}\n${body}`;
 };
 if (Blockly.Python.forBlock) {
@@ -5796,6 +6055,7 @@ Blockly.Blocks['for_unpack'] = {
   init: function() {
     this.appendValueInput("LIST")
         .setCheck(null)
+        .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL') // [W5]
         .appendField("for")
         .appendField(new Blockly.FieldTextInput("k, v"), "TARGETS")
         .appendField("in");
@@ -5809,9 +6069,10 @@ Blockly.Blocks['for_unpack'] = {
 };
 Blockly.Python['for_unpack'] = function(block) {
   const targets = (block.getFieldValue('TARGETS') || 'k, v').trim();
+  const asyncPrefix = block.getFieldValue('ASYNC_LABEL') || ''; // [W5] "async " or ""
   const list = Blockly.Python.valueToCode(block, 'LIST', Blockly.Python.ORDER_NONE) || '[]';
   let branch = Blockly.Python.statementToCode(block, 'DO') || '    pass\n';
-  return `for ${targets} in ${list}:\n${branch}`;
+  return `${asyncPrefix}for ${targets} in ${list}:\n${branch}`;
 };
 
 // [W4] register forBlock aliases + a defensive lists_setIndex generator.
