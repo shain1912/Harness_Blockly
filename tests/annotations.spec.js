@@ -1,7 +1,7 @@
 // Coverage: type annotations (W7) — annotated assignment (ASG-06), return annotation
 // (FN-08 return half), and typing names (STD-18). Previously parse errors (`:` after a
 // target, and `->` after the param list). Now they parse, round-trip losslessly, and
-// astToBlockly emits dedicated ann_assign / method_def(RETURNS) blocks (no gray raw lump).
+// astToBlockly emits dedicated var_assign / method_def(RETURNS) blocks (no gray raw lump).
 // Pure Node.
 const { test, expect } = require('@playwright/test');
 const P = require('../src/utils/parser.js');
@@ -19,12 +19,12 @@ function analyze(code) {
 
 // [label, code, dedicated block type expected in astToBlockly]
 const CASES = [
-  ['ann-assign with value', 'x: int = 5', 'ann_assign'],
-  ['ann-assign no value', 'x: int', 'ann_assign'],
-  ['ann-assign generic', 'names: list[str] = []', 'ann_assign'],
-  ['ann-assign typing', 'from typing import List\nx: List[int] = []', 'ann_assign'],
-  ['ann-assign attribute target', 'self.data: list = []', 'ann_assign'],
-  ['ann-assign attribute no value', 'self.count: int', 'ann_assign'],
+  ['ann-assign with value', 'x: int = 5', 'var_assign'],
+  ['ann-assign no value', 'x: int', 'var_assign'],
+  ['ann-assign generic', 'names: list[str] = []', 'var_assign'],
+  ['ann-assign typing', 'from typing import List\nx: List[int] = []', 'var_assign'],
+  ['ann-assign attribute target', 'self.data: list = []', 'var_assign'],
+  ['ann-assign attribute no value', 'self.count: int', 'var_assign'],
   ['return annotation', 'def f(a: int) -> str:\n    return a', 'method_def'],
   ['return annotation None', 'def g(a: int = 3, *args, **kw) -> None:\n    return None', 'method_def'],
   ['return annotation generic', 'def h() -> list[int]:\n    return []', 'method_def'],

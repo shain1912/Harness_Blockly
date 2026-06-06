@@ -5,10 +5,14 @@
 // demo and the tests can never drift. Each snippet is curated to round-trip losslessly
 // (Python -> blocks -> Python) and execute with a known output.
 //
-// Shape: { id, title, category, code, expectedStdout, desugar, execute }
+// Shape: { id, title, category, code, expectedStdout, desugar, execute, canonical? }
 //   expectedStdout : string[] — substrings expected in the console after Run
 //   desugar        : boolean  — desired #toggle-desugar state for this snippet
 //   execute        : boolean  — false => render/convert-only (e.g. OpenCV)
+//   canonical      : string?  — for constructs that normalize on round-trip (semicolon
+//                               splits to newlines, `\` continuation joins lines), the
+//                               exact Python the round-trip must produce. Omit when the
+//                               snippet round-trips byte-for-byte.
 //
 // Follows the project's window-global + module.exports side-effect pattern so Node
 // tests can require() it too.
@@ -131,6 +135,57 @@ const DEMO_SNIPPETS = [
     id: 'cv-face', title: 'OpenCV: Webcam Face Detection', category: 'OpenCV', desugar: true, execute: false,
     code: 'import cv2\nface_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")\ncap = cv2.VideoCapture(0)\nwhile True:\n    ret, frame = cap.read()\n    if not ret:\n        break\n    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)\n    faces = face_cascade.detectMultiScale(gray, 1.1, 4)\n    for (x, y, w, h) in faces:\n        cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)\n    cv2.imshow("Face Detection", frame)\n    if cv2.waitKey(1) & 0xFF == ord("q"):\n        break\ncap.release()\ncv2.destroyAllWindows()',
     expectedStdout: [],
+  },
+
+  // ── Type Hints & Syntax (added 2026-06-06: W7/W8/W9) ─────────────────────────
+  // Each prints a result so Run shows visible output. desugar:true — none of these
+  // contain desugarable constructs (comprehension/ternary/chained-comparison) so the
+  // desugar pass is a no-op; true matches the default toggle state.
+  {
+    id: 'ann-vars', title: 'Annotated Variables', category: 'Type Hints & Syntax', desugar: true, execute: true,
+    code: 'count: int = 0\nnames: list[str] = ["a", "b"]\ncount = count + len(names)\nprint(count)',
+    expectedStdout: ['2'],
+  },
+  {
+    id: 'ann-return', title: 'Return Annotation', category: 'Type Hints & Syntax', desugar: true, execute: true,
+    code: 'def add(a: int, b: int) -> int:\n    return a + b\nresult: int = add(3, 4)\nprint(result)',
+    expectedStdout: ['7'],
+  },
+  {
+    id: 'ann-attr', title: 'Annotated Attribute (in __init__)', category: 'Type Hints & Syntax', desugar: true, execute: true,
+    code: 'class Box:\n    def __init__(self, w: float, h: float) -> None:\n        self.area: float = w * h\nb = Box(3.0, 4.0)\nprint(b.area)',
+    expectedStdout: ['12.0'],
+  },
+  {
+    id: 'syntax-range', title: 'range() as a Value', category: 'Type Hints & Syntax', desugar: true, execute: true,
+    code: 'r = list(range(2, 10, 2))\nprint(r)',
+    expectedStdout: ['[2, 4, 6, 8]'],
+  },
+  {
+    id: 'syntax-ellipsis', title: 'Ellipsis ...', category: 'Type Hints & Syntax', desugar: true, execute: true,
+    code: 'placeholder = ...\nprint(placeholder is Ellipsis)',
+    expectedStdout: ['True'],
+  },
+  {
+    id: 'ann-subscript', title: 'Annotated Subscript Target', category: 'Type Hints & Syntax', desugar: true, execute: true,
+    code: 'matrix = [[0, 0], [0, 0]]\nmatrix[0]: list = [1, 2]\nprint(matrix)',
+    expectedStdout: ['[[1, 2], [0, 0]]'],
+  },
+  {
+    // Normalizes: a semicolon has no Blockly syntax, so each simple statement becomes
+    // its own block and the round-trip re-emits them on separate lines.
+    id: 'syntax-semicolon', title: 'Semicolon Statements', category: 'Type Hints & Syntax', desugar: true, execute: true,
+    code: 'a = 1; b = 2; c = 3\nprint(a + b + c)',
+    canonical: 'a = 1\nb = 2\nc = 3\nprint(a + b + c)',
+    expectedStdout: ['6'],
+  },
+  {
+    // Normalizes: a `\` line continuation joins the physical lines into one statement,
+    // which the round-trip re-emits as a single line.
+    id: 'syntax-continuation', title: 'Line Continuation \\', category: 'Type Hints & Syntax', desugar: true, execute: true,
+    code: 'total = 1 + 2 + \\\n        3 + 4\nprint(total)',
+    canonical: 'total = 1 + 2 + 3 + 4\nprint(total)',
+    expectedStdout: ['10'],
   },
 
   // ── Libraries (unseen, pip-installed) ────────────────────────────────────────

@@ -20,12 +20,14 @@ Measured over all **182** catalog rows.
 
 | Bucket | Count | % of 182 |
 |--------|-------|----------|
-| ✅ Matched (dedicated block) | 170 | 93.4% |
+| ✅ Matched (dedicated block) | 172 | 94.5% |
 | 🟡 Partial (`raw` fallback) | 3 | 1.6% |
-| ❌ Missing | 9 | 4.9% |
+| ❌ Missing | 7 | 3.8% |
 
-- **block-convertible %** = (matched + partial) / total = (170 + 3) / 182 = **95.1%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
-- **dedicated-block %** = matched / total = 170 / 182 = **93.4%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+- **block-convertible %** = (matched + partial) / total = (172 + 3) / 182 = **96.2%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
+- **dedicated-block %** = matched / total = 172 / 182 = **94.5%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+
+> **Update (W9 lexer gaps):** explicit line continuation `a = 1 + \` (MSC-04) and semicolon-separated statements `a = 1; b = 2` (MSC-05) were parse errors. Both are now handled in the tokenizer and normalize the way Blockly represents them — a continuation joins the physical lines into one logical statement; a semicolon emits a statement boundary so each simple statement becomes its own block. They re-emit as canonical Python (`a = 1 + 2`; `a = 1` / `b = 2` on separate lines) rather than byte-identical, which is the correct lossless-in-meaning behavior for a block model with no syntax for either. 2 rows ❌→✅, dedicated-block 93.4%→94.5%. Verified Node (`tests/lexer_gaps.spec.js`).
 
 > **Update (W8 Ellipsis / subscript-target / range expr):** `...` (LIT-12) was a parse error — now tokenized as one symbol and parsed to a dedicated `ellipsis_literal` value block, which also unblocks variadic generics like `Tuple[int, ...]`. `range()` in expression position (BIF-04, e.g. a comprehension iterable or `x = range(n)`) was a gray `raw_expression` fallback — now a dedicated `range_value` block that records the arg count to reproduce `range(stop)` / `range(start, stop)` / `range(start, stop, step)` losslessly. And annotated assignment (ASG-06) now also accepts subscript targets `a[i]: int = v` (was Name/Attribute only). 2 rows ❌/🟡→✅, dedicated-block 92.3%→93.4%. Verified Node (`tests/iteration_gaps.spec.js`) + real-UI screenshot driver.
 
@@ -54,8 +56,8 @@ Measured over all **182** catalog rows.
 | 11. Built-in Type Methods (MTH) | 5 | 5 | 0 | 0 |
 | 12. Standard Library Modules (STD) | 20 | 20 | 0 | 0 |
 | 13. Async (ASY) | 4 | 4 | 0 | 0 |
-| 14. Comments & Misc (MSC) | 6 | 2 | 1 | 3 |
-| **Total** | **182** | **170** | **3** | **9** |
+| 14. Comments & Misc (MSC) | 6 | 4 | 1 | 1 |
+| **Total** | **182** | **172** | **3** | **7** |
 
 **Weakest sections** (most ❌ missing — these are genuine parse errors, the real remaining gaps):
 
@@ -365,8 +367,8 @@ Each is a `Call` to a known builtin. Grouped for mapping.
 | MSC-01 | Line comment | `# comment` | ✅ comment dropped (stmt parses) |
 | MSC-02 | Inline comment | `x = 1  # note` | ✅ comment dropped (stmt parses) |
 | MSC-03 | Module/function docstring | `"""doc"""` | 🟡 raw (bare docstring) |
-| MSC-04 | Line continuation | `a = 1 + \` | ❌ parse error (line continuation) |
-| MSC-05 | Semicolon-separated stmts | `a = 1; b = 2` | ❌ parse error (semicolon) |
+| MSC-04 | Line continuation | `a = 1 + \` | ✅ joined into one logical statement |
+| MSC-05 | Semicolon-separated stmts | `a = 1; b = 2` | ✅ split into separate statement blocks |
 | MSC-06 | Type alias (3.12) | `type Vec = list[float]` | ❌ parse error (type alias) |
 
 ---

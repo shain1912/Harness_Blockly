@@ -206,6 +206,20 @@ class Tokenizer {
         continue;
       }
 
+      // [W8] Explicit line continuation (MSC-04): a backslash immediately before a newline
+      // joins the two physical lines into one logical line. Consume both, emit no NEWLINE,
+      // and keep isLineStart false so the continued line is not treated as fresh indentation.
+      if (char === '\\') {
+        const nxt = this.source[this.cursor + 1];
+        if (nxt === '\n' || nxt === '\r') {
+          this.nextChar(); // consume '\'
+          if (this.peekChar() === '\r') { this.nextChar(); if (this.peekChar() === '\n') this.nextChar(); }
+          else this.nextChar(); // consume newline
+          this.isLineStart = false;
+          continue;
+        }
+      }
+
       // Handle Comments
       if (char === '#') {
         let commentText = '';
@@ -287,6 +301,15 @@ class Tokenizer {
         const startCol = this.col;
         this.nextChar(); this.nextChar();
         this.tokens.push(new Token(TokenType.SYMBOL, sym, this.line, startCol));
+        continue;
+      }
+
+      // [W8] Semicolon separates simple statements on one physical line (MSC-05). Blockly
+      // has no semicolon — the statements become separate blocks — so emit a NEWLINE (a
+      // statement boundary) but stay on the same physical line (don't touch isLineStart).
+      if (char === ';') {
+        this.nextChar();
+        if (this.bracketDepth === 0) this.tokens.push(new Token(TokenType.NEWLINE, '\n', this.line, this.col));
         continue;
       }
 
@@ -2591,6 +2614,40 @@ function makeBlockId() {
   return `block_id_${blockIdCounter++}_${Math.random().toString(36).substring(2, 7)}`;
 }
 
+// [Feature B] Names that refer to imported modules in the program being converted. A
+// non-called attribute rooted here (cv2.COLOR_BGR2GRAY, cv2.data.haarcascades) is a library
+// constant/member → routed to the dedicated lib_const dropdown block. Set per astToBlockly run.
+let _importedModules = new Set();
+function collectImportedModules(node, set = new Set()) {
+  if (!node || typeof node !== 'object') return set;
+  if (node.type === 'Import' && Array.isArray(node.names)) {
+    for (const n of node.names) {
+      const ref = n.as || n.name;
+      if (ref) set.add(ref);
+      if (n.name) set.add(String(n.name).split('.')[0]); // root of `import os.path`
+    }
+  }
+  for (const k in node) {
+    const v = node[k];
+    if (Array.isArray(v)) v.forEach(c => collectImportedModules(c, set));
+    else if (v && typeof v === 'object') collectImportedModules(v, set);
+  }
+  return set;
+}
+
+// If `node` is a non-called attribute chain rooted at an imported module, return
+// { lib, path } (e.g. cv2.data.haarcascades -> { lib:'cv2', path:'data.haarcascades' }),
+// else null.
+function moduleConstPath(node) {
+  const parts = [];
+  let cur = node;
+  while (cur && cur.type === 'Attribute') { parts.unshift(cur.attr); cur = cur.value; }
+  if (cur && cur.type === 'Name' && parts.length && _importedModules.has(cur.id)) {
+    return { lib: cur.id, path: parts.join('.') };
+  }
+  return null;
+}
+
 function collectVariables(node, varsSet = new Set()) {
   if (!node) return varsSet;
 
@@ -2806,6 +2863,7 @@ function astToBlockly(astNode) {
   }
 
   blockIdCounter = 0;
+  _importedModules = collectImportedModules(astNode); // [Feature B] for lib_const routing
   const blocks = [];
 
   // FunctionDef/ClassDef blocks don't support next connections — place them separately
@@ -2885,12 +2943,13 @@ function convertStatementToBlock(node) {
       };
     }
 
-    // [W7] annotated assignment (ASG-06) -> dedicated ann_assign block (lossless).
+    // [Feature A] annotated assignment (ASG-06) -> var_assign with the type toggle ON.
     case 'AnnAssign': {
       const varName = node.target.type === 'Name' ? node.target.id : astToPython(node.target);
       const block = {
-        "type": "ann_assign",
+        "type": "var_assign",
         "id": makeBlockId(),
+        "extraState": { "hasType": true },
         "fields": { "VAR": varName, "ANNOTATION": node.annotation },
         "inputs": {}
       };
@@ -2942,20 +3001,16 @@ function convertStatementToBlock(node) {
         };
       }
 
-      // Handle variable assignment: e.g. x = 10
+      // [Feature A] Simple `name = value` -> var_assign with the type toggle OFF (no
+      // annotation). A unified block so the user can opt into a type hint with +type.
       const targetName = node.target.type === 'Name' ? node.target.id : 'x';
       return {
-        "type": "variables_set",
+        "type": "var_assign",
         "id": makeBlockId(),
-        "fields": {
-          "VAR": {
-            "id": targetName
-          }
-        },
+        "extraState": { "hasType": false },
+        "fields": { "VAR": targetName },
         "inputs": {
-          "VALUE": {
-            "block": convertExpressionToBlock(node.value)
-          }
+          "VALUE": { "block": convertExpressionToBlock(node.value) }
         }
       };
     }
@@ -3568,7 +3623,10 @@ function functionDefToMethodBlock(stmt) {
     block.fields.DECORATORS = stmt.decorators.map(d => '@' + astToPython(d)).join('\n');
   }
   if (stmt.isAsync) block.fields.ASYNC_LABEL = 'async '; // [W5] async def
-  if (stmt.returns) block.fields.RETURNS = ' -> ' + stmt.returns; // [W7] return annotation (FN-08)
+  if (stmt.returns) { // [W7/A] return annotation (FN-08) — toggle the field on
+    block.extraState = { hasReturn: true };
+    block.fields.RETURNS = ' -> ' + stmt.returns;
+  }
   const bodyBlock = convertStatementListToBlock(stmt.body);
   if (bodyBlock) block.inputs.BODY = { "block": bodyBlock };
   return block;
@@ -4475,7 +4533,20 @@ function convertExpressionToBlock(node) {
         }
       };
 
-    case 'Attribute':
+    case 'Attribute': {
+      // [Feature B] A non-called attribute rooted at an imported module is a library
+      // constant/member (cv2.COLOR_BGR2GRAY, cv2.data.haarcascades) -> lib_const dropdown.
+      const mc = moduleConstPath(node);
+      if (mc) {
+        // extraState is the source of truth: loadExtraState runs before fields are applied,
+        // so the CONST dropdown's option generator already includes this exact value (even
+        // when it isn't in the seed list) and setValue won't be rejected.
+        return {
+          "type": "lib_const",
+          "id": makeBlockId(),
+          "extraState": { "lib": mc.lib, "const": mc.path }
+        };
+      }
       // obj.attr  ->  custom attribute_access block (OBJECT value + NAME field)
       return {
         "type": "attribute_access",
@@ -4489,6 +4560,7 @@ function convertExpressionToBlock(node) {
           }
         }
       };
+    }
 
     // [W8] Ellipsis literal `...` (LIT-12)
     case 'Ellipsis':
@@ -4706,28 +4778,66 @@ if (Blockly.Python.forBlock) {
 // class_def BODY or another def's body. Params are a flat text field (lossless: defaults,
 // *args/**kwargs, type annotations all survive as text). Decorators emit as @-lines above.
 Blockly.Blocks['method_def'] = {
+  hasReturn_: false, // [Feature A] return annotation is opt-in (+return)
   init: function() {
+    this.hasReturn_ = false;
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour("#8b5cf6");
+    this.setTooltip("Defines a function/method (nestable) — press + to add a -> return type");
+    this.updateShape_();
+  },
+  saveExtraState: function() { return { hasReturn: this.hasReturn_ }; },
+  loadExtraState: function(state) { this.hasReturn_ = !!(state && state.hasReturn); this.updateShape_(); },
+  // Toggle the `-> type` return annotation, preserving all signature fields + the body.
+  changeReturn_: function(on) {
+    if (this.hasReturn_ === on) return;
+    const snap = {
+      DECORATORS: this.getField('DECORATORS') ? this.getFieldValue('DECORATORS') : '',
+      ASYNC_LABEL: this.getField('ASYNC_LABEL') ? this.getFieldValue('ASYNC_LABEL') : '',
+      NAME: this.getFieldValue('NAME'),
+      PARAMS: this.getFieldValue('PARAMS'),
+      RETURNS: this.getField('RETURNS') ? this.getFieldValue('RETURNS') : '',
+    };
+    const bodyInput = this.getInput('BODY');
+    const bodyConn = bodyInput && bodyInput.connection && bodyInput.connection.targetConnection;
+    const group = (Blockly.Events && Blockly.Events.getGroup && Blockly.Events.getGroup()) || false;
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(true);
+    this.hasReturn_ = on;
+    this.updateShape_();
+    this.setFieldValue(snap.DECORATORS, 'DECORATORS');
+    this.setFieldValue(snap.ASYNC_LABEL, 'ASYNC_LABEL');
+    this.setFieldValue(snap.NAME, 'NAME');
+    this.setFieldValue(snap.PARAMS, 'PARAMS');
+    if (on && this.getField('RETURNS')) this.setFieldValue(snap.RETURNS || ' -> str', 'RETURNS');
+    if (bodyConn) { const bi = this.getInput('BODY'); try { bi.connection.connect(bodyConn); } catch (e) {} }
+    if (this.rendered && typeof this.render === 'function') this.render();
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(group);
+  },
+  updateShape_: function() {
+    for (const inp of this.inputList.slice()) this.removeInput(inp.name);
     const DecoField = Blockly.FieldMultilineInput || Blockly.FieldTextInput;
-    this.appendDummyInput('DECO')
-        .appendField(new DecoField(''), 'DECORATORS');
-    this.appendDummyInput()
-        // [W5] async marker — empty for a plain def, "async " for an async def. A
-        // serializable label so it round-trips without adding UI noise to sync defs.
+    this.appendDummyInput('DECO').appendField(new DecoField(''), 'DECORATORS');
+    const sig = this.appendDummyInput('SIG')
+        // [W5] async marker — empty for a plain def, "async " for an async def.
         .appendField(new (Blockly.FieldLabelSerializable || Blockly.FieldTextInput)(''), 'ASYNC_LABEL')
         .appendField("def")
         .appendField(new Blockly.FieldTextInput("method"), "NAME")
         .appendField("(")
         .appendField(new Blockly.FieldTextInput("self"), "PARAMS")
-        .appendField(")")
-        // [W7] return annotation — empty for no annotation, " -> str" otherwise.
-        // Serializable text so it round-trips; procedures_def* has no return-type slot.
-        .appendField(new Blockly.FieldTextInput(""), "RETURNS")
-        .appendField(":");
+        .appendField(")");
+    // [Feature A] return annotation only when toggled on; the field value carries the
+    // full " -> type" suffix (procedures_def* has no return-type slot).
+    if (this.hasReturn_) sig.appendField(new Blockly.FieldTextInput(" -> str"), "RETURNS");
+    sig.appendField(":");
+    if (Blockly.FieldImage) {
+      const svg = this.hasReturn_ ? ARITY_MINUS_SVG : ARITY_PLUS_SVG;
+      sig.appendField(new Blockly.FieldImage(svg, 18, 18, this.hasReturn_ ? '-return' : '+return', function () {
+        const b = this.getSourceBlock && this.getSourceBlock();
+        if (b) b.changeReturn_(!b.hasReturn_);
+      }), 'RET_BTN');
+    }
     this.appendStatementInput("BODY").setCheck(null).appendField("do");
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour("#8b5cf6");
-    this.setTooltip("Defines a function/method (nestable)");
   }
 };
 Blockly.Python['method_def'] = function(block) {
@@ -4771,6 +4881,73 @@ Blockly.Python['ann_assign'] = function(block) {
 };
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['ann_assign'] = Blockly.Python['ann_assign'];
+}
+
+// [Feature A] Unified assignment block with an OPTIONAL type annotation toggled by a
+// +type / -type button (the type hint is opt-in, matching Python where it's optional).
+// Supersedes ann_assign and the built-in variables_set for simple `name = value` and
+// `name: type = value` (the VAR field is plain text, so it also holds attribute / subscript
+// targets like self.x or a[i]). hasType_ is serialized so the toggle round-trips.
+Blockly.Blocks['var_assign'] = {
+  hasType_: false,
+  init: function() {
+    this.hasType_ = false;
+    this.setInputsInline(true);
+    this.setPreviousStatement(true, null);
+    this.setNextStatement(true, null);
+    this.setColour('#5b80a5');
+    this.setTooltip('Assignment with an optional type hint — press + to add `: type`');
+    this.setHelpUrl('');
+    this.updateShape_();
+  },
+  saveExtraState: function() { return { hasType: this.hasType_ }; },
+  loadExtraState: function(state) { this.hasType_ = !!(state && state.hasType); this.updateShape_(); },
+  // Toggle the annotation on/off, preserving the VAR/ANNOTATION text and the VALUE child.
+  changeType_: function(on) {
+    if (this.hasType_ === on) return;
+    const var0 = this.getFieldValue('VAR');
+    const ann0 = this.getField('ANNOTATION') ? this.getFieldValue('ANNOTATION') : '';
+    const valInput = this.getInput('VALUE');
+    const valConn = valInput && valInput.connection && valInput.connection.targetConnection;
+    const group = (Blockly.Events && Blockly.Events.getGroup && Blockly.Events.getGroup()) || false;
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(true);
+    this.hasType_ = on;
+    this.updateShape_();
+    if (var0 != null) this.setFieldValue(var0, 'VAR');
+    if (on && ann0) this.setFieldValue(ann0, 'ANNOTATION');
+    if (valConn) { const vi = this.getInput('VALUE'); try { vi.connection.connect(valConn); } catch (e) {} }
+    if (this.rendered && typeof this.render === 'function') this.render();
+    if (Blockly.Events && Blockly.Events.setGroup) Blockly.Events.setGroup(group);
+  },
+  updateShape_: function() {
+    for (const inp of this.inputList.slice()) this.removeInput(inp.name);
+    const row = this.appendValueInput('VALUE').setCheck(null);
+    row.appendField(new Blockly.FieldTextInput('x'), 'VAR');
+    if (this.hasType_) {
+      row.appendField(':').appendField(new Blockly.FieldTextInput('int'), 'ANNOTATION');
+    }
+    row.appendField('=');
+    const self = this;
+    const svg = this.hasType_ ? ARITY_MINUS_SVG : ARITY_PLUS_SVG;
+    const alt = this.hasType_ ? '-type' : '+type';
+    if (Blockly.FieldImage) {
+      this.appendDummyInput('TYPETOGGLE')
+          .appendField(new Blockly.FieldImage(svg, 18, 18, alt, function () {
+            const b = this.getSourceBlock && this.getSourceBlock();
+            if (b) b.changeType_(!b.hasType_);
+          }), 'TYPE_BTN');
+    }
+  }
+};
+Blockly.Python['var_assign'] = function(block) {
+  const varName = block.getFieldValue('VAR') || 'x';
+  const annotation = block.hasType_ ? (block.getFieldValue('ANNOTATION') || '') : '';
+  const value = Blockly.Python.valueToCode(block, 'VALUE', Blockly.Python.ORDER_NONE);
+  const head = annotation ? `${varName}: ${annotation}` : varName;
+  return (value ? `${head} = ${value}` : head) + '\n';
+};
+if (Blockly.Python.forBlock) {
+  Blockly.Python.forBlock['var_assign'] = Blockly.Python['var_assign'];
 }
 
 // [W8] Ellipsis literal `...` (LIT-12) — a value block. Common in type stubs / variadic
@@ -5425,6 +5602,70 @@ Blockly.Python['attribute_access'] = function(block) {
   const name = block.getFieldValue('NAME') || 'attr';
   return [`${object}.${name}`, Blockly.Python.ORDER_MEMBER];
 };
+// [Feature B Phase 1] Library constant / member as a dropdown (cv2.COLOR_BGR2GRAY,
+// cv2.data.haarcascades). LIB is a serializable label; CONST is a dynamic-options dropdown
+// seeded with common constants for the library, always including the current value so any
+// constant round-trips. lib + const live in extraState (the source of truth).
+const LIB_CONST_SEEDS = {
+  cv2: [
+    'COLOR_BGR2GRAY', 'COLOR_RGB2GRAY', 'COLOR_GRAY2BGR', 'COLOR_BGR2RGB', 'COLOR_BGR2HSV',
+    'IMREAD_COLOR', 'IMREAD_GRAYSCALE', 'RETR_EXTERNAL', 'RETR_TREE',
+    'CHAIN_APPROX_SIMPLE', 'CHAIN_APPROX_NONE', 'data.haarcascades',
+  ],
+};
+function libConstOptions() {
+  const block = this.getSourceBlock && this.getSourceBlock();
+  const lib = block ? (block.getFieldValue('LIB') || block.libName_ || '') : '';
+  const cur = block ? (block.constValue_ || '') : '';
+  const seed = (LIB_CONST_SEEDS[lib] || []).slice();
+  const opts = [];
+  if (cur && seed.indexOf(cur) === -1) opts.push([cur, cur]);
+  for (const c of seed) opts.push([c, c]);
+  if (!opts.length) opts.push([cur || ' ', cur || ' ']);
+  return opts;
+}
+Blockly.Blocks['lib_const'] = {
+  libName_: '',
+  constValue_: '',
+  init: function() {
+    this.libName_ = '';
+    this.constValue_ = '';
+    const LabelField = Blockly.FieldLabelSerializable || Blockly.FieldTextInput;
+    this.appendDummyInput()
+        .appendField(new LabelField(''), 'LIB')
+        .appendField('.')
+        .appendField(new Blockly.FieldDropdown(libConstOptions), 'CONST');
+    this.setOutput(true, null);
+    this.setInputsInline(true);
+    this.setColour('#06b6d4');
+    this.setTooltip('A library constant / member (e.g. cv2.COLOR_BGR2GRAY)');
+    this.setHelpUrl('');
+  },
+  saveExtraState: function () {
+    return { lib: this.getFieldValue('LIB') || this.libName_ || '', const: this.getFieldValue('CONST') || this.constValue_ || '' };
+  },
+  loadExtraState: function (state) {
+    this.libName_ = (state && state.lib) || '';
+    this.constValue_ = (state && state.const) || '';
+    if (this.getField('LIB')) this.setFieldValue(this.libName_, 'LIB');
+    const f = this.getField('CONST');
+    if (f) {
+      // FieldDropdown caches its generated options from init (when constValue_ was empty),
+      // and setValue validates against that stale cache. Force a regeneration first so the
+      // current value (incl. non-seed constants like data.haarcascades) is a valid option.
+      if (typeof f.getOptions === 'function') { try { f.getOptions(false); } catch (e) {} }
+      this.setFieldValue(this.constValue_, 'CONST');
+    }
+  },
+};
+Blockly.Python['lib_const'] = function (block) {
+  const lib = block.getFieldValue('LIB') || block.libName_ || '';
+  const c = block.getFieldValue('CONST') || block.constValue_ || '';
+  const order = (typeof Blockly.Python.ORDER_MEMBER === 'number') ? Blockly.Python.ORDER_MEMBER : 0;
+  return [lib ? `${lib}.${c}` : c, order];
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['lib_const'] = Blockly.Python['lib_const'];
+
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['attribute_access'] = Blockly.Python['attribute_access'];
 }

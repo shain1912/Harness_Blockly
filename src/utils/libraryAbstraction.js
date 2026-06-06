@@ -129,6 +129,31 @@ function validateMacroTemplate(spec, parser) {
   }
 }
 
+// [Phase 1] Oracle-gated synthesis planner (pure — no Blockly). For each candidate spec,
+// gate it through the lossless round-trip oracle (validateMacroTemplate). Specs that pass
+// are queued for registration; specs that fail get ONE optional repair attempt; still-
+// failing specs are dropped (graceful degradation — partial success beats total failure).
+// Returns { toRegister: spec[], repaired: spec[], rejected: {type,error}[] }.
+function planSynthesis(specs, parser, repair) {
+  const toRegister = [];
+  const repaired = [];
+  const rejected = [];
+  for (const spec of specs || []) {
+    let v = validateMacroTemplate(spec, parser);
+    if (v.ok) { toRegister.push(spec); continue; }
+    if (typeof repair === 'function') {
+      const fixed = repair(spec, v.error || 'round-trip mismatch');
+      if (fixed) {
+        const v2 = validateMacroTemplate(fixed, parser);
+        if (v2.ok) { repaired.push(fixed); toRegister.push(fixed); continue; }
+        v = v2;
+      }
+    }
+    rejected.push({ type: spec.type, error: v.error || 'round-trip mismatch' });
+  }
+  return { toRegister, repaired, rejected };
+}
+
 // Shipped macro presets — kid-friendly one-way authoring blocks. Each expands to several
 // lines of canonical Python; every template here passes Invariant-2 (see macro_block.spec.js).
 // Korean display names target elementary users; the emitted Python stays English.
@@ -319,6 +344,20 @@ class LibraryAbstractionEngine {
     return { ok: true, type: blockType, validation };
   }
 
+  // [Phase 1] Plan candidate specs through the oracle gate, then register the survivors as
+  // real blocks. Returns { registered: type[], repaired: type[], rejected: {type,error}[] }.
+  synthesizeBlocks(specs, repair) {
+    const P = (typeof window !== 'undefined') ? window.BlockPyParser : null;
+    const plan = planSynthesis(specs, P, repair);
+    const registered = [];
+    for (const spec of plan.toRegister) {
+      const res = this.registerMacroBlock(spec, P);
+      if (res && res.ok) registered.push(res.type);
+      else plan.rejected.push({ type: spec.type, error: 'registration failed' });
+    }
+    return { registered, repaired: plan.repaired.map(s => s.type), rejected: plan.rejected };
+  }
+
   // Abstract library dynamically based on select or custom imports
   async runAbstraction(libKey, customCode = '') {
     const chatSim = document.getElementById('ai-chat-sim');
@@ -491,7 +530,8 @@ const BlockPyAbstraction = {
   MACRO_PRESETS,
   expandMacroTemplate,
   sampleValuesFor,
-  validateMacroTemplate
+  validateMacroTemplate,
+  planSynthesis
 };
 
 if (typeof window !== 'undefined') {
