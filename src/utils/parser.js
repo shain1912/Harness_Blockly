@@ -264,8 +264,8 @@ class Tokenizer {
 
       // Handle Symbols & Multi-char operators
       // [W3] ORDER MATTERS — match longer operators first.
-      // [W3] 3-char augmented ops: **= //= <<= >>= (ASG-05)
-      const threeCharOps = ['**=', '//=', '<<=', '>>='];
+      // [W3] 3-char augmented ops: **= //= <<= >>= (ASG-05). [W8] Ellipsis literal '...' (LIT-12).
+      const threeCharOps = ['**=', '//=', '<<=', '>>=', '...'];
       const nextThree = this.source.slice(this.cursor, this.cursor + 3);
       if (threeCharOps.includes(nextThree)) {
         const sym = nextThree;
@@ -506,6 +506,15 @@ class RangeNode extends ASTNode {
     this.start = start || new NumNode(0, line);
     this.stop = stop;
     this.step = step || new NumNode(1, line);
+  }
+}
+
+// [W8] Ellipsis literal `...` (LIT-12). Common in type stubs and variadic generics
+// (Tuple[int, ...]); also a placeholder body.
+class EllipsisNode extends ASTNode {
+  constructor(line) {
+    super(line);
+    this.type = 'Ellipsis';
   }
 }
 
@@ -1449,11 +1458,14 @@ class Parser {
     }
 
     if (tok && tok.type === TokenType.SYMBOL) {
-      // [W7] annotated assignment (ASG-06): `x: int = 5`, plus attribute targets
-      // `self.data: List[float] = data` (ubiquitous in __init__). Restricted to Name /
-      // Attribute targets at statement top level, so it never collides with slice /
+      // [W7] annotated assignment (ASG-06): `x: int = 5`, attribute targets
+      // `self.data: List[float] = data` (ubiquitous in __init__), and [W8] subscript
+      // targets `a[i]: int = v` (a subscript parses as a BinOp/INDEX node). Restricted to
+      // these target shapes at statement top level, so it never collides with slice /
       // dict-literal ':'.
-      if (tok.value === ':' && (expr.type === 'Name' || expr.type === 'Attribute')) {
+      if (tok.value === ':' &&
+          (expr.type === 'Name' || expr.type === 'Attribute' ||
+           (expr.type === 'BinOp' && expr.op === 'INDEX'))) {
         this.next(); // consume ':'
         const annotation = astToPython(this.parseExpression());
         let value = null;
@@ -1876,6 +1888,12 @@ class Parser {
   parseAtom() {
     const tok = this.peek();
     if (!tok) throw new SyntaxError('Unexpected EOF inside expression');
+
+    // [W8] Ellipsis literal `...` (LIT-12)
+    if (tok.type === TokenType.SYMBOL && tok.value === '...') {
+      this.next();
+      return new EllipsisNode(tok.line);
+    }
 
     if (tok.type === TokenType.NUMBER) {
       this.next();
@@ -2380,6 +2398,9 @@ function astToPython(node, indentLevel = 0) {
     case 'Name':
       return node.id;
       
+    case 'Ellipsis': // [W8] LIT-12
+      return '...';
+
     case 'Num':
       // Preserve the original literal form (hex, underscores, float) when available.
       return (node.raw !== undefined && node.raw !== null) ? node.raw : node.value.toString();
@@ -4469,14 +4490,27 @@ function convertExpressionToBlock(node) {
         }
       };
 
-    // [Demo] range(...) in expression context (e.g. comprehension iterable)
-    // -> lossless raw_expression (NOT a string literal)
-    case 'Range':
-      return {
-        "type": "raw_expression",
+    // [W8] Ellipsis literal `...` (LIT-12)
+    case 'Ellipsis':
+      return { "type": "ellipsis_literal", "id": makeBlockId() };
+
+    // [W8] range(...) in expression context (comprehension iterable, `x = range(n)`)
+    // -> dedicated range_value block. argc reproduces the minimal call form losslessly:
+    // range(stop) / range(start, stop) / range(start, stop, step) — matching astToPython.
+    case 'Range': {
+      const explicitStep = node.step.type !== 'Num' || node.step.value !== 1;
+      const explicitStart = node.start.type !== 'Num' || node.start.value !== 0;
+      const argc = explicitStep ? 3 : (explicitStart ? 2 : 1);
+      const block = {
+        "type": "range_value",
         "id": makeBlockId(),
-        "fields": { "EXPR": astToPython(node) }
+        "extraState": { "argc": argc },
+        "inputs": { "STOP": { "block": convertExpressionToBlock(node.stop) } }
       };
+      if (argc >= 2) block.inputs["START"] = { "block": convertExpressionToBlock(node.start) };
+      if (argc === 3) block.inputs["STEP"] = { "block": convertExpressionToBlock(node.step) };
+      return block;
+    }
 
   }
 
@@ -4738,6 +4772,69 @@ Blockly.Python['ann_assign'] = function(block) {
 if (Blockly.Python.forBlock) {
   Blockly.Python.forBlock['ann_assign'] = Blockly.Python['ann_assign'];
 }
+
+// [W8] Ellipsis literal `...` (LIT-12) — a value block. Common in type stubs / variadic
+// generics (Tuple[int, ...]) and as a placeholder.
+Blockly.Blocks['ellipsis_literal'] = {
+  init: function() {
+    this.appendDummyInput().appendField('...');
+    this.setOutput(true, null);
+    this.setColour('#7f8c8d');
+    this.setTooltip('Ellipsis literal ...');
+    this.setHelpUrl('');
+  }
+};
+Blockly.Python['ellipsis_literal'] = function() {
+  const order = (typeof Blockly.Python.ORDER_ATOMIC === 'number') ? Blockly.Python.ORDER_ATOMIC : 0;
+  return ['...', order];
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['ellipsis_literal'] = Blockly.Python['ellipsis_literal'];
+
+// [W8] range(...) as a value (expression context). argc (1/2/3) records the minimal call
+// form so it round-trips exactly: range(stop) / range(start, stop) / range(start, stop, step).
+Blockly.Blocks['range_value'] = {
+  argc_: 1,
+  init: function() {
+    this.argc_ = 1;
+    this.setOutput(true, null);
+    this.setInputsInline(true);
+    this.setColour('#5b80a5');
+    this.setTooltip('range(...) as a value');
+    this.setHelpUrl('');
+    this.updateShape_();
+  },
+  saveExtraState: function() { return { argc: this.argc_ }; },
+  loadExtraState: function(state) {
+    this.argc_ = (state && typeof state.argc === 'number') ? state.argc : 1;
+    this.updateShape_();
+  },
+  updateShape_: function() {
+    for (const inp of this.inputList.slice()) this.removeInput(inp.name);
+    if (this.argc_ >= 2) {
+      this.appendValueInput('START').setCheck(null).appendField('range(');
+      this.appendValueInput('STOP').setCheck(null).appendField(',');
+    } else {
+      this.appendValueInput('STOP').setCheck(null).appendField('range(');
+    }
+    if (this.argc_ === 3) this.appendValueInput('STEP').setCheck(null).appendField(',');
+    this.appendDummyInput('TAIL').appendField(')');
+  }
+};
+Blockly.Python['range_value'] = function(block) {
+  const argc = block.argc_ || 1;
+  const O = Blockly.Python.ORDER_NONE;
+  const stop = Blockly.Python.valueToCode(block, 'STOP', O) || '0';
+  let args = [stop];
+  if (argc >= 2) {
+    const start = Blockly.Python.valueToCode(block, 'START', O) || '0';
+    args = (argc === 3)
+      ? [start, stop, Blockly.Python.valueToCode(block, 'STEP', O) || '1']
+      : [start, stop];
+  }
+  const order = (typeof Blockly.Python.ORDER_FUNCTION_CALL === 'number') ? Blockly.Python.ORDER_FUNCTION_CALL : 0;
+  return [`range(${args.join(', ')})`, order];
+};
+if (Blockly.Python.forBlock) Blockly.Python.forBlock['range_value'] = Blockly.Python['range_value'];
 
 // Raw Python statement block — used as fallback for statements that can't map to built-in blocks
 Blockly.Blocks['raw_statement'] = {
@@ -6308,6 +6405,7 @@ const BlockPyParser = {
   RangeNode,
   ImportNode,
   FunctionDefNode,
+  EllipsisNode,
   ReturnNode,
   ClassDefNode,
   LambdaNode,

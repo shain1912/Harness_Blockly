@@ -20,12 +20,14 @@ Measured over all **182** catalog rows.
 
 | Bucket | Count | % of 182 |
 |--------|-------|----------|
-| ✅ Matched (dedicated block) | 168 | 92.3% |
-| 🟡 Partial (`raw` fallback) | 4 | 2.2% |
-| ❌ Missing | 10 | 5.5% |
+| ✅ Matched (dedicated block) | 170 | 93.4% |
+| 🟡 Partial (`raw` fallback) | 3 | 1.6% |
+| ❌ Missing | 9 | 4.9% |
 
-- **block-convertible %** = (matched + partial) / total = (168 + 4) / 182 = **94.5%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
-- **dedicated-block %** = matched / total = 168 / 182 = **92.3%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+- **block-convertible %** = (matched + partial) / total = (170 + 3) / 182 = **95.1%** — fraction that survives a Python→block→Python round-trip (i.e. converts to *some* block, dedicated or gray fallback).
+- **dedicated-block %** = matched / total = 170 / 182 = **93.4%** — fraction that maps to a real, named block (not the gray `raw_*` fallback).
+
+> **Update (W8 Ellipsis / subscript-target / range expr):** `...` (LIT-12) was a parse error — now tokenized as one symbol and parsed to a dedicated `ellipsis_literal` value block, which also unblocks variadic generics like `Tuple[int, ...]`. `range()` in expression position (BIF-04, e.g. a comprehension iterable or `x = range(n)`) was a gray `raw_expression` fallback — now a dedicated `range_value` block that records the arg count to reproduce `range(stop)` / `range(start, stop)` / `range(start, stop, step)` losslessly. And annotated assignment (ASG-06) now also accepts subscript targets `a[i]: int = v` (was Name/Attribute only). 2 rows ❌/🟡→✅, dedicated-block 92.3%→93.4%. Verified Node (`tests/iteration_gaps.spec.js`) + real-UI screenshot driver.
 
 > **Update (W7 type annotations):** annotated assignment (ASG-06 `x: int = 5`, plus attribute targets like `self.data: List[float] = data` — ubiquitous in `__init__`) and return annotation (FN-08 `def f(a: int) -> str:`) were parse errors. They now parse, round-trip losslessly, and get a dedicated `ann_assign` block / a `RETURNS` field on `method_def` (the route also used by async defs, since the built-in `procedures_def*` hat has no return-type slot). `typing` names (STD-18 `List`/`Optional`/`Union`/`Dict`) ride along inside annotation expressions and round-trip for free. Also fixed a latent bug: annotated params (`def f(a: int)`) registered the whole `"a: int"` string as a workspace variable, so a `return a` in the body resolved to a stray default — now the bare name is registered. 3 rows ❌→✅ plus the stale OP-19 lambda row corrected to ✅ (the `lambda_func` block already shipped), dedicated-block 90.1%→92.3%. Verified Node (`tests/annotations.spec.js`) + real-workspace block→code (`tests/annotations_browser.spec.js`), and stress-tested via a generate-and-screenshot agent loop (`tools/anno_loop_driver.mjs`) that drives the real UI on 15 randomized snippets. Still out of scope (next iteration): subscript-target annotations (`a[i]: int`), variadic `Tuple[int, ...]` (blocked on the Ellipsis `...` gap, LIT-12).
 
@@ -39,7 +41,7 @@ Measured over all **182** catalog rows.
 
 | Section | Total | ✅ Matched | 🟡 Partial | ❌ Missing |
 |---------|------:|----------:|----------:|----------:|
-| 1. Literals & Lexical (LIT) | 17 | 15 | 0 | 2 |
+| 1. Literals & Lexical (LIT) | 17 | 16 | 0 | 1 |
 | 2. Variables & Assignment (ASG) | 11 | 10 | 0 | 1 |
 | 3. Operators & Expressions (OP) | 21 | 20 | 0 | 1 |
 | 4. Comprehensions & Generators (CMP) | 7 | 7 | 0 | 0 |
@@ -48,12 +50,12 @@ Measured over all **182** catalog rows.
 | 7. Classes & OOP (CLS) | 15 | 15 | 0 | 0 |
 | 8. Exceptions & Context (EXC) | 13 | 12 | 1 | 0 |
 | 9. Modules & Imports (IMP) | 9 | 9 | 0 | 0 |
-| 10. Built-in Functions (BIF) | 20 | 19 | 1 | 0 |
+| 10. Built-in Functions (BIF) | 20 | 20 | 0 | 0 |
 | 11. Built-in Type Methods (MTH) | 5 | 5 | 0 | 0 |
 | 12. Standard Library Modules (STD) | 20 | 20 | 0 | 0 |
 | 13. Async (ASY) | 4 | 4 | 0 | 0 |
 | 14. Comments & Misc (MSC) | 6 | 2 | 1 | 3 |
-| **Total** | **182** | **168** | **4** | **10** |
+| **Total** | **182** | **170** | **3** | **9** |
 
 **Weakest sections** (most ❌ missing — these are genuine parse errors, the real remaining gaps):
 
@@ -102,7 +104,7 @@ These are **standard Blockly library blocks** shipped in `blocks_compressed.js` 
 | LIT-09 | String concatenation (implicit) | `"a" "b"` | ✅ text_concat |
 | LIT-10 | Boolean literal | `True`, `False` | ✅ logic_boolean |
 | LIT-11 | None literal | `None` | ✅ logic_null |
-| LIT-12 | Ellipsis | `...` | ❌ parse error (Ellipsis) |
+| LIT-12 | Ellipsis | `...` | ✅ ellipsis_literal |
 | LIT-13 | List literal | `[1, 2, 3]` | ✅ lists_create_with |
 | LIT-14 | Tuple literal | `(1, 2)`, `1, 2`, `()` | ✅ tuple_create |
 | LIT-15 | Dict literal | `{"a": 1}` | ✅ dict_create |
@@ -286,7 +288,7 @@ Each is a `Call` to a known builtin. Grouped for mapping.
 | BIF-01 | `print()` | ✅ text_print / print_multi |
 | BIF-02 | `input()` | ✅ func_call (input) |
 | BIF-03 | `len()` | ✅ func_call (len) |
-| BIF-04 | `range()` | 🟡 raw (range as expr) |
+| BIF-04 | `range()` | ✅ range_value (expr) / controls_for (loop) |
 | BIF-05 | Type constructors: `int() float() str() bool() list() tuple() dict() set() frozenset() bytes()` | ✅ func_call (constructors) |
 | BIF-06 | `abs() round() pow() divmod()` | ✅ func_call (abs/round/pow) |
 | BIF-07 | `min() max() sum()` | ✅ func_call (min/max/sum) |
