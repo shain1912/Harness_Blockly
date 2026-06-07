@@ -27,9 +27,9 @@ const NODE_POLICY = {
   Break: 'PENDING', Continue: 'PENDING', TypeAlias: 'PENDING', Expr: 'PENDING',
   // expressions — only Name/Constant implemented so far
   BoolOp: 'PENDING', NamedExpr: 'PENDING', BinOp: 'PENDING', UnaryOp: 'PENDING', Lambda: 'PENDING',
-  Dict: 'PENDING', Set: 'PENDING', Await: 'PENDING', Yield: 'PENDING', YieldFrom: 'PENDING',
+  Dict: 'DB', Set: 'DB', Await: 'PENDING', Yield: 'PENDING', YieldFrom: 'PENDING',
   Compare: 'PENDING', Call: 'PENDING', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'PENDING',
-  Subscript: 'PENDING', Starred: 'PENDING', Name: 'DB', List: 'PENDING', Tuple: 'PENDING',
+  Subscript: 'PENDING', Starred: 'PENDING', Name: 'DB', List: 'DB', Tuple: 'DB',
   // sugar (dedicated block + desugar pass) — all pending
   IfExp: 'PENDING', ListComp: 'PENDING', SetComp: 'PENDING', DictComp: 'PENDING', GeneratorExp: 'PENDING',
   // helpers (rendered as part of a parent block)
@@ -67,10 +67,37 @@ function blk(type, fields = {}, inputs = {}) {
   return { type, fields, inputs };
 }
 
+// A collection of element expressions (List/Tuple/Set) -> variable-arity block.
+function eltsBlock(blockType) {
+  return (n) => {
+    const inputs = {};
+    n.elts.forEach((e, i) => { inputs['ELT' + i] = { block: exprToBlock(e) }; });
+    return { type: blockType, extraState: { n: n.elts.length }, inputs };
+  };
+}
+
 // expr IR -> block
 const EXPR_HANDLERS = {
   Name:     (n) => blk('ir_name',  { ID: n.id }),
   Constant: (n) => blk('ir_const', { VALUE: JSON.stringify(n.value) }),
+  List:  eltsBlock('ir_list'),
+  Tuple: eltsBlock('ir_tuple'),
+  // Python has no empty set literal (Set([]) unparses to the unroundtrippable "{*()}").
+  Set: (n) => {
+    if (!n.elts || n.elts.length === 0) {
+      throw new Error('irToBlockly: empty Set has no Python literal (use set())');
+    }
+    return eltsBlock('ir_set')(n);
+  },
+  // Dict pairs; a null key encodes ** unpacking ({**x}), so KEYi is omitted for it.
+  Dict: (n) => {
+    const inputs = {};
+    n.keys.forEach((k, i) => {
+      if (k !== null && k !== undefined) inputs['KEY' + i] = { block: exprToBlock(k) };
+      inputs['VAL' + i] = { block: exprToBlock(n.values[i]) };
+    });
+    return { type: 'ir_dict', extraState: { n: n.keys.length }, inputs };
+  },
 };
 
 // stmt IR -> block

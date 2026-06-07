@@ -95,6 +95,42 @@ test.describe('AST-IR bridge round-trip', () => {
     }
   });
 
+  // Push-back evidence (Codex Collections round 2): Set([]) is unreachable from valid
+  // Python — there is no empty-set literal. So failing loud on it does not break raw=0,
+  // which is defined over valid Python source. Every real set (>=1 elt) round-trips.
+  test('Python has no empty-set literal: {} is Dict and set() is Call (Set([]) unreachable)', async ({ page }) => {
+    const t = await page.evaluate(async () => {
+      const B = window.BlockPyAstBridge;
+      const a = await B.pythonToIR(window.__pyodide, 'x = {}\n');
+      const b = await B.pythonToIR(window.__pyodide, 'x = set()\n');
+      return { empty: a.body[0].value.type, setcall: b.body[0].value.type };
+    });
+    expect(t.empty).toBe('Dict');    // {} is always a dict literal, never an empty Set
+    expect(t.setcall).toBe('Call');  // set() is a call, never a Set node
+  });
+
+  // Collections slice: every form survives a REAL Blockly load->save (mutator arity),
+  // including empty collections, nesting, and dict ** unpacking (null key).
+  test('collections survive a real Blockly load->save', async ({ page }) => {
+    const cases = ['xs = [1, 2, 3]', 'empty = []', 't = (1, 2)', 's = {1, 2, 3}',
+      "d = {'a': 1}", 'ed = {}', 'nested = [[1], [2]]', "merged = {**d, 'c': 3}"];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push((await B.irToPython(window.__pyodide, back)).trim());
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

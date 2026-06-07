@@ -48,6 +48,14 @@ test('multiple statements chain via next and round-trip', () => {
   expect(back).toEqual(ir2);
 });
 
+test('empty set has no literal: ir_set min-arity 1, and Set([]) fails loud', () => {
+  // A fresh ir_set block must not default to n=0 (which would unparse to "{*()}").
+  // We assert the converter rejects an empty Set IR rather than emit unroundtrippable code.
+  const mod = { type: 'Module', type_ignores: [], body: [
+    { type: 'Assign', targets: [{ type: 'Name', id: 's' }], value: { type: 'Set', elts: [] } }] };
+  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/empty Set/);
+});
+
 test('PENDING (unimplemented) nodes fail loudly with policy status, never silently', () => {
   // Return is on the worklist (PENDING) — converting it must throw an explicit error
   // naming the node and its policy, not produce a wrong/empty block.

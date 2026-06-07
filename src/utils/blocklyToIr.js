@@ -8,9 +8,33 @@
  * Comment preservation (Option 3) is layered later via parso (Phase 3), not here.
  */
 
+// block -> a collection of element expressions (List/Tuple/Set).
+function eltsToExpr(astType) {
+  return (b) => {
+    const n = (b.extraState && b.extraState.n) || 0;
+    const elts = [];
+    for (let i = 0; i < n; i++) elts.push(blockToExpr(b.inputs['ELT' + i].block));
+    return { type: astType, elts };
+  };
+}
+
 const BLOCK_TO_EXPR = {
   ir_name:  (b) => ({ type: 'Name', id: b.fields.ID }),
   ir_const: (b) => ({ type: 'Constant', value: JSON.parse(b.fields.VALUE) }),
+  ir_list:  eltsToExpr('List'),
+  ir_tuple: eltsToExpr('Tuple'),
+  ir_set:   eltsToExpr('Set'),
+  ir_dict: (b) => {
+    const n = (b.extraState && b.extraState.n) || 0;
+    const keys = [];
+    const values = [];
+    for (let i = 0; i < n; i++) {
+      // a missing KEYi means a null key (** unpacking)
+      keys.push(b.inputs['KEY' + i] ? blockToExpr(b.inputs['KEY' + i].block) : null);
+      values.push(blockToExpr(b.inputs['VAL' + i].block));
+    }
+    return { type: 'Dict', keys, values };
+  },
 };
 
 const BLOCK_TO_STMT = {
