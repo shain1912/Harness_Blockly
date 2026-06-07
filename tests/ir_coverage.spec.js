@@ -9,7 +9,7 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('raw=0 coverage', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:3000');
+    await page.goto('/');
     await page.waitForFunction(() => !!window.__pyodide && !!window.BlockPyIR,
       null, { timeout: 180000 });
   });

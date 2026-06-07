@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
-    port: 3000,
+    port: Number(process.env.PORT) || 3000,
+    strictPort: true,
     headers: {
       // Required for SharedArrayBuffer (Pyodide interrupt buffer)
       'Cross-Origin-Opener-Policy': 'same-origin',
