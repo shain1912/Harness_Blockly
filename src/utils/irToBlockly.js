@@ -20,7 +20,7 @@ const NODE_POLICY = {
   Module: 'ROOT',
   // statements — only Assign implemented so far; the rest are the worklist (PENDING)
   FunctionDef: 'PENDING', AsyncFunctionDef: 'PENDING', ClassDef: 'PENDING', Return: 'PENDING',
-  Delete: 'PENDING', Assign: 'DB', AugAssign: 'PENDING', AnnAssign: 'PENDING', For: 'PENDING',
+  Delete: 'PENDING', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'PENDING',
   AsyncFor: 'PENDING', While: 'PENDING', If: 'PENDING', With: 'PENDING', AsyncWith: 'PENDING',
   Match: 'PENDING', Raise: 'PENDING', Try: 'PENDING', TryStar: 'PENDING', Assert: 'PENDING',
   Import: 'PENDING', ImportFrom: 'PENDING', Global: 'PENDING', Nonlocal: 'PENDING', Pass: 'PENDING',
@@ -135,6 +135,18 @@ const STMT_HANDLERS = {
     // Variable arity -> extraState (not a field) so a REAL Blockly load rebuilds the
     // matching TARGET* inputs via loadExtraState before connections are restored.
     return { type: 'ir_assign', extraState: { n: n.targets.length }, inputs };
+  },
+  AugAssign: (n) => blk('ir_augassign', { OP: n.op.type },
+    { TARGET: { block: exprToBlock(n.target) }, VALUE: { block: exprToBlock(n.value) } }),
+  // Annotated assignment. value is optional (`x: int` has none). `simple` (0/1) marks an
+  // unparenthesized bare-name target — preserved so `(x): int` round-trips.
+  AnnAssign: (n) => {
+    const inputs = {
+      TARGET: { block: exprToBlock(n.target) },
+      ANNOTATION: { block: exprToBlock(n.annotation) },
+    };
+    if (n.value !== null && n.value !== undefined) inputs.VALUE = { block: exprToBlock(n.value) };
+    return { type: 'ir_annassign', extraState: { simple: n.simple }, inputs };
   },
 };
 

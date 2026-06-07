@@ -205,4 +205,38 @@ if (Blockly) {
   };
 }
 
+if (Blockly) {
+  const AUG_OPS = [['+=', 'Add'], ['-=', 'Sub'], ['*=', 'Mult'], ['/=', 'Div'], ['//=', 'FloorDiv'],
+    ['%=', 'Mod'], ['**=', 'Pow'], ['<<=', 'LShift'], ['>>=', 'RShift'], ['|=', 'BitOr'],
+    ['^=', 'BitXor'], ['&=', 'BitAnd'], ['@=', 'MatMult']];
+  Blockly.Blocks['ir_augassign'] = {
+    init() {
+      this.appendValueInput('TARGET');
+      this.appendValueInput('VALUE').appendField(new Blockly.FieldDropdown(AUG_OPS), 'OP');
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setInputsInline(true);
+      this.setColour('#5b5ba5');
+    },
+  };
+  // Annotated assignment: TARGET : ANNOTATION [= VALUE]. VALUE may be left unconnected
+  // (`x: int`). `simple` (0/1) preserved via extraState for the parenthesized-target case.
+  Blockly.Blocks['ir_annassign'] = {
+    simple_: 1,
+    init() {
+      this.appendValueInput('TARGET');
+      this.appendValueInput('ANNOTATION').appendField(':');
+      this.appendValueInput('VALUE').appendField('=');
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setInputsInline(true);
+      this.setColour('#5b5ba5');
+    },
+    saveExtraState() { return { simple: this.simple_ }; },
+    loadExtraState(state) {
+      this.simple_ = (state && typeof state.simple === 'number') ? state.simple : 1;
+    },
+  };
+}
+
 if (typeof module !== 'undefined') module.exports = {};

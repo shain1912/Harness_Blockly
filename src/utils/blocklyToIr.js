@@ -65,6 +65,13 @@ const BLOCK_TO_STMT = {
     for (let i = 0; i < n; i++) targets.push(blockToExpr(b.inputs['TARGET' + i].block));
     return { type: 'Assign', targets, value: blockToExpr(b.inputs.VALUE.block) };
   },
+  ir_augassign: (b) => ({ type: 'AugAssign', target: blockToExpr(b.inputs.TARGET.block),
+    op: { type: b.fields.OP }, value: blockToExpr(b.inputs.VALUE.block) }),
+  ir_annassign: (b) => ({ type: 'AnnAssign',
+    target: blockToExpr(b.inputs.TARGET.block),
+    annotation: blockToExpr(b.inputs.ANNOTATION.block),
+    value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null,   // optional
+    simple: (b.extraState && typeof b.extraState.simple === 'number') ? b.extraState.simple : 1 }),
 };
 
 function blockToExpr(b) {
