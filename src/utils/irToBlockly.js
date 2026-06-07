@@ -26,9 +26,9 @@ const NODE_POLICY = {
   Import: 'PENDING', ImportFrom: 'PENDING', Global: 'PENDING', Nonlocal: 'PENDING', Pass: 'PENDING',
   Break: 'PENDING', Continue: 'PENDING', TypeAlias: 'PENDING', Expr: 'PENDING',
   // expressions — only Name/Constant implemented so far
-  BoolOp: 'PENDING', NamedExpr: 'PENDING', BinOp: 'PENDING', UnaryOp: 'PENDING', Lambda: 'PENDING',
+  BoolOp: 'DB', NamedExpr: 'PENDING', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'PENDING',
   Dict: 'DB', Set: 'DB', Await: 'PENDING', Yield: 'PENDING', YieldFrom: 'PENDING',
-  Compare: 'PENDING', Call: 'PENDING', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'PENDING',
+  Compare: 'DB', Call: 'PENDING', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'PENDING',
   Subscript: 'PENDING', Starred: 'PENDING', Name: 'DB', List: 'DB', Tuple: 'DB',
   // sugar (dedicated block + desugar pass) — all pending
   IfExp: 'PENDING', ListComp: 'PENDING', SetComp: 'PENDING', DictComp: 'PENDING', GeneratorExp: 'PENDING',
@@ -97,6 +97,28 @@ const EXPR_HANDLERS = {
       inputs['VAL' + i] = { block: exprToBlock(n.values[i]) };
     });
     return { type: 'ir_dict', extraState: { n: n.keys.length }, inputs };
+  },
+  // Operators. The op is an enum NODE (e.g. {type:'Add'}) -> stored as a FIELD (dropdown),
+  // never its own block. Operands/comparators are expression inputs. ast.unparse re-adds
+  // any needed parentheses from the reconstructed tree, so precedence is preserved.
+  BinOp: (n) => blk('ir_binop', { OP: n.op.type },
+    { LEFT: { block: exprToBlock(n.left) }, RIGHT: { block: exprToBlock(n.right) } }),
+  UnaryOp: (n) => blk('ir_unaryop', { OP: n.op.type },
+    { OPERAND: { block: exprToBlock(n.operand) } }),
+  BoolOp: (n) => {
+    const inputs = {};
+    n.values.forEach((v, i) => { inputs['VAL' + i] = { block: exprToBlock(v) }; });
+    return { type: 'ir_boolop', fields: { OP: n.op.type }, extraState: { n: n.values.length }, inputs };
+  },
+  // a < b <= c: left + N (op, comparator) pairs. ops are FIELDs, comparators are inputs.
+  Compare: (n) => {
+    const fields = {};
+    const inputs = { LEFT: { block: exprToBlock(n.left) } };
+    n.ops.forEach((op, i) => {
+      fields['OP' + i] = op.type;
+      inputs['CMP' + i] = { block: exprToBlock(n.comparators[i]) };
+    });
+    return { type: 'ir_compare', fields, extraState: { n: n.ops.length }, inputs };
   },
 };
 

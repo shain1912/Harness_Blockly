@@ -12,3 +12,14 @@ d = {'a': 1, 'b': 2}
 ed = {}
 nested = [[1, 2], [3]]
 merged = {**d, 'c': 3}
+r = 1 + 2 * 3
+g = (1 + 2) * 3
+h = a - b - c
+neg = -x
+nt = not flag
+inv = ~bits
+band = a and b and c
+bor = p or q
+chain = a < b < c
+mix = x == 1 and y != 2
+mm = m @ n

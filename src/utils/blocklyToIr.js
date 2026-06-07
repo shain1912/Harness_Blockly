@@ -35,6 +35,27 @@ const BLOCK_TO_EXPR = {
     }
     return { type: 'Dict', keys, values };
   },
+  // Operators: the OP field carries the enum node's type name; rebuild it as a bare node.
+  ir_binop: (b) => ({ type: 'BinOp', left: blockToExpr(b.inputs.LEFT.block),
+    op: { type: b.fields.OP }, right: blockToExpr(b.inputs.RIGHT.block) }),
+  ir_unaryop: (b) => ({ type: 'UnaryOp', op: { type: b.fields.OP },
+    operand: blockToExpr(b.inputs.OPERAND.block) }),
+  ir_boolop: (b) => {
+    const n = (b.extraState && b.extraState.n) || 0;
+    const values = [];
+    for (let i = 0; i < n; i++) values.push(blockToExpr(b.inputs['VAL' + i].block));
+    return { type: 'BoolOp', op: { type: b.fields.OP }, values };
+  },
+  ir_compare: (b) => {
+    const n = (b.extraState && b.extraState.n) || 0;
+    const ops = [];
+    const comparators = [];
+    for (let i = 0; i < n; i++) {
+      ops.push({ type: b.fields['OP' + i] });
+      comparators.push(blockToExpr(b.inputs['CMP' + i].block));
+    }
+    return { type: 'Compare', left: blockToExpr(b.inputs.LEFT.block), ops, comparators };
+  },
 };
 
 const BLOCK_TO_STMT = {

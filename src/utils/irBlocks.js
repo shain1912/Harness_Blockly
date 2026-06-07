@@ -127,4 +127,82 @@ if (Blockly) {
   };
 }
 
+if (Blockly) {
+  // Operator enum dropdowns: stored value = ast op node name, label = Python symbol.
+  const BIN_OPS = [['+', 'Add'], ['-', 'Sub'], ['*', 'Mult'], ['/', 'Div'], ['//', 'FloorDiv'],
+    ['%', 'Mod'], ['**', 'Pow'], ['<<', 'LShift'], ['>>', 'RShift'], ['|', 'BitOr'],
+    ['^', 'BitXor'], ['&', 'BitAnd'], ['@', 'MatMult']];
+  const UNARY_OPS = [['not ', 'Not'], ['-', 'USub'], ['+', 'UAdd'], ['~', 'Invert']];
+  const BOOL_OPS = [['and', 'And'], ['or', 'Or']];
+  const CMP_OPS = [['==', 'Eq'], ['!=', 'NotEq'], ['<', 'Lt'], ['<=', 'LtE'], ['>', 'Gt'],
+    ['>=', 'GtE'], ['is', 'Is'], ['is not', 'IsNot'], ['in', 'In'], ['not in', 'NotIn']];
+
+  Blockly.Blocks['ir_binop'] = {
+    init() {
+      this.appendValueInput('LEFT');
+      this.appendValueInput('RIGHT').appendField(new Blockly.FieldDropdown(BIN_OPS), 'OP');
+      this.setInputsInline(true);
+      this.setOutput(true);
+      this.setColour('#5b67a5');
+    },
+  };
+  Blockly.Blocks['ir_unaryop'] = {
+    init() {
+      this.appendValueInput('OPERAND').appendField(new Blockly.FieldDropdown(UNARY_OPS), 'OP');
+      this.setInputsInline(true);
+      this.setOutput(true);
+      this.setColour('#5b67a5');
+    },
+  };
+  // a and b and c: variable-arity values joined by a single and/or dropdown.
+  Blockly.Blocks['ir_boolop'] = {
+    itemCount_: 2,
+    init() {
+      this.itemCount_ = 2;
+      this.updateShape_();
+      this.setOutput(true);
+      this.setColour('#5b67a5');
+      this.setInputsInline(true);
+    },
+    saveExtraState() { return { n: this.itemCount_ }; },
+    loadExtraState(state) {
+      this.itemCount_ = (state && typeof state.n === 'number' && state.n >= 2) ? state.n : 2;
+      this.updateShape_();
+    },
+    updateShape_() {
+      let i = 0;
+      while (this.getInput('VAL' + i)) { this.removeInput('VAL' + i); i++; }
+      for (let t = 0; t < this.itemCount_; t++) {
+        const inp = this.appendValueInput('VAL' + t);
+        if (t === 0) inp.appendField(new Blockly.FieldDropdown(BOOL_OPS), 'OP');
+      }
+    },
+  };
+  // left + N (op, comparator) pairs for chained comparisons (a < b <= c).
+  Blockly.Blocks['ir_compare'] = {
+    itemCount_: 1,
+    init() {
+      this.itemCount_ = 1;
+      this.updateShape_();
+      this.setOutput(true);
+      this.setColour('#5b67a5');
+      this.setInputsInline(true);
+    },
+    saveExtraState() { return { n: this.itemCount_ }; },
+    loadExtraState(state) {
+      this.itemCount_ = (state && typeof state.n === 'number' && state.n >= 1) ? state.n : 1;
+      this.updateShape_();
+    },
+    updateShape_() {
+      if (this.getInput('LEFT')) this.removeInput('LEFT');
+      let i = 0;
+      while (this.getInput('CMP' + i)) { this.removeInput('CMP' + i); i++; }
+      this.appendValueInput('LEFT');
+      for (let t = 0; t < this.itemCount_; t++) {
+        this.appendValueInput('CMP' + t).appendField(new Blockly.FieldDropdown(CMP_OPS), 'OP' + t);
+      }
+    },
+  };
+}
+
 if (typeof module !== 'undefined') module.exports = {};
