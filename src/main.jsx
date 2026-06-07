@@ -7,6 +7,7 @@ import './index.css';
 import './utils/parser.js';
 import './utils/desugarer.js';
 import './utils/libraryAbstraction.js';
+import './utils/pyAstBridge.js';
 import './examples/snippets.js';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
