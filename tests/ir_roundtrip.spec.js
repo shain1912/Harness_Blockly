@@ -70,6 +70,31 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // Property harness: every snippet in the corpus must survive python -> blocks -> python
+  // with its *meaning* preserved (compare canonical unparse of original vs round-tripped).
+  // The corpus grows as each node-family slice lands.
+  test('round-trip corpus preserves meaning (python -> blocks -> python)', async ({ page }) => {
+    const fs = require('fs');
+    const cases = fs.readFileSync('tests/fixtures/roundtrip_corpus.txt', 'utf8')
+      .split('\n').map((s) => s.trim()).filter(Boolean);
+    const results = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const back = IRm.blocklyToIr(IRm.irToBlockly(ir));
+        out.push({
+          a: (await B.irToPython(window.__pyodide, ir)).trim(),     // canonical original
+          b: (await B.irToPython(window.__pyodide, back)).trim(),   // via blocks
+        });
+      }
+      return out;
+    }, cases);
+    for (let i = 0; i < results.length; i++) {
+      expect(results[i].b, `corpus line: ${cases[i]}`).toBe(results[i].a);
+    }
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

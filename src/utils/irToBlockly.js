@@ -8,10 +8,60 @@
  * have a block — the raw=0 coverage test reads BlockPyIR.__handled.
  */
 
-// Policy per ast node (closed CPython-3.12 set is filled in over the worklist; see spec §5).
+// Closed CPython-3.12 totality table (raw=0): EVERY ast node class is categorized.
+// DB = dedicated block (implemented + has a handler), SUGAR = block + desugar (implemented),
+// PENDING = planned DB/SUGAR not yet implemented (the node-family worklist; eventual DB-vs-
+// SUGAR per spec §5), HELPER = part of parent, FIELD = enum dropdown, ROOT = Module,
+// SKIP = abstract base / parse-mode root / ctx / deprecated.
+// The ir_coverage test asserts: every Pyodide-3.12 node appears here (no silent gap), and
+// every DB/SUGAR node actually has a handler (so a node is only marked DB/SUGAR once it
+// truly round-trips). Worklist is done when no PENDING remain.
 const NODE_POLICY = {
-  Module: 'ROOT', Assign: 'DB', Name: 'DB', Constant: 'DB',
+  Module: 'ROOT',
+  // statements — only Assign implemented so far; the rest are the worklist (PENDING)
+  FunctionDef: 'PENDING', AsyncFunctionDef: 'PENDING', ClassDef: 'PENDING', Return: 'PENDING',
+  Delete: 'PENDING', Assign: 'DB', AugAssign: 'PENDING', AnnAssign: 'PENDING', For: 'PENDING',
+  AsyncFor: 'PENDING', While: 'PENDING', If: 'PENDING', With: 'PENDING', AsyncWith: 'PENDING',
+  Match: 'PENDING', Raise: 'PENDING', Try: 'PENDING', TryStar: 'PENDING', Assert: 'PENDING',
+  Import: 'PENDING', ImportFrom: 'PENDING', Global: 'PENDING', Nonlocal: 'PENDING', Pass: 'PENDING',
+  Break: 'PENDING', Continue: 'PENDING', TypeAlias: 'PENDING', Expr: 'PENDING',
+  // expressions — only Name/Constant implemented so far
+  BoolOp: 'PENDING', NamedExpr: 'PENDING', BinOp: 'PENDING', UnaryOp: 'PENDING', Lambda: 'PENDING',
+  Dict: 'PENDING', Set: 'PENDING', Await: 'PENDING', Yield: 'PENDING', YieldFrom: 'PENDING',
+  Compare: 'PENDING', Call: 'PENDING', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'PENDING',
+  Subscript: 'PENDING', Starred: 'PENDING', Name: 'DB', List: 'PENDING', Tuple: 'PENDING',
+  // sugar (dedicated block + desugar pass) — all pending
+  IfExp: 'PENDING', ListComp: 'PENDING', SetComp: 'PENDING', DictComp: 'PENDING', GeneratorExp: 'PENDING',
+  // helpers (rendered as part of a parent block)
+  FormattedValue: 'HELPER', Slice: 'HELPER', comprehension: 'HELPER', ExceptHandler: 'HELPER',
+  arguments: 'HELPER', arg: 'HELPER', keyword: 'HELPER', alias: 'HELPER', withitem: 'HELPER',
+  match_case: 'HELPER',
+  MatchValue: 'HELPER', MatchSingleton: 'HELPER', MatchSequence: 'HELPER', MatchMapping: 'HELPER',
+  MatchClass: 'HELPER', MatchStar: 'HELPER', MatchAs: 'HELPER', MatchOr: 'HELPER',
+  TypeVar: 'HELPER', ParamSpec: 'HELPER', TypeVarTuple: 'HELPER',
+  // operator enums -> dropdown fields on the parent block
+  And: 'FIELD', Or: 'FIELD', Add: 'FIELD', Sub: 'FIELD', Mult: 'FIELD', MatMult: 'FIELD',
+  Div: 'FIELD', Mod: 'FIELD', Pow: 'FIELD', LShift: 'FIELD', RShift: 'FIELD', BitOr: 'FIELD',
+  BitXor: 'FIELD', BitAnd: 'FIELD', FloorDiv: 'FIELD', Invert: 'FIELD', Not: 'FIELD',
+  UAdd: 'FIELD', USub: 'FIELD', Eq: 'FIELD', NotEq: 'FIELD', Lt: 'FIELD', LtE: 'FIELD',
+  Gt: 'FIELD', GtE: 'FIELD', Is: 'FIELD', IsNot: 'FIELD', In: 'FIELD', NotIn: 'FIELD',
+  // skip: abstract bases, alternate parse-mode roots, ctx (positionally derived), deprecated
+  AST: 'SKIP', mod: 'SKIP', stmt: 'SKIP', expr: 'SKIP', expr_context: 'SKIP', boolop: 'SKIP',
+  operator: 'SKIP', unaryop: 'SKIP', cmpop: 'SKIP', excepthandler: 'SKIP', pattern: 'SKIP',
+  type_param: 'SKIP', type_ignore: 'SKIP', slice: 'SKIP',
+  Expression: 'SKIP', Interactive: 'SKIP', FunctionType: 'SKIP', Suite: 'SKIP',
+  Load: 'SKIP', Store: 'SKIP', Del: 'SKIP', AugLoad: 'SKIP', AugStore: 'SKIP', Param: 'SKIP',
+  _ast_Ellipsis: 'SKIP', TypeIgnore: 'SKIP', ExtSlice: 'SKIP', Index: 'SKIP',
+  // Deprecated constant aliases: ast.parse never emits these (it emits Constant). Their
+  // presence in dir(ast) varies by build (Pyodide 3.12.1 exposes only `_ast_Ellipsis`,
+  // serving Num/Str/Bytes/NameConstant/Ellipsis lazily via module __getattr__). Categorized
+  // SKIP so any build that does expose them stays covered; the coverage test treats this
+  // set as optional so absent ones are not flagged stale.
+  Num: 'SKIP', Str: 'SKIP', Bytes: 'SKIP', NameConstant: 'SKIP', Ellipsis: 'SKIP',
 };
+
+// Deprecated alias names whose presence in dir(ast) is build-dependent (see above).
+const OPTIONAL_DEPRECATED = ['Num', 'Str', 'Bytes', 'NameConstant', 'Ellipsis', '_ast_Ellipsis'];
 
 function blk(type, fields = {}, inputs = {}) {
   return { type, fields, inputs };
@@ -39,15 +89,22 @@ const STMT_HANDLERS = {
   },
 };
 
+// Fail loud (never silently wrong) for a node we cannot yet turn into a block. The policy
+// status makes the gap explicit: PENDING = on the worklist, not yet implemented.
+function noHandler(kind, type) {
+  const status = NODE_POLICY[type] || 'UNCATEGORIZED';
+  throw new Error(`irToBlockly: no ${kind} handler for ${type} (policy=${status})`);
+}
+
 function exprToBlock(n) {
   const h = EXPR_HANDLERS[n.type];
-  if (!h) throw new Error('irToBlockly: no expr handler for ' + n.type);
+  if (!h) noHandler('expr', n.type);
   return h(n);
 }
 
 function stmtToBlock(n) {
   const h = STMT_HANDLERS[n.type];
-  if (!h) throw new Error('irToBlockly: no stmt handler for ' + n.type);
+  if (!h) noHandler('stmt', n.type);
   return h(n);
 }
 
@@ -62,5 +119,6 @@ function irToBlockly(ir) {
 const __handled = new Set([...Object.keys(EXPR_HANDLERS), ...Object.keys(STMT_HANDLERS)]);
 
 const api = (typeof window !== 'undefined' ? window : global);
-api.BlockPyIR = Object.assign(api.BlockPyIR || {}, { irToBlockly, exprToBlock, NODE_POLICY, __handled });
+api.BlockPyIR = Object.assign(api.BlockPyIR || {},
+  { irToBlockly, exprToBlock, NODE_POLICY, OPTIONAL_DEPRECATED, __handled });
 if (typeof module !== 'undefined') module.exports = api.BlockPyIR;

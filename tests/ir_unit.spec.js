@@ -48,6 +48,14 @@ test('multiple statements chain via next and round-trip', () => {
   expect(back).toEqual(ir2);
 });
 
+test('PENDING (unimplemented) nodes fail loudly with policy status, never silently', () => {
+  // Return is on the worklist (PENDING) — converting it must throw an explicit error
+  // naming the node and its policy, not produce a wrong/empty block.
+  const mod = { type: 'Module', type_ignores: [],
+    body: [{ type: 'Return', value: { type: 'Constant', value: 1 } }] };
+  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/Return \(policy=PENDING\)/);
+});
+
 test('multiple disconnected top-level stacks are all converted (none dropped)', () => {
   // Simulate a saved workspace with TWO separate top-level stacks.
   const stack = (id) => ({ type: 'ir_assign', extraState: { n: 1 },
