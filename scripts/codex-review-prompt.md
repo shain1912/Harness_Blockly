@@ -2,8 +2,15 @@
 
 당신은 적대적 코드 리뷰어다. 설계 문서를 기준으로 현재 변경분(슬라이스 1개, 보통 ast 노드 패밀리 1개)을 리뷰하라.
 
-기준 문서: `docs/superpowers/specs/2026-06-07-blockpy-ast-ir-redesign-design.md`
+기준 문서: `DOCS/superpowers/specs/2026-06-07-blockpy-ast-ir-redesign-design.md`
 구현자(Claude)는 이미 자가검증(테스트·round-trip)을 통과시킨 상태다. 통과한 것을 신뢰하지 말고 적대적으로 검증하라.
+
+## 무엇을 리뷰할지 (스코프)
+
+이번 슬라이스의 변경분을 스스로 찾아 리뷰하라:
+1. 먼저 `git status --short` 와 `git diff` (working-tree 변경분)를 확인한다.
+2. working-tree가 비어 있으면(이미 커밋됨) `git diff master...HEAD` 의 최신 슬라이스 커밋을 리뷰 대상으로 삼는다.
+3. 리뷰 범위는 그 diff에 한정한다. 무관한 기존 코드는 지적하지 말 것.
 
 ## 반드시 점검할 불변식 (위반 시 blocking)
 
