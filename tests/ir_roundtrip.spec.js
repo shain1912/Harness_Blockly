@@ -6,7 +6,7 @@ const { test, expect } = require('@playwright/test');
 test.describe('AST-IR bridge round-trip', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:3000');
-    await page.waitForFunction(() => !!window.__pyodide && !!window.BlockPyAstBridge,
+    await page.waitForFunction(() => !!window.__pyodide && !!window.BlockPyAstBridge && !!window.BlockPyIR,
       null, { timeout: 180000 });
   });
 
@@ -51,5 +51,42 @@ test.describe('AST-IR bridge round-trip', () => {
     });
     expect(r.bigInt).toBe('n = 9007199254740993'); // exact — no rounding to ...992
     expect(r.c2).toBe(r.c1);                        // stable fixpoint, no JSON crash
+  });
+
+  // Task 1.3 — full single-IR pipeline through the Blockly mapping layer:
+  // python -> ast IR -> blocks -> IR -> python.
+  test('full pipeline: assignments -> blocks -> python', async ({ page }) => {
+    const cases = ['x = 1', 'a = b = 1'];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const back = IRm.blocklyToIr(IRm.irToBlockly(ir));
+        out.push((await B.irToPython(window.__pyodide, back)).trim());
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
+  // Codex review (round 2): exercise the REAL Blockly serialization path — load the
+  // generated JSON into an actual workspace, save it back, then to IR/Python. This
+  // catches mutator-input mismatches that the pure-JSON round-trip cannot.
+  test('chained assignment survives a real Blockly load->save', async ({ page }) => {
+    const code = await page.evaluate(async () => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const ir = await B.pythonToIR(window.__pyodide, 'a = b = 1\n');
+      const ws = new Bk.Workspace();
+      try {
+        Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+        const saved = Bk.serialization.workspaces.save(ws);   // real round-trip through Blockly
+        const back = IRm.blocklyToIr(saved);
+        return await B.irToPython(window.__pyodide, back);
+      } finally {
+        ws.dispose();
+      }
+    });
+    expect(code.trim()).toBe('a = b = 1');
   });
 });
