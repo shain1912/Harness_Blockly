@@ -14,7 +14,7 @@
 
 ## 반드시 점검할 불변식 (위반 시 blocking)
 
-1. **raw=0 전수성.** 이번 슬라이스가 다루는 ast 노드(CPython 3.12 문법 기준)가 raw 문자열 블록이나 무근거 에러로 빠지지 않는가? 일반 call/attribute/subscript 문법 블록(Tier B)으로라도 표현되는가?
+1. **raw=0 전수성 (슬라이스 단위).** 이번 슬라이스가 **DB/SUGAR로 승격(구현)했다고 주장하는** 노드가 raw 문자열이나 무근거 에러로 빠지지 않고 실제 round-trip 되는가? 일반 call/attribute/subscript(Tier B)로라도 표현되는가? — **단, 이건 다단계 빌드다.** 아직 구현 안 된 노드는 `NODE_POLICY`에서 **PENDING**으로 표시되고 변환 시 의도적으로 fail-loud(`policy=PENDING`)한다. raw=0 *달성*(PENDING 0개)은 worklist 완료 시점의 목표이며 `ir_coverage`의 **fixme 정의-완료 테스트**로 추적된다(프로젝트 합의된 결정). **fixme로 둔 것, 또는 PENDING 노드가 아직 미구현인 것 자체를 BLOCKING으로 지적하지 말 것.** 이번 슬라이스가 새로 DB/SUGAR로 올린 노드의 손실/오류만 BLOCKING이다.
 2. **round-trip 무손실.** 블록→Python→블록, Python→블록→Python 왕복에서 의미가 보존되는가? 필드 누락·shadow 블록 불일치로 데이터가 사라지지 않는가?
 3. **단일 IR 정합성.** 블록↔Python 양방향이 같은 IR 스키마를 쓰는가? 양쪽 필드 이름이 어긋나지 않는가? (과거 CHANGE vs VALUE류 버그)
 4. **옵션3 주석 보존 (Phase 3 이후에만 BLOCKING).** parso로 회수한 주석이 round-trip에서 사라지지 않는가? (포맷 재생성은 허용, 주석 소실은 불가) — **단, parso 기반 주석 보존은 Phase 3 작업이다.** Phase 1~2 foundation 슬라이스(IR 브리지, IR↔블록 매핑)는 AST 수준(의미) round-trip만 보장하면 되며, 이 단계의 주석 손실은 BLOCKING이 아니라 NIT(정보성)로만 보고하라. 현재 슬라이스가 Phase 3(parso/주석)에 속할 때만 BLOCKING.
