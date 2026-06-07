@@ -22,8 +22,6 @@ export default function App() {
   });
   const [drawnLines, setDrawnLines] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [runSpeed, setRunSpeed] = useState(50);
   const [highlightedLine, setHighlightedLine] = useState(null);
   
   // OpenCV image output (from real cv2.imshow) + uploaded image name
@@ -57,7 +55,6 @@ export default function App() {
   const isSyncingFromCodeRef = useRef(false);
   const blocklySnapshotRef = useRef(null);
   const associatedPythonRef = useRef('');
-  const interpreterRef = useRef(null);
   const abstractionEngineRef = useRef(null);
   const shellAbortRef = useRef(null);
 
@@ -225,41 +222,8 @@ export default function App() {
     }
   };
 
-  // Pre-load interpreter and standard OpenCV blocks
+  // Pre-load the abstraction engine and standard OpenCV blocks
   useEffect(() => {
-    // Initialize custom interpreter
-    interpreterRef.current = new window.BlockPyInterpreter.ASTInterpreter({
-      onLog: (msg) => {
-        setLogs(prev => [...prev, msg]);
-      },
-      onVarUpdate: (vars) => {
-        setVariables({ ...vars });
-      },
-      onSpriteCommand: (cmd, state) => {
-        setSpriteState({
-          x: state.x,
-          y: state.y,
-          angle: state.angle,
-          penDown: state.penDown,
-          color: state.color,
-          sayBubble: state.sayBubble
-        });
-        if (cmd === 'move' && state.penDown) {
-          setDrawnLines(prev => [...prev, {
-            x1: state.oldX,
-            y1: state.oldY,
-            x2: state.newX,
-            y2: state.newY,
-            color: state.color
-          }]);
-        }
-      },
-      onHighlightLine: (line) => {
-        setHighlightedLine(line);
-      },
-      onCv2Action: handleCv2Action,
-    });
-
     // Populate preloaded blocks for OpenCV Visual Palette Parity
     const cv2Preset = window.BlockPyAbstraction.AI_PRESETS['cv2'];
     {
@@ -287,12 +251,6 @@ export default function App() {
 
     // Load initial glowing star demo script
     loadDemoScript('star');
-
-    return () => {
-      if (interpreterRef.current) {
-        interpreterRef.current.reset();
-      }
-    };
   }, []);
 
   // Pre-warm the Python environment (Pyodide + real opencv-python + sample images) in the
@@ -570,20 +528,11 @@ for i in range(4):
 
   // ── Run: Pyodide real Python execution ────────────────────────────────────────
   const handleRunExecution = async () => {
-    if (isPaused) {
-      // Step-mode resume still uses JS interpreter
-      setIsPaused(false);
-      interpreterRef.current.runExecution(() => runSpeed, (err) => handleExecutionFinish(err));
-      setLogs(prev => [...prev, '[Interpreter] Resuming step execution.']);
-      return;
-    }
-
     setDrawnLines([]);
     setHighlightedLine(null);
     setVariables({});
     setCv2Images([]);
     setIsRunning(true);
-    setIsPaused(false);
     setPyodideLoading(!pyodideReady);
 
     setLogs([
@@ -623,7 +572,6 @@ for i in range(4):
         setPyodideLoading(false);
         setPyodideReady(true);
         setIsRunning(false);
-        setIsPaused(false);
         setHighlightedLine(null);
         if (!err) {
           setLogs(prev => [...prev, '[Python] Execution completed.']);
@@ -636,65 +584,14 @@ for i in range(4):
     });
   };
 
-  // ── Pause: only applies to JS step-mode ───────────────────────────────────────
-  const handlePauseExecution = () => {
-    if (interpreterRef.current) {
-      interpreterRef.current.pauseExecution();
-      setIsPaused(true);
-      setLogs(prev => [...prev, '[Interpreter] Paused.']);
-    }
-  };
-
-  // ── Step: still uses JS interpreter for line-by-line ─────────────────────────
-  const handleStepExecution = () => {
-    if (!isRunning) {
-      try {
-        const lexer = new window.BlockPyParser.Tokenizer(code);
-        const tokens = lexer.tokenize();
-        const parser = new window.BlockPyParser.Parser(tokens);
-        const ast = parser.parse();
-        let finalAST = ast;
-        if (shouldDesugar) {
-          const desugarer = new window.BlockPyDesugarer.ASTDesugarer();
-          finalAST = desugarer.desugar(ast);
-        }
-        setDrawnLines([]);
-        setHighlightedLine(null);
-        setVariables({});
-        setLogs(['[Step] Initializing step debugger...']);
-        interpreterRef.current.initProgram(finalAST);
-        setIsRunning(true);
-        setIsPaused(true);
-      } catch (err) {
-        setLogs(prev => [...prev, `[Step Error] ${err.message}`]);
-        return;
-      }
-    }
-    const res = interpreterRef.current.stepExecution();
-    if (res.done) handleExecutionFinish(res.error);
-  };
-
-  // ── Stop: interrupt Pyodide + reset JS interpreter ────────────────────────────
+  // ── Stop: interrupt Pyodide execution ─────────────────────────────────────────
   const handleStopExecution = () => {
     interruptPyodide();
     if (shellAbortRef.current) { try { shellAbortRef.current.abort(); } catch (_) {} }
-    if (interpreterRef.current) interpreterRef.current.reset();
     setHighlightedLine(null);
     setIsRunning(false);
-    setIsPaused(false);
     setSpriteState({ x: 240, y: 140, angle: 0, penDown: false, color: '#a855f7', sayBubble: null });
     setLogs(prev => [...prev, '[Python] Stopped.']);
-  };
-
-  const handleExecutionFinish = (err) => {
-    setIsRunning(false);
-    setIsPaused(false);
-    setHighlightedLine(null);
-    if (err) {
-      setLogs(prev => [...prev, `[Runtime Error] ${err.message}`]);
-    } else {
-      setLogs(prev => [...prev, '[Interpreter] Program execution completed successfully.']);
-    }
   };
 
   // ── pip install handler ───────────────────────────────────────────────────────
@@ -876,14 +773,9 @@ for i in range(4):
                     spriteState={spriteState}
                     drawnLines={drawnLines}
                     isRunning={isRunning}
-                    isPaused={isPaused}
                     onRun={handleRunExecution}
-                    onPause={handlePauseExecution}
-                    onStep={handleStepExecution}
                     onStop={handleStopExecution}
                     onClearCanvas={() => setDrawnLines([])}
-                    runSpeed={runSpeed}
-                    onSpeedChange={setRunSpeed}
                   />
                   {uploadedMedia.length > 0 && (
                     <div className="uploaded-media">

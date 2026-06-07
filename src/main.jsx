@@ -6,7 +6,6 @@ import './index.css';
 // Import compiler utilities so they are bundled by Vite and register globally
 import './utils/parser.js';
 import './utils/desugarer.js';
-import './utils/interpreter.js';
 import './utils/libraryAbstraction.js';
 import './examples/snippets.js';
 

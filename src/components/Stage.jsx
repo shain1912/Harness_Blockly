@@ -1,17 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 
-export default function Stage({ 
-  spriteState, 
-  drawnLines, 
-  isRunning, 
-  isPaused, 
-  onRun, 
-  onPause, 
-  onStep, 
-  onStop, 
-  onClearCanvas,
-  runSpeed, 
-  onSpeedChange 
+export default function Stage({
+  spriteState,
+  drawnLines,
+  isRunning,
+  onRun,
+  onStop,
+  onClearCanvas
 }) {
   const canvasRef = useRef(null);
   const bubbleRef = useRef(null);
@@ -78,7 +73,7 @@ export default function Stage({
       ctx.rotate(-spriteState.angle * Math.PI / 180);
 
       // Draw glowing fire particles from thruster if executing moves
-      if (isRunning && !isPaused && frame % 4 < 2) {
+      if (isRunning && frame % 4 < 2) {
         ctx.fillStyle = 'rgba(236, 72, 153, 0.8)';
         ctx.beginPath();
         ctx.arc(-16, 0, 5 + Math.sin(frame) * 2, 0, Math.PI * 2);
@@ -120,7 +115,7 @@ export default function Stage({
     return () => {
       cancelAnimationFrame(animationId);
     };
-  }, [spriteState, drawnLines, isRunning, isPaused]);
+  }, [spriteState, drawnLines, isRunning]);
 
   // Handle bubble placement dynamically based on canvas bounding rect
   useEffect(() => {
@@ -163,25 +158,8 @@ export default function Stage({
         >
           <i className="fa-solid fa-play"></i> Run
         </button>
-        <button 
-          className="btn btn-action pause" 
-          id="btn-pause" 
-          onClick={onPause}
-          disabled={!isRunning || isPaused}
-          title="Pause"
-        >
-          <i className="fa-solid fa-pause"></i>
-        </button>
-        <button 
-          className="btn btn-action step" 
-          id="btn-step" 
-          onClick={onStep}
-          title="Step Node"
-        >
-          <i className="fa-solid fa-forward-step"></i> Step
-        </button>
-        <button 
-          className="btn btn-action stop" 
+        <button
+          className="btn btn-action stop"
           id="btn-stop" 
           onClick={onStop}
           disabled={!isRunning}
@@ -189,21 +167,9 @@ export default function Stage({
         >
           <i className="fa-solid fa-stop"></i>
         </button>
-        <div className="speed-slider-group">
-          <i className="fa-solid fa-bolt"></i>
-          <input 
-            type="range" 
-            id="run-speed" 
-            min="1" 
-            max="100" 
-            value={runSpeed} 
-            onChange={(e) => onSpeedChange(Number(e.target.value))}
-            title="Execution Delay Speed" 
-          />
-        </div>
-        <button 
-          className="btn btn-secondary btn-icon-only" 
-          id="btn-clear-canvas" 
+        <button
+          className="btn btn-secondary btn-icon-only"
+          id="btn-clear-canvas"
           onClick={onClearCanvas}
           title="Clear Path & Drawing"
         >

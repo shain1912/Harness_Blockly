@@ -1,12 +1,8 @@
 const { test, expect } = require('@playwright/test');
 
-async function setSpeedToMax(page) {
-  const speedSlider = page.locator('#run-speed');
-  await speedSlider.evaluate(el => {
-    el.value = 100;
-    el.dispatchEvent(new Event('input'));
-    el.dispatchEvent(new Event('change'));
-  });
+async function setSpeedToMax(_page) {
+  // No-op: the speed slider / JS step interpreter was removed (Run uses Pyodide only).
+  // Kept as a no-op so existing call sites across the suite need no changes.
 }
 
 test.describe('BlockPy E2E Harness Tests', () => {
