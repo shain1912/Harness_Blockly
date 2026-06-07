@@ -239,4 +239,45 @@ if (Blockly) {
   };
 }
 
+if (Blockly) {
+  Blockly.Blocks['ir_attribute'] = {
+    init() {
+      this.appendValueInput('VALUE');
+      this.appendDummyInput().appendField('.').appendField(new Blockly.FieldTextInput('attr'), 'ATTR');
+      this.setInputsInline(true);
+      this.setOutput(true);
+      this.setColour('#a07a4a');
+    },
+  };
+  Blockly.Blocks['ir_subscript'] = {
+    init() {
+      this.appendValueInput('VALUE');
+      this.appendValueInput('SLICE').appendField('[');
+      this.appendDummyInput().appendField(']');
+      this.setInputsInline(true);
+      this.setOutput(true);
+      this.setColour('#a07a4a');
+    },
+  };
+  // Slice with optional lower:upper:step inputs (a[1:], a[::2], a[:]).
+  Blockly.Blocks['ir_slice'] = {
+    init() {
+      this.appendValueInput('LOWER');
+      this.appendValueInput('UPPER').appendField(':');
+      this.appendValueInput('STEP').appendField(':');
+      this.setInputsInline(true);
+      this.setOutput(true);
+      this.setColour('#a07a4a');
+    },
+  };
+  Blockly.Blocks['ir_starred'] = {
+    init() {
+      this.appendValueInput('VALUE').appendField('*');
+      this.setInputsInline(true);
+      this.setOutput(true);
+      this.setColour('#a07a4a');
+    },
+  };
+}
+
 if (typeof module !== 'undefined') module.exports = {};

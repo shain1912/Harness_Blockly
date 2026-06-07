@@ -56,6 +56,14 @@ const BLOCK_TO_EXPR = {
     }
     return { type: 'Compare', left: blockToExpr(b.inputs.LEFT.block), ops, comparators };
   },
+  ir_attribute: (b) => ({ type: 'Attribute', value: blockToExpr(b.inputs.VALUE.block), attr: b.fields.ATTR }),
+  ir_subscript: (b) => ({ type: 'Subscript', value: blockToExpr(b.inputs.VALUE.block),
+    slice: blockToExpr(b.inputs.SLICE.block) }),
+  ir_slice: (b) => ({ type: 'Slice',
+    lower: b.inputs.LOWER ? blockToExpr(b.inputs.LOWER.block) : null,
+    upper: b.inputs.UPPER ? blockToExpr(b.inputs.UPPER.block) : null,
+    step: b.inputs.STEP ? blockToExpr(b.inputs.STEP.block) : null }),
+  ir_starred: (b) => ({ type: 'Starred', value: blockToExpr(b.inputs.VALUE.block) }),
 };
 
 const BLOCK_TO_STMT = {
@@ -74,13 +82,18 @@ const BLOCK_TO_STMT = {
     simple: (b.extraState && typeof b.extraState.simple === 'number') ? b.extraState.simple : 1 }),
 };
 
+// Blockly omits `inputs` entirely when a block has no connected inputs (e.g. an empty
+// slice a[:] -> ir_slice with no LOWER/UPPER/STEP). Normalize so handlers can always read
+// b.inputs.X safely (absent -> undefined, handled by their optional guards).
 function blockToExpr(b) {
+  if (!b.inputs) b.inputs = {};
   const h = BLOCK_TO_EXPR[b.type];
   if (!h) throw new Error('blocklyToIr: no expr handler for ' + b.type);
   return h(b);
 }
 
 function blockToStmt(b) {
+  if (!b.inputs) b.inputs = {};
   const h = BLOCK_TO_STMT[b.type];
   if (!h) throw new Error('blocklyToIr: no stmt handler for ' + b.type);
   return h(b);

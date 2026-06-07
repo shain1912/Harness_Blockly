@@ -152,6 +152,30 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // Access/unpacking slice through REAL Blockly load->save: attribute chains, subscript
+  // with index and with each slice form (optional lower/upper/step), starred elements,
+  // and previously-deferred targets (Attribute/Subscript) now reachable.
+  test('attribute/subscript/slice/starred survive a real Blockly load->save', async ({ page }) => {
+    const cases = ['attr = obj.x', 'chain = o.a.b.c', 'item = m[0]', 'sl = a[1:5]',
+      'sl2 = a[1:]', 'sl3 = a[:5]', 'sl4 = a[::2]', 'sl5 = a[:]', 'star = [*a, b]',
+      'o.x = 5', 'xs[0] += 1'];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push((await B.irToPython(window.__pyodide, back)).trim());
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

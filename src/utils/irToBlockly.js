@@ -28,12 +28,12 @@ const NODE_POLICY = {
   // expressions — only Name/Constant implemented so far
   BoolOp: 'DB', NamedExpr: 'PENDING', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'PENDING',
   Dict: 'DB', Set: 'DB', Await: 'PENDING', Yield: 'PENDING', YieldFrom: 'PENDING',
-  Compare: 'DB', Call: 'PENDING', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'PENDING',
-  Subscript: 'PENDING', Starred: 'PENDING', Name: 'DB', List: 'DB', Tuple: 'DB',
+  Compare: 'DB', Call: 'PENDING', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'DB',
+  Subscript: 'DB', Starred: 'DB', Name: 'DB', List: 'DB', Tuple: 'DB',
   // sugar (dedicated block + desugar pass) — all pending
   IfExp: 'PENDING', ListComp: 'PENDING', SetComp: 'PENDING', DictComp: 'PENDING', GeneratorExp: 'PENDING',
   // helpers (rendered as part of a parent block)
-  FormattedValue: 'HELPER', Slice: 'HELPER', comprehension: 'HELPER', ExceptHandler: 'HELPER',
+  FormattedValue: 'HELPER', Slice: 'DB', comprehension: 'HELPER', ExceptHandler: 'HELPER',
   arguments: 'HELPER', arg: 'HELPER', keyword: 'HELPER', alias: 'HELPER', withitem: 'HELPER',
   match_case: 'HELPER',
   MatchValue: 'HELPER', MatchSingleton: 'HELPER', MatchSequence: 'HELPER', MatchMapping: 'HELPER',
@@ -120,6 +120,19 @@ const EXPR_HANDLERS = {
     });
     return { type: 'ir_compare', fields, extraState: { n: n.ops.length }, inputs };
   },
+  // Access / unpacking. attr is a plain identifier FIELD; subscript index/slice is an input.
+  Attribute: (n) => blk('ir_attribute', { ATTR: n.attr }, { VALUE: { block: exprToBlock(n.value) } }),
+  Subscript: (n) => blk('ir_subscript', {},
+    { VALUE: { block: exprToBlock(n.value) }, SLICE: { block: exprToBlock(n.slice) } }),
+  // Slice lower/upper/step are each optional (a[1:], a[::2], a[:]) -> omit absent inputs.
+  Slice: (n) => {
+    const inputs = {};
+    if (n.lower !== null && n.lower !== undefined) inputs.LOWER = { block: exprToBlock(n.lower) };
+    if (n.upper !== null && n.upper !== undefined) inputs.UPPER = { block: exprToBlock(n.upper) };
+    if (n.step !== null && n.step !== undefined) inputs.STEP = { block: exprToBlock(n.step) };
+    return blk('ir_slice', {}, inputs);
+  },
+  Starred: (n) => blk('ir_starred', {}, { VALUE: { block: exprToBlock(n.value) } }),
 };
 
 // stmt IR -> block

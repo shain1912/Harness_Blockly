@@ -31,3 +31,16 @@ av: int = 1
 nv: str
 a, b = pair
 x, y, z = t
+attr = obj.x
+chain = o.a.b.c
+item = m[0]
+key = d['k']
+sl = a[1:5]
+sl2 = a[1:]
+sl3 = a[:5]
+sl4 = a[::2]
+sl5 = a[:]
+sl6 = a[1:5:2]
+star = [*a, b]
+o.x = 5
+xs[0] += 1
