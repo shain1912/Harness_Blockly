@@ -20,11 +20,11 @@ const NODE_POLICY = {
   Module: 'ROOT',
   // statements — only Assign implemented so far; the rest are the worklist (PENDING)
   FunctionDef: 'PENDING', AsyncFunctionDef: 'PENDING', ClassDef: 'PENDING', Return: 'PENDING',
-  Delete: 'PENDING', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'PENDING',
-  AsyncFor: 'PENDING', While: 'PENDING', If: 'PENDING', With: 'PENDING', AsyncWith: 'PENDING',
+  Delete: 'PENDING', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'DB',
+  AsyncFor: 'PENDING', While: 'DB', If: 'DB', With: 'PENDING', AsyncWith: 'PENDING',
   Match: 'PENDING', Raise: 'PENDING', Try: 'PENDING', TryStar: 'PENDING', Assert: 'PENDING',
-  Import: 'PENDING', ImportFrom: 'PENDING', Global: 'PENDING', Nonlocal: 'PENDING', Pass: 'PENDING',
-  Break: 'PENDING', Continue: 'PENDING', TypeAlias: 'PENDING', Expr: 'DB',
+  Import: 'PENDING', ImportFrom: 'PENDING', Global: 'PENDING', Nonlocal: 'PENDING', Pass: 'DB',
+  Break: 'DB', Continue: 'DB', TypeAlias: 'PENDING', Expr: 'DB',
   // expressions — only Name/Constant implemented so far
   BoolOp: 'DB', NamedExpr: 'PENDING', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'PENDING',
   Dict: 'DB', Set: 'DB', Await: 'PENDING', Yield: 'PENDING', YieldFrom: 'PENDING',
@@ -65,6 +65,15 @@ const OPTIONAL_DEPRECATED = ['Num', 'Str', 'Bytes', 'NameConstant', 'Ellipsis', 
 
 function blk(type, fields = {}, inputs = {}) {
   return { type, fields, inputs };
+}
+
+// A statement list -> a Blockly statement-input value (first block + next-chain), or
+// undefined when empty (so optional bodies like a missing else are simply omitted).
+function stmtStack(stmts) {
+  if (!stmts || !stmts.length) return undefined;
+  const blocks = stmts.map(stmtToBlock);
+  for (let i = 0; i < blocks.length - 1; i++) blocks[i].next = { block: blocks[i + 1] };
+  return { block: blocks[0] };
 }
 
 // A collection of element expressions (List/Tuple/Set) -> variable-arity block.
@@ -177,6 +186,33 @@ const STMT_HANDLERS = {
   // Expression statement (e.g. a bare call print(x)): wraps a value-output expression block
   // as a statement block.
   Expr: (n) => blk('ir_exprstmt', {}, { VALUE: { block: exprToBlock(n.value) } }),
+  // Control flow. body/orelse are statement-input stacks; orelse omitted when empty (no
+  // else). elif is represented as a single nested If in orelse (ast.unparse re-collapses it).
+  If: (n) => {
+    const inputs = { TEST: { block: exprToBlock(n.test) }, BODY: stmtStack(n.body) };
+    const orelse = stmtStack(n.orelse);
+    if (orelse) inputs.ORELSE = orelse;
+    return blk('ir_if', {}, inputs);
+  },
+  While: (n) => {
+    const inputs = { TEST: { block: exprToBlock(n.test) }, BODY: stmtStack(n.body) };
+    const orelse = stmtStack(n.orelse);
+    if (orelse) inputs.ORELSE = orelse;
+    return blk('ir_while', {}, inputs);
+  },
+  For: (n) => {
+    const inputs = {
+      TARGET: { block: exprToBlock(n.target) },
+      ITER: { block: exprToBlock(n.iter) },
+      BODY: stmtStack(n.body),
+    };
+    const orelse = stmtStack(n.orelse);
+    if (orelse) inputs.ORELSE = orelse;
+    return blk('ir_for', {}, inputs);
+  },
+  Pass: () => blk('ir_pass', {}, {}),
+  Break: () => blk('ir_break', {}, {}),
+  Continue: () => blk('ir_continue', {}, {}),
 };
 
 // Fail loud (never silently wrong) for a node we cannot yet turn into a block. The policy

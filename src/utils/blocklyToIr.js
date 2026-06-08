@@ -91,7 +91,33 @@ const BLOCK_TO_STMT = {
     value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null,   // optional
     simple: (b.extraState && typeof b.extraState.simple === 'number') ? b.extraState.simple : 1 }),
   ir_exprstmt: (b) => ({ type: 'Expr', value: blockToExpr(b.inputs.VALUE.block) }),
+  ir_if: (b) => ({ type: 'If', test: blockToExpr(b.inputs.TEST.block),
+    body: stmtListOrPass(b.inputs.BODY), orelse: stmtList(b.inputs.ORELSE) }),
+  ir_while: (b) => ({ type: 'While', test: blockToExpr(b.inputs.TEST.block),
+    body: stmtListOrPass(b.inputs.BODY), orelse: stmtList(b.inputs.ORELSE) }),
+  ir_for: (b) => ({ type: 'For', target: blockToExpr(b.inputs.TARGET.block),
+    iter: blockToExpr(b.inputs.ITER.block),
+    body: stmtListOrPass(b.inputs.BODY), orelse: stmtList(b.inputs.ORELSE) }),
+  ir_pass: () => ({ type: 'Pass' }),
+  ir_break: () => ({ type: 'Break' }),
+  ir_continue: () => ({ type: 'Continue' }),
 };
+
+// Walk a statement-input stack (first block + next-chain) into an IR statement list.
+function stmtList(inp) {
+  const out = [];
+  let cur = inp && inp.block;
+  while (cur) { out.push(blockToStmt(cur)); cur = cur.next && cur.next.block; }
+  return out;
+}
+
+// A mandatory suite (if/while/for body, def body, ...) cannot be empty in Python. A user
+// can leave a body block empty, though; synthesize `pass` so block->Python stays valid
+// (an empty `if x:` would be unparsable). Idempotent: round-trips back to the pass.
+function stmtListOrPass(inp) {
+  const list = stmtList(inp);
+  return list.length ? list : [{ type: 'Pass' }];
+}
 
 // Blockly omits `inputs` entirely when a block has no connected inputs (e.g. an empty
 // slice a[:] -> ir_slice with no LOWER/UPPER/STEP). Normalize so handlers can always read

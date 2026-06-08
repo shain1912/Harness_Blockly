@@ -198,6 +198,36 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // Control-flow slice (multi-line) through REAL Blockly load->save: if/elif/else,
+  // while-else, for-else, tuple targets, pass/break/continue, and nesting.
+  test('control flow survives a real Blockly load->save', async ({ page }) => {
+    const cases = [
+      'if x:\n    a()\nelif y:\n    b()\nelse:\n    c()',
+      'while x:\n    a()\nelse:\n    b()',
+      'for i in xs:\n    a()\nelse:\n    b()',
+      'for a, b in items:\n    print(a)',
+      'if x:\n    pass',
+      'while True:\n    break',
+      'for i in r:\n    continue',
+      'if x:\n    if y:\n        a()',
+    ];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push(await B.irToPython(window.__pyodide, back));
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    expect(codes.map((c) => c.replace(/\n$/, ''))).toEqual(cases);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

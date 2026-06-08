@@ -329,4 +329,40 @@ if (Blockly) {
   };
 }
 
+if (Blockly) {
+  const stmt = (b, colour) => {
+    b.setPreviousStatement(true, null);
+    b.setNextStatement(true, null);
+    b.setColour(colour);
+  };
+  Blockly.Blocks['ir_if'] = {
+    init() {
+      this.appendValueInput('TEST').appendField('if');
+      this.appendStatementInput('BODY');
+      this.appendStatementInput('ORELSE').appendField('else');
+      stmt(this, '#a0734a');
+    },
+  };
+  Blockly.Blocks['ir_while'] = {
+    init() {
+      this.appendValueInput('TEST').appendField('while');
+      this.appendStatementInput('BODY');
+      this.appendStatementInput('ORELSE').appendField('else');
+      stmt(this, '#a0734a');
+    },
+  };
+  Blockly.Blocks['ir_for'] = {
+    init() {
+      this.appendValueInput('TARGET').appendField('for');
+      this.appendValueInput('ITER').appendField('in');
+      this.appendStatementInput('BODY');
+      this.appendStatementInput('ORELSE').appendField('else');
+      stmt(this, '#a0734a');
+    },
+  };
+  Blockly.Blocks['ir_pass'] = { init() { this.appendDummyInput().appendField('pass'); stmt(this, '#888888'); } };
+  Blockly.Blocks['ir_break'] = { init() { this.appendDummyInput().appendField('break'); stmt(this, '#a0734a'); } };
+  Blockly.Blocks['ir_continue'] = { init() { this.appendDummyInput().appendField('continue'); stmt(this, '#a0734a'); } };
+}
+
 if (typeof module !== 'undefined') module.exports = {};

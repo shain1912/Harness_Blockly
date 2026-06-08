@@ -56,6 +56,17 @@ test('empty set has no literal: ir_set min-arity 1, and Set([]) fails loud', () 
   expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/empty Set/);
 });
 
+test('empty mandatory body synthesizes pass (block->IR stays valid Python)', () => {
+  // An ir_if with an empty BODY (user dragged an if with nothing inside) must become
+  // If(body=[Pass]) so it unparses to valid `if x: pass`, not an empty suite.
+  const ws = { blocks: { languageVersion: 0, blocks: [
+    { type: 'ir_if', inputs: { TEST: { block: { type: 'ir_name', fields: { ID: 'x' } } } } }] } };
+  const ir = global.BlockPyIR.blocklyToIr(ws);
+  expect(ir.body[0].type).toBe('If');
+  expect(ir.body[0].body).toEqual([{ type: 'Pass' }]);
+  expect(ir.body[0].orelse).toEqual([]);
+});
+
 test('PENDING (unimplemented) nodes fail loudly with policy status, never silently', () => {
   // Return is on the worklist (PENDING) — converting it must throw an explicit error
   // naming the node and its policy, not produce a wrong/empty block.
