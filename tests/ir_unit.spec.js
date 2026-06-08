@@ -173,6 +173,42 @@ test('With (multi-item, with/without as) and Delete (multi-target) round-trip lo
   expect(back).toEqual(IR);
 });
 
+test('IfExp (ternary) round-trips losslessly (IR -> Blockly -> IR)', () => {
+  const IR = { type: 'Module', type_ignores: [], body: [{
+    type: 'Assign', targets: [{ type: 'Name', id: 'r' }],
+    value: { type: 'IfExp',
+      test: { type: 'Name', id: 'c' },
+      body: { type: 'Name', id: 'a' },
+      orelse: { type: 'Name', id: 'b' } } }] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
+test('ListComp (multi-generator + multi-if) and DictComp round-trip losslessly', () => {
+  // comprehension is a HELPER: each generator's target/iter are inputs, its `ifs` count and
+  // is_async flag live in the block extraState gens fragment, IF<i>_<j> inputs per filter.
+  const IR = { type: 'Module', type_ignores: [], body: [
+    { type: 'Assign', targets: [{ type: 'Name', id: 'xs' }],
+      value: { type: 'ListComp',
+        elt: { type: 'Name', id: 'x' },
+        generators: [
+          { type: 'comprehension', target: { type: 'Name', id: 'x' },
+            iter: { type: 'Name', id: 'a' },
+            ifs: [{ type: 'Name', id: 'p' }, { type: 'Name', id: 'q' }], is_async: 0 },
+          { type: 'comprehension', target: { type: 'Name', id: 'y' },
+            iter: { type: 'Name', id: 'b' }, ifs: [], is_async: 0 },
+        ] } },
+    { type: 'Assign', targets: [{ type: 'Name', id: 'd' }],
+      value: { type: 'DictComp',
+        key: { type: 'Name', id: 'k' }, value: { type: 'Name', id: 'v' },
+        generators: [
+          { type: 'comprehension', target: { type: 'Name', id: 'k' },
+            iter: { type: 'Name', id: 'pairs' }, ifs: [], is_async: 0 }] } },
+  ] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
 test('multiple disconnected top-level stacks are all converted (none dropped)', () => {
   // Simulate a saved workspace with TWO separate top-level stacks.
   const stack = (id) => ({ type: 'ir_assign', extraState: { n: 1 },

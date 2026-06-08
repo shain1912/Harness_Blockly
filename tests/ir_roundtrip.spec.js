@@ -399,6 +399,40 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // SUGAR slice through REAL Blockly load->save: ternary (IfExp) and the four comprehension
+  // forms (list/set/dict/generator), incl. multiple `for` generators, multiple `if` filters,
+  // tuple targets, and a parenthesized nested ternary. comprehension is a HELPER.
+  test('ternary and comprehensions survive a real Blockly load->save', async ({ page }) => {
+    const cases = [
+      'r = a if c else b',
+      'r = (a if c else b) + 1',
+      'xs = [x for x in items]',
+      'xs = [x for x in items if x > 0]',
+      'xs = [x for x in items if x > 0 if x < 10]',
+      'm = [x + y for x in a for y in b]',
+      's = {x for x in items}',
+      'g = (x for x in items)',
+      'd = {k: v for k, v in pairs}',
+      'd = {k: v for k, v in pairs if k}',
+      'n = [x for row in matrix for x in row if x]',
+    ];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push((await B.irToPython(window.__pyodide, back)).replace(/\n$/, ''));
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

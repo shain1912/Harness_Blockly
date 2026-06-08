@@ -77,7 +77,33 @@ const BLOCK_TO_EXPR = {
     }));
     return { type: 'Call', func: blockToExpr(b.inputs.FUNC.block), args, keywords };
   },
+  ir_ifexp: (b) => ({ type: 'IfExp',
+    test: blockToExpr(b.inputs.TEST.block),
+    body: blockToExpr(b.inputs.BODY.block),
+    orelse: blockToExpr(b.inputs.ORELSE.block) }),
+  ir_listcomp: (b) => compToIr('ListComp', b, false),
+  ir_setcomp: (b) => compToIr('SetComp', b, false),
+  ir_genexp: (b) => compToIr('GeneratorExp', b, false),
+  ir_dictcomp: (b) => compToIr('DictComp', b, true),
 };
+
+// Rebuild a comprehension expr from its gens fragment + ELT/KEY/VAL, TARGET<i>/ITER<i>, and
+// IF<i>_<j> inputs. comprehension is a HELPER (no own block); is_async is carried as 0/1.
+function compToIr(typeName, b, isDict) {
+  const generators = ((b.extraState && b.extraState.gens) || []).map((g, i) => {
+    const ifs = [];
+    for (let j = 0; j < (g.ifs || 0); j++) ifs.push(blockToExpr(b.inputs['IF' + i + '_' + j].block));
+    return { type: 'comprehension',
+      target: blockToExpr(b.inputs['TARGET' + i].block),
+      iter: blockToExpr(b.inputs['ITER' + i].block),
+      ifs, is_async: g.async ? 1 : 0 };
+  });
+  if (isDict) {
+    return { type: typeName, key: blockToExpr(b.inputs.KEY.block),
+      value: blockToExpr(b.inputs.VAL.block), generators };
+  }
+  return { type: typeName, elt: blockToExpr(b.inputs.ELT.block), generators };
+}
 
 const BLOCK_TO_STMT = {
   ir_assign: (b) => {

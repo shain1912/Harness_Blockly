@@ -465,6 +465,60 @@ if (Blockly) {
 }
 
 if (Blockly) {
+  // Ternary: BODY if TEST else ORELSE.
+  Blockly.Blocks['ir_ifexp'] = {
+    init() {
+      this.appendValueInput('BODY');
+      this.appendValueInput('TEST').appendField('if');
+      this.appendValueInput('ORELSE').appendField('else');
+      this.setInputsInline(true);
+      this.setOutput(true);
+      this.setColour('#5b80a5');
+    },
+  };
+
+  // Comprehension family (list/set/gen/dict). gens_ is [{ifs:<count>, async:<bool>}] so the
+  // mutator rebuilds TARGET<i>/ITER<i>/IF<i>_<j> inputs on a real load. The element row is ELT
+  // (or KEY:VAL for dict). OPEN is the stable kept row carrying the opening bracket.
+  const OPEN = { list: '[', set: '{', gen: '(', dict: '{' };
+  const compBlockDef = (kind) => ({
+    gens_: [],
+    init() {
+      this.gens_ = [{ ifs: 0, async: false }];
+      this.appendDummyInput('OPEN').appendField(OPEN[kind]);
+      this.updateShape_();
+      this.setOutput(true);
+      this.setColour('#5b80a5');
+      this.setInputsInline(true);
+    },
+    saveExtraState() { return { gens: this.gens_ }; },
+    loadExtraState(s) {
+      this.gens_ = (s && Array.isArray(s.gens) && s.gens.length) ? s.gens : [{ ifs: 0, async: false }];
+      this.updateShape_();
+    },
+    updateShape_() {
+      this.inputList.map((inp) => inp.name).filter((nm) => nm && nm !== 'OPEN')
+        .forEach((nm) => this.removeInput(nm));
+      if (kind === 'dict') {
+        this.appendValueInput('KEY');
+        this.appendValueInput('VAL').appendField(':');
+      } else {
+        this.appendValueInput('ELT');
+      }
+      this.gens_.forEach((g, i) => {
+        this.appendValueInput('TARGET' + i).appendField(g.async ? 'async for' : 'for');
+        this.appendValueInput('ITER' + i).appendField('in');
+        for (let j = 0; j < (g.ifs || 0); j++) this.appendValueInput('IF' + i + '_' + j).appendField('if');
+      });
+    },
+  });
+  Blockly.Blocks['ir_listcomp'] = compBlockDef('list');
+  Blockly.Blocks['ir_setcomp'] = compBlockDef('set');
+  Blockly.Blocks['ir_genexp'] = compBlockDef('gen');
+  Blockly.Blocks['ir_dictcomp'] = compBlockDef('dict');
+}
+
+if (Blockly) {
   // Rebuild ANN<i>/DEF<i> inputs from a param list (shared by funcdef + lambda). Removes
   // every input except the named stable rows, then recreates the signature inputs so a real
   // Blockly load restores connections to matching names.

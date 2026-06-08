@@ -31,7 +31,7 @@ const NODE_POLICY = {
   Compare: 'DB', Call: 'DB', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'DB',
   Subscript: 'DB', Starred: 'DB', Name: 'DB', List: 'DB', Tuple: 'DB',
   // sugar (dedicated block + desugar pass) — all pending
-  IfExp: 'PENDING', ListComp: 'PENDING', SetComp: 'PENDING', DictComp: 'PENDING', GeneratorExp: 'PENDING',
+  IfExp: 'SUGAR', ListComp: 'SUGAR', SetComp: 'SUGAR', DictComp: 'SUGAR', GeneratorExp: 'SUGAR',
   // helpers (rendered as part of a parent block)
   FormattedValue: 'HELPER', Slice: 'DB', comprehension: 'HELPER', ExceptHandler: 'HELPER',
   arguments: 'HELPER', arg: 'HELPER', keyword: 'HELPER', alias: 'HELPER', withitem: 'HELPER',
@@ -248,7 +248,40 @@ const EXPR_HANDLERS = {
     });
     return { type: 'ir_call', extraState: { nargs: n.args.length, kw }, inputs };
   },
+  // SUGAR family (dedicated blocks; the desugar-as-feature pass is Phase 4). ast.unparse
+  // re-adds any needed parentheses, so precedence is preserved without tracking it here.
+  // Ternary: body if test else orelse.
+  IfExp: (n) => blk('ir_ifexp', {}, {
+    BODY: { block: exprToBlock(n.body) },
+    TEST: { block: exprToBlock(n.test) },
+    ORELSE: { block: exprToBlock(n.orelse) },
+  }),
+  ListComp: (n) => compBlock('ir_listcomp', n, false),
+  SetComp: (n) => compBlock('ir_setcomp', n, false),
+  GeneratorExp: (n) => compBlock('ir_genexp', n, false),
+  DictComp: (n) => compBlock('ir_dictcomp', n, true),
 };
+
+// Comprehension family. The element (ELT, or KEY/VAL for dict) plus N generators. comprehension
+// is a HELPER: each generator's target/iter are inputs; its filter count + is_async flag live in
+// the gens fragment (extraState), with one IF<i>_<j> input per filter. Supports nested `for`
+// (multiple generators) and chained `if` (multiple filters).
+function compBlock(type, n, isDict) {
+  const inputs = {};
+  if (isDict) {
+    inputs.KEY = { block: exprToBlock(n.key) };
+    inputs.VAL = { block: exprToBlock(n.value) };
+  } else {
+    inputs.ELT = { block: exprToBlock(n.elt) };
+  }
+  const gens = (n.generators || []).map((g, i) => {
+    inputs['TARGET' + i] = { block: exprToBlock(g.target) };
+    inputs['ITER' + i] = { block: exprToBlock(g.iter) };
+    (g.ifs || []).forEach((cond, j) => { inputs['IF' + i + '_' + j] = { block: exprToBlock(cond) }; });
+    return { ifs: (g.ifs || []).length, async: !!g.is_async };
+  });
+  return { type, extraState: { gens }, inputs };
+}
 
 // stmt IR -> block
 const STMT_HANDLERS = {
