@@ -244,6 +244,25 @@ test('Await / Yield (bare + value) / YieldFrom / NamedExpr round-trip losslessly
   }
 });
 
+test('JoinedStr / FormattedValue (conversion + nested format_spec) round-trip losslessly', () => {
+  // f"{x!s:>{w}}" — values mix Constant pieces and FormattedValues; FormattedValue is a HELPER
+  // (no standalone block: built only inside JoinedStr). conversion is an int (-1/115/114/97);
+  // format_spec is itself a JoinedStr (here with a nested FormattedValue).
+  const IR = { type: 'Module', type_ignores: [], body: [{
+    type: 'Assign', targets: [{ type: 'Name', id: 'a' }],
+    value: { type: 'JoinedStr', values: [
+      { type: 'Constant', value: 'pre ' },
+      { type: 'FormattedValue', value: { type: 'Name', id: 'x' }, conversion: 115,
+        format_spec: { type: 'JoinedStr', values: [
+          { type: 'Constant', value: '>' },
+          { type: 'FormattedValue', value: { type: 'Name', id: 'w' }, conversion: -1,
+            format_spec: null }] } },
+      { type: 'Constant', value: ' post' },
+    ] } }] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
 test('multiple disconnected top-level stacks are all converted (none dropped)', () => {
   // Simulate a saved workspace with TWO separate top-level stacks.
   const stack = (id) => ({ type: 'ir_assign', extraState: { n: 1 },

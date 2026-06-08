@@ -90,7 +90,28 @@ const BLOCK_TO_EXPR = {
   ir_yieldfrom: (b) => ({ type: 'YieldFrom', value: blockToExpr(b.inputs.VALUE.block) }),
   ir_namedexpr: (b) => ({ type: 'NamedExpr',
     target: blockToExpr(b.inputs.TARGET.block), value: blockToExpr(b.inputs.VALUE.block) }),
+  ir_joinedstr: (b) => joinedStrToIr(b),
 };
+
+// f-string inverse. FormattedValue is a HELPER (no BLOCK_TO_EXPR entry): the JoinedStr handler
+// branches on the block type rather than routing ir_formattedvalue through blockToExpr.
+function jstrBlockToValue(b) {
+  if (!b.inputs) b.inputs = {};
+  return b.type === 'ir_formattedvalue' ? fvToIr(b) : blockToExpr(b);
+}
+function joinedStrToIr(b) {
+  const n = (b.extraState && b.extraState.n) || 0;
+  const values = [];
+  for (let i = 0; i < n; i++) values.push(jstrBlockToValue(b.inputs['VAL' + i].block));
+  return { type: 'JoinedStr', values };
+}
+function fvToIr(b) {
+  const es = b.extraState || {};
+  return { type: 'FormattedValue',
+    value: blockToExpr(b.inputs.VALUE.block),
+    conversion: typeof es.conv === 'number' ? es.conv : -1,
+    format_spec: es.spec ? joinedStrToIr(b.inputs.SPEC.block) : null };
+}
 
 // Rebuild a comprehension expr from its gens fragment + ELT/KEY/VAL, TARGET<i>/ITER<i>, and
 // IF<i>_<j> inputs. comprehension is a HELPER (no own block); is_async is carried as 0/1.

@@ -548,6 +548,58 @@ if (Blockly) {
       this.setColour('#5b80a5');
     },
   };
+
+  // f-string: VAL<i> inputs are the ordered pieces (string Constants + ir_formattedvalue
+  // interpolations). itemCount_ may be 0 (empty f""). OPEN is the stable kept label row.
+  Blockly.Blocks['ir_joinedstr'] = {
+    itemCount_: 0,
+    init() {
+      this.itemCount_ = 0;
+      this.appendDummyInput('OPEN').appendField('f-str');
+      this.updateShape_();
+      this.setOutput(true);
+      this.setColour('#a55b80');
+      this.setInputsInline(true);
+    },
+    saveExtraState() { return { n: this.itemCount_ }; },
+    loadExtraState(s) {
+      this.itemCount_ = (s && typeof s.n === 'number') ? s.n : 0;
+      this.updateShape_();
+    },
+    updateShape_() {
+      this.inputList.map((inp) => inp.name).filter((nm) => nm && nm !== 'OPEN')
+        .forEach((nm) => this.removeInput(nm));
+      for (let i = 0; i < this.itemCount_; i++) this.appendValueInput('VAL' + i);
+    },
+  };
+
+  // FormattedValue (HELPER, only inside ir_joinedstr): VALUE expr + optional conversion label
+  // (!s/!r/!a, conv_ int) + optional SPEC (a nested ir_joinedstr format spec). VALUE is kept.
+  const CONV = { 115: '!s', 114: '!r', 97: '!a' };
+  Blockly.Blocks['ir_formattedvalue'] = {
+    conv_: -1, spec_: false,
+    init() {
+      this.conv_ = -1; this.spec_ = false;
+      this.appendValueInput('VALUE').appendField('{');
+      this.updateShape_();
+      this.setOutput(true);
+      this.setColour('#a55b80');
+      this.setInputsInline(true);
+    },
+    saveExtraState() { return { conv: this.conv_, spec: this.spec_ }; },
+    loadExtraState(s) {
+      this.conv_ = (s && typeof s.conv === 'number') ? s.conv : -1;
+      this.spec_ = !!(s && s.spec);
+      this.updateShape_();
+    },
+    updateShape_() {
+      this.inputList.map((inp) => inp.name).filter((nm) => nm && nm !== 'VALUE')
+        .forEach((nm) => this.removeInput(nm));
+      const label = CONV[this.conv_];
+      if (label) this.appendDummyInput('CONVROW').appendField(label);
+      if (this.spec_) this.appendValueInput('SPEC').appendField(':');
+    },
+  };
 }
 
 if (Blockly) {

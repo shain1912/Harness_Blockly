@@ -470,6 +470,43 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // f-string slice through REAL Blockly load->save. f-string unparse formatting differs across
+  // CPython versions, so this asserts the round-trip PROPERTY (unparse(ir) === unparse(back))
+  // rather than input==output: plain, single/multiple interpolations, conversions (!r/!s/!a),
+  // format specs (static + nested {w}), the `=` debug form, and an empty f-string.
+  // FormattedValue is a HELPER (only inside JoinedStr.values / a nested format_spec).
+  test('f-strings survive a real Blockly load->save (round-trip property)', async ({ page }) => {
+    const cases = [
+      'a = f"plain"',
+      'a = f""',
+      'a = f"hi {name}"',
+      'a = f"{x}{y}"',
+      'a = f"{x!r}"',
+      'a = f"{x!s} and {y!a}"',
+      'a = f"{x:.2f}"',
+      'a = f"{x:{w}}"',
+      'a = f"{x!s:>{w}.{p}f}"',
+      'a = f"{x = }"',
+      'a = f"pre {obj.attr[0]} post"',
+    ];
+    const pairs = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push({ a: await B.irToPython(window.__pyodide, ir),
+            b: await B.irToPython(window.__pyodide, back) });
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    for (const { a, b } of pairs) expect(b).toBe(a);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

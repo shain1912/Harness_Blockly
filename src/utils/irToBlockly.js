@@ -28,7 +28,7 @@ const NODE_POLICY = {
   // expressions — only Name/Constant implemented so far
   BoolOp: 'DB', NamedExpr: 'DB', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'DB',
   Dict: 'DB', Set: 'DB', Await: 'DB', Yield: 'DB', YieldFrom: 'DB',
-  Compare: 'DB', Call: 'DB', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'DB',
+  Compare: 'DB', Call: 'DB', JoinedStr: 'DB', Constant: 'DB', Attribute: 'DB',
   Subscript: 'DB', Starred: 'DB', Name: 'DB', List: 'DB', Tuple: 'DB',
   // sugar (dedicated block + desugar pass) — all pending
   IfExp: 'SUGAR', ListComp: 'SUGAR', SetComp: 'SUGAR', DictComp: 'SUGAR', GeneratorExp: 'SUGAR',
@@ -296,7 +296,30 @@ const EXPR_HANDLERS = {
   YieldFrom: (n) => blk('ir_yieldfrom', {}, { VALUE: { block: exprToBlock(n.value) } }),
   NamedExpr: (n) => blk('ir_namedexpr', {},
     { TARGET: { block: exprToBlock(n.target) }, VALUE: { block: exprToBlock(n.value) } }),
+  // f-string. values is a mix of Constant string pieces and FormattedValue interpolations.
+  JoinedStr: (n) => joinedStrBlock(n),
 };
+
+// f-string helpers. FormattedValue is a HELPER (no EXPR_HANDLERS entry / never dispatched at
+// top level): it appears only inside a JoinedStr's values or a nested format_spec, so the
+// JoinedStr builder special-cases it rather than routing through exprToBlock.
+function jstrValueToBlock(v) {
+  return v.type === 'FormattedValue' ? fvBlock(v) : exprToBlock(v);
+}
+function joinedStrBlock(n) {
+  const inputs = {};
+  (n.values || []).forEach((v, i) => { inputs['VAL' + i] = { block: jstrValueToBlock(v) }; });
+  return { type: 'ir_joinedstr', extraState: { n: (n.values || []).length }, inputs };
+}
+// FormattedValue: the interpolated VALUE expr, an int conversion (-1 none / 115 !s / 114 !r /
+// 97 !a) carried in extraState, and an optional format_spec which is itself a JoinedStr (SPEC).
+function fvBlock(fv) {
+  const inputs = { VALUE: { block: exprToBlock(fv.value) } };
+  const hasSpec = fv.format_spec !== null && fv.format_spec !== undefined;
+  if (hasSpec) inputs.SPEC = { block: joinedStrBlock(fv.format_spec) };
+  return { type: 'ir_formattedvalue',
+    extraState: { conv: fv.conversion, spec: hasSpec }, inputs };
+}
 
 // Comprehension family. The element (ELT, or KEY/VAL for dict) plus N generators. comprehension
 // is a HELPER: each generator's target/iter are inputs; its filter count + is_async flag live in
