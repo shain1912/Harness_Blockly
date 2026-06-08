@@ -73,9 +73,9 @@ test.describe('raw=0 coverage', () => {
   });
 
   // Worklist definition-of-done: no PENDING nodes remain (every planned node implemented).
-  // RED until the worklist completes — marked fixme so it tracks progress without breaking
-  // the suite; the message prints the remaining worklist. Remove `.fixme` when it goes green.
-  test.fixme('no PENDING nodes remain (node-family worklist complete)', async ({ page }) => {
+  // Now GREEN — the full node-family worklist (#1–#16) is complete; raw=0 is achieved for the
+  // closed CPython-3.12 set. If a future node regresses to PENDING this turns RED and prints it.
+  test('no PENDING nodes remain (node-family worklist complete)', async ({ page }) => {
     const policy = await page.evaluate(() => window.BlockPyIR.NODE_POLICY);
     const pending = Object.entries(policy).filter(([, p]) => p === 'PENDING').map(([n]) => n);
     expect(pending, `remaining worklist (${pending.length}): ${pending.join(', ')}`).toEqual([]);

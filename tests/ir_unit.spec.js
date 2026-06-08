@@ -99,13 +99,13 @@ test('handlerless try without a valid finally form fails loud (invalid Python, n
   expect(() => global.BlockPyIR.blocklyToIr(tryElseNoExcept)).toThrow(/must have a finally and no else/);
 });
 
-test('PENDING (unimplemented) nodes fail loudly with policy status, never silently', () => {
-  // TypeAlias is on the worklist (PENDING, #16) — converting it must throw an explicit error
-  // naming the node and its policy, not produce a wrong/empty block.
+test('unmapped nodes fail loudly with policy status, never silently', () => {
+  // The worklist is complete (no PENDING nodes remain), but the fail-loud invariant endures:
+  // any node without a handler must throw an explicit error naming the node and its policy,
+  // never produce a wrong/empty block. An unknown node type reports policy=UNCATEGORIZED.
   const mod = { type: 'Module', type_ignores: [],
-    body: [{ type: 'TypeAlias', name: { type: 'Name', id: 'X' }, type_params: [],
-      value: { type: 'Name', id: 'int' } }] };
-  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/TypeAlias \(policy=PENDING\)/);
+    body: [{ type: 'NotARealStatement' }] };
+  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/NotARealStatement \(policy=UNCATEGORIZED\)/);
 });
 
 test('ClassDef (bases + keyword + body) round-trips losslessly (IR -> Blockly -> IR)', () => {
@@ -295,6 +295,21 @@ test('Match: all 8 pattern nodes + match_case (guard, multi-case) round-trip los
       { type: 'match_case', pattern: { type: 'MatchAs', name: null, pattern: null },
         guard: null, body: [{ type: 'Pass' }] },
     ] }] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
+test('TypeAlias (plain + PEP-695 type params with bound) round-trips losslessly', () => {
+  // TypeAlias.name is always a bare Name; type_params reuse the shared tparams fragment (the
+  // block layer drops ctx, as for every Store-context Name). TypeVar/ParamSpec/TypeVarTuple
+  // are HELPERs encoded in the tparams fragment, never their own blocks.
+  const IR = { type: 'Module', type_ignores: [], body: [
+    { type: 'TypeAlias', name: { type: 'Name', id: 'X' }, type_params: [],
+      value: { type: 'Name', id: 'int' } },
+    { type: 'TypeAlias', name: { type: 'Name', id: 'P' },
+      type_params: [{ type: 'TypeVar', name: 'T', bound: { type: 'Name', id: 'int' } }],
+      value: { type: 'Name', id: 'T' } },
+  ] };
   const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
   expect(back).toEqual(IR);
 });

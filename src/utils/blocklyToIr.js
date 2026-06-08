@@ -209,6 +209,10 @@ const BLOCK_TO_STMT = {
       type_params: fragmentToTparams(es.tparams || [], b.inputs) };
   },
   ir_return: (b) => ({ type: 'Return', value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null }),
+  ir_typealias: (b) => ({ type: 'TypeAlias',
+    name: { type: 'Name', id: b.fields.NAME },
+    type_params: fragmentToTparams((b.extraState && b.extraState.tparams) || [], b.inputs),
+    value: blockToExpr(b.inputs.VALUE.block) }),
   ir_global: (b) => ({ type: 'Global', names: b.fields.NAMES.split(', ') }),
   ir_nonlocal: (b) => ({ type: 'Nonlocal', names: b.fields.NAMES.split(', ') }),
   ir_import: (b) => ({ type: 'Import', names: fieldToAliases(b.fields.NAMES) }),

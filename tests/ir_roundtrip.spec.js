@@ -545,6 +545,36 @@ test.describe('AST-IR bridge round-trip', () => {
     for (const { a, b } of pairs) expect(b).toBe(a);
   });
 
+  // TypeAlias slice (PEP-695 `type X[T] = ...`) through REAL Blockly load->save. type_params
+  // reuse the shared tparams fragment (TypeVar/ParamSpec/TypeVarTuple are HELPERs). Property
+  // comparison (unparse(ir)===unparse(back)) since `tuple[*Ts]` normalizes to `tuple[*Ts,]`.
+  test('type aliases survive a real Blockly load->save (round-trip property)', async ({ page }) => {
+    const cases = [
+      'type X = int',
+      'type Alias = list[int]',
+      'type V[T] = list[T]',
+      'type P[T: int] = T',
+      'type Cb[**P] = int',
+      'type Ts[*Ts] = tuple[*Ts]',
+    ];
+    const pairs = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push({ a: await B.irToPython(window.__pyodide, ir),
+            b: await B.irToPython(window.__pyodide, back) });
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    for (const { a, b } of pairs) expect(b).toBe(a);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

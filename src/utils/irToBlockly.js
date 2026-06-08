@@ -15,22 +15,23 @@
 // SKIP = abstract base / parse-mode root / ctx / deprecated.
 // The ir_coverage test asserts: every Pyodide-3.12 node appears here (no silent gap), and
 // every DB/SUGAR node actually has a handler (so a node is only marked DB/SUGAR once it
-// truly round-trips). Worklist is done when no PENDING remain.
+// truly round-trips). The worklist (#1–#16) is complete: no PENDING entries remain (raw=0
+// achieved). PENDING stays documented above as the regression signal if a node is ever added.
 const NODE_POLICY = {
   Module: 'ROOT',
-  // statements — only Assign implemented so far; the rest are the worklist (PENDING)
+  // statements
   FunctionDef: 'DB', AsyncFunctionDef: 'DB', ClassDef: 'DB', Return: 'DB',
   Delete: 'DB', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'DB',
   AsyncFor: 'DB', While: 'DB', If: 'DB', With: 'DB', AsyncWith: 'DB',
   Match: 'DB', Raise: 'DB', Try: 'DB', TryStar: 'DB', Assert: 'DB',
   Import: 'DB', ImportFrom: 'DB', Global: 'DB', Nonlocal: 'DB', Pass: 'DB',
-  Break: 'DB', Continue: 'DB', TypeAlias: 'PENDING', Expr: 'DB',
-  // expressions — only Name/Constant implemented so far
+  Break: 'DB', Continue: 'DB', TypeAlias: 'DB', Expr: 'DB',
+  // expressions
   BoolOp: 'DB', NamedExpr: 'DB', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'DB',
   Dict: 'DB', Set: 'DB', Await: 'DB', Yield: 'DB', YieldFrom: 'DB',
   Compare: 'DB', Call: 'DB', JoinedStr: 'DB', Constant: 'DB', Attribute: 'DB',
   Subscript: 'DB', Starred: 'DB', Name: 'DB', List: 'DB', Tuple: 'DB',
-  // sugar (dedicated block + desugar pass) — all pending
+  // sugar (dedicated block now; the desugar-as-feature pass is Phase 4)
   IfExp: 'SUGAR', ListComp: 'SUGAR', SetComp: 'SUGAR', DictComp: 'SUGAR', GeneratorExp: 'SUGAR',
   // helpers (rendered as part of a parent block)
   FormattedValue: 'HELPER', Slice: 'DB', comprehension: 'HELPER', ExceptHandler: 'HELPER',
@@ -487,6 +488,14 @@ const STMT_HANDLERS = {
     if (n.value !== null && n.value !== undefined) inputs.VALUE = { block: exprToBlock(n.value) };
     return blk('ir_return', {}, inputs);
   },
+  // type X[T] = value (PEP-695). name is always a bare identifier (NAME field); type_params
+  // reuse the shared tparams fragment (TypeVar/ParamSpec/TypeVarTuple HELPERs); value is an expr.
+  TypeAlias: (n) => {
+    const inputs = {};
+    const tparams = tparamsFragment(n.type_params, inputs);
+    inputs.VALUE = { block: exprToBlock(n.value) };
+    return { type: 'ir_typealias', fields: { NAME: n.name.id }, extraState: { tparams }, inputs };
+  },
   Global: (n) => blk('ir_global', { NAMES: n.names.join(', ') }, {}),
   Nonlocal: (n) => blk('ir_nonlocal', { NAMES: n.names.join(', ') }, {}),
   // alias is a HELPER node (no own block): each is encoded as "name" or "name as asname".
@@ -506,8 +515,9 @@ function aliasesToField(names) {
   return (names || []).map((a) => (a.asname ? a.name + ' as ' + a.asname : a.name)).join(', ');
 }
 
-// Fail loud (never silently wrong) for a node we cannot yet turn into a block. The policy
-// status makes the gap explicit: PENDING = on the worklist, not yet implemented.
+// Fail loud (never silently wrong) for a node with no block handler. The worklist is complete,
+// so this is now a regression guard: it surfaces the node + its policy (UNCATEGORIZED for an
+// unknown node, or PENDING if one is ever reintroduced) instead of emitting a wrong/empty block.
 function noHandler(kind, type) {
   const status = NODE_POLICY[type] || 'UNCATEGORIZED';
   throw new Error(`irToBlockly: no ${kind} handler for ${type} (policy=${status})`);

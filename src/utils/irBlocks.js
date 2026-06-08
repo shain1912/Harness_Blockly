@@ -773,6 +773,34 @@ if (Blockly) {
       this.setColour('#888888');
     },
   };
+  // type NAME[<tparams>] = VALUE (PEP-695). tparams_ mirrors funcdef/classdef; NAMEROW is the
+  // stable kept row. The TPB<i>/TPD<i> tparam inputs precede the VALUE expr.
+  Blockly.Blocks['ir_typealias'] = {
+    tparams_: [],
+    init() {
+      this.tparams_ = [];
+      this.appendDummyInput('NAMEROW').appendField('type')
+        .appendField(new Blockly.FieldTextInput('X'), 'NAME');
+      this.updateShape_();
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#9a6a8a');
+    },
+    saveExtraState() { return { tparams: this.tparams_ }; },
+    loadExtraState(s) {
+      this.tparams_ = (s && Array.isArray(s.tparams)) ? s.tparams : [];
+      this.updateShape_();
+    },
+    updateShape_() {
+      this.inputList.map((inp) => inp.name).filter((nm) => nm && nm !== 'NAMEROW')
+        .forEach((nm) => this.removeInput(nm));
+      this.tparams_.forEach((t, i) => {
+        if (t.bound) this.appendValueInput('TPB' + i).appendField('[' + t.name + ':');
+        if (t.def) this.appendValueInput('TPD' + i).appendField('[' + t.name + '=');
+      });
+      this.appendValueInput('VALUE').appendField('=');
+    },
+  };
   Blockly.Blocks['ir_nonlocal'] = {
     init() {
       this.appendDummyInput().appendField('nonlocal')
