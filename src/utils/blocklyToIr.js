@@ -137,7 +137,23 @@ const BLOCK_TO_STMT = {
   ir_return: (b) => ({ type: 'Return', value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null }),
   ir_global: (b) => ({ type: 'Global', names: b.fields.NAMES.split(', ') }),
   ir_nonlocal: (b) => ({ type: 'Nonlocal', names: b.fields.NAMES.split(', ') }),
+  ir_import: (b) => ({ type: 'Import', names: fieldToAliases(b.fields.NAMES) }),
+  ir_importfrom: (b) => {
+    const raw = b.fields.MODULE || '';
+    const level = raw.match(/^\.*/)[0].length;     // leading dots = relative-import depth
+    const module = raw.slice(level) || null;       // remainder is the module ('' -> None)
+    return { type: 'ImportFrom', module, names: fieldToAliases(b.fields.NAMES), level };
+  },
 };
+
+// Decode the comma-joined NAMES field back into alias HELPER nodes (inverse of
+// aliasesToField). Each clause is "name" or "name as asname"; `*` is a valid name.
+function fieldToAliases(s) {
+  return (s || '').split(',').map((p) => p.trim()).filter(Boolean).map((part) => {
+    const m = part.split(/\s+as\s+/);
+    return { type: 'alias', name: m[0].trim(), asname: m.length > 1 ? m[1].trim() : null };
+  });
+}
 
 // Walk a statement-input stack (first block + next-chain) into an IR statement list.
 function stmtList(inp) {

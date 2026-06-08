@@ -510,6 +510,28 @@ if (Blockly) {
       this.setColour('#888888');
     },
   };
+  // import a, b as c — alias list is a single text field (alias has no own block).
+  Blockly.Blocks['ir_import'] = {
+    init() {
+      this.appendDummyInput().appendField('import')
+        .appendField(new Blockly.FieldTextInput('os'), 'NAMES');
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#888888');
+    },
+  };
+  // from <MODULE> import <NAMES> — MODULE carries leading dots for relative imports.
+  Blockly.Blocks['ir_importfrom'] = {
+    init() {
+      this.appendDummyInput().appendField('from')
+        .appendField(new Blockly.FieldTextInput('os'), 'MODULE')
+        .appendField('import')
+        .appendField(new Blockly.FieldTextInput('path'), 'NAMES');
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#888888');
+    },
+  };
 }
 
 if (typeof module !== 'undefined') module.exports = {};

@@ -23,7 +23,7 @@ const NODE_POLICY = {
   Delete: 'PENDING', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'DB',
   AsyncFor: 'PENDING', While: 'DB', If: 'DB', With: 'PENDING', AsyncWith: 'PENDING',
   Match: 'PENDING', Raise: 'PENDING', Try: 'PENDING', TryStar: 'PENDING', Assert: 'PENDING',
-  Import: 'PENDING', ImportFrom: 'PENDING', Global: 'DB', Nonlocal: 'DB', Pass: 'DB',
+  Import: 'DB', ImportFrom: 'DB', Global: 'DB', Nonlocal: 'DB', Pass: 'DB',
   Break: 'DB', Continue: 'DB', TypeAlias: 'PENDING', Expr: 'DB',
   // expressions — only Name/Constant implemented so far
   BoolOp: 'DB', NamedExpr: 'PENDING', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'DB',
@@ -302,7 +302,22 @@ const STMT_HANDLERS = {
   },
   Global: (n) => blk('ir_global', { NAMES: n.names.join(', ') }, {}),
   Nonlocal: (n) => blk('ir_nonlocal', { NAMES: n.names.join(', ') }, {}),
+  // alias is a HELPER node (no own block): each is encoded as "name" or "name as asname".
+  // A dotted name (os.path) and identifier asname never contain ',' or ' as ', so the
+  // comma-joined field round-trips losslessly. `import *` is just an alias named '*'.
+  Import: (n) => blk('ir_import', { NAMES: aliasesToField(n.names) }, {}),
+  // module + relative-import level (`from .. import x`) are folded into one MODULE field as
+  // leading dots + module text: level=2,module='pkg' -> '..pkg'; level=1,module=None -> '.'.
+  ImportFrom: (n) => blk('ir_importfrom', {
+    MODULE: '.'.repeat(n.level || 0) + (n.module || ''),
+    NAMES: aliasesToField(n.names),
+  }, {}),
 };
+
+// Encode an alias list (Import/ImportFrom names) into the comma-joined NAMES field text.
+function aliasesToField(names) {
+  return (names || []).map((a) => (a.asname ? a.name + ' as ' + a.asname : a.name)).join(', ');
+}
 
 // Fail loud (never silently wrong) for a node we cannot yet turn into a block. The policy
 // status makes the gap explicit: PENDING = on the worklist, not yet implemented.

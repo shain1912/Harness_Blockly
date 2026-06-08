@@ -91,6 +91,23 @@ test('ClassDef (bases + keyword + body) round-trips losslessly (IR -> Blockly ->
   expect(back).toEqual(IR);
 });
 
+test('Import / ImportFrom round-trip losslessly incl. asname and relative level (IR -> Blockly -> IR)', () => {
+  // alias is a HELPER (no block): names + asnames live in the NAMES field; ImportFrom also
+  // carries module + relative-import level (encoded as leading dots in the MODULE field).
+  const IR = { type: 'Module', type_ignores: [], body: [
+    { type: 'Import', names: [
+      { type: 'alias', name: 'os.path', asname: 'p' },
+      { type: 'alias', name: 'sys', asname: null }] },
+    { type: 'ImportFrom', module: 'pkg', level: 2, names: [
+      { type: 'alias', name: 'a', asname: 'b' },
+      { type: 'alias', name: 'c', asname: null }] },
+    { type: 'ImportFrom', module: null, level: 1, names: [
+      { type: 'alias', name: 'x', asname: null }] },
+  ] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
 test('multiple disconnected top-level stacks are all converted (none dropped)', () => {
   // Simulate a saved workspace with TWO separate top-level stacks.
   const stack = (id) => ({ type: 'ir_assign', extraState: { n: 1 },

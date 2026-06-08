@@ -297,6 +297,43 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // Imports slice through REAL Blockly load->save: plain/dotted/aliased imports, multi-name
+  // imports, from-imports with aliases, star import, and relative (level) imports with and
+  // without a module. alias is a HELPER node (encoded in the NAMES field, no own block).
+  test('imports survive a real Blockly load->save', async ({ page }) => {
+    const cases = [
+      'import os',
+      'import os, sys',
+      'import os.path',
+      'import numpy as np',
+      'import os.path as p',
+      'from os import path',
+      'from os import path, sep',
+      'from os import path as p',
+      'from os import name as n, sep as s',
+      'from . import x',
+      'from .mod import y',
+      'from ..pkg import z',
+      'from .. import x',
+      'from os import *',
+    ];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push((await B.irToPython(window.__pyodide, back)).replace(/\n$/, ''));
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.
