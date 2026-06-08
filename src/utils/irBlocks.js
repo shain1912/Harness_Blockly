@@ -280,4 +280,53 @@ if (Blockly) {
   };
 }
 
+if (Blockly) {
+  // Expression statement: a value block used as a statement (print(x)).
+  Blockly.Blocks['ir_exprstmt'] = {
+    init() {
+      this.appendValueInput('VALUE');
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#6a8a5b');
+    },
+  };
+  // Call: FUNC + nargs_ positional inputs + kw_ keyword inputs. Keyword names (and the **
+  // marker as null) live in extraState so they survive a real save/load; the keyword values
+  // are KW* inputs. Rebuilt before connections are restored on load.
+  Blockly.Blocks['ir_call'] = {
+    nargs_: 0,
+    kw_: [],
+    init() {
+      this.nargs_ = 0;
+      this.kw_ = [];
+      this.updateShape_();
+      this.setOutput(true);
+      this.setColour('#6a8a5b');
+      this.setInputsInline(true);
+    },
+    saveExtraState() { return { nargs: this.nargs_, kw: this.kw_ }; },
+    loadExtraState(state) {
+      this.nargs_ = (state && typeof state.nargs === 'number') ? state.nargs : 0;
+      this.kw_ = (state && Array.isArray(state.kw)) ? state.kw : [];
+      this.updateShape_();
+    },
+    updateShape_() {
+      if (this.getInput('FUNC')) this.removeInput('FUNC');
+      let i = 0;
+      while (this.getInput('ARG' + i)) { this.removeInput('ARG' + i); i++; }
+      i = 0;
+      while (this.getInput('KW' + i)) { this.removeInput('KW' + i); i++; }
+      this.appendValueInput('FUNC');
+      for (let t = 0; t < this.nargs_; t++) {
+        this.appendValueInput('ARG' + t).appendField(t === 0 ? '(' : ',');
+      }
+      for (let t = 0; t < this.kw_.length; t++) {
+        const name = this.kw_[t];
+        const label = (name === null || name === undefined) ? '**' : name + '=';
+        this.appendValueInput('KW' + t).appendField((t === 0 && this.nargs_ === 0) ? '(' + label : ',' + label);
+      }
+    },
+  };
+}
+
 if (typeof module !== 'undefined') module.exports = {};

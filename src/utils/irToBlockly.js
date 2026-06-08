@@ -24,11 +24,11 @@ const NODE_POLICY = {
   AsyncFor: 'PENDING', While: 'PENDING', If: 'PENDING', With: 'PENDING', AsyncWith: 'PENDING',
   Match: 'PENDING', Raise: 'PENDING', Try: 'PENDING', TryStar: 'PENDING', Assert: 'PENDING',
   Import: 'PENDING', ImportFrom: 'PENDING', Global: 'PENDING', Nonlocal: 'PENDING', Pass: 'PENDING',
-  Break: 'PENDING', Continue: 'PENDING', TypeAlias: 'PENDING', Expr: 'PENDING',
+  Break: 'PENDING', Continue: 'PENDING', TypeAlias: 'PENDING', Expr: 'DB',
   // expressions — only Name/Constant implemented so far
   BoolOp: 'DB', NamedExpr: 'PENDING', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'PENDING',
   Dict: 'DB', Set: 'DB', Await: 'PENDING', Yield: 'PENDING', YieldFrom: 'PENDING',
-  Compare: 'DB', Call: 'PENDING', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'DB',
+  Compare: 'DB', Call: 'DB', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'DB',
   Subscript: 'DB', Starred: 'DB', Name: 'DB', List: 'DB', Tuple: 'DB',
   // sugar (dedicated block + desugar pass) — all pending
   IfExp: 'PENDING', ListComp: 'PENDING', SetComp: 'PENDING', DictComp: 'PENDING', GeneratorExp: 'PENDING',
@@ -133,6 +133,19 @@ const EXPR_HANDLERS = {
     return blk('ir_slice', {}, inputs);
   },
   Starred: (n) => blk('ir_starred', {}, { VALUE: { block: exprToBlock(n.value) } }),
+  // Call: func + N positional args (may include *a Starred) + M keywords. Each keyword is
+  // (arg, value); arg=null encodes ** unpacking. arg names + arity live in extraState; the
+  // keyword VALUES are KW* inputs. This is the Tier-B representation for any library call.
+  Call: (n) => {
+    const inputs = { FUNC: { block: exprToBlock(n.func) } };
+    n.args.forEach((a, i) => { inputs['ARG' + i] = { block: exprToBlock(a) }; });
+    const kw = [];
+    n.keywords.forEach((k, i) => {
+      kw.push(k.arg === null || k.arg === undefined ? null : k.arg);
+      inputs['KW' + i] = { block: exprToBlock(k.value) };
+    });
+    return { type: 'ir_call', extraState: { nargs: n.args.length, kw }, inputs };
+  },
 };
 
 // stmt IR -> block
@@ -161,6 +174,9 @@ const STMT_HANDLERS = {
     if (n.value !== null && n.value !== undefined) inputs.VALUE = { block: exprToBlock(n.value) };
     return { type: 'ir_annassign', extraState: { simple: n.simple }, inputs };
   },
+  // Expression statement (e.g. a bare call print(x)): wraps a value-output expression block
+  // as a statement block.
+  Expr: (n) => blk('ir_exprstmt', {}, { VALUE: { block: exprToBlock(n.value) } }),
 };
 
 // Fail loud (never silently wrong) for a node we cannot yet turn into a block. The policy

@@ -44,3 +44,12 @@ sl6 = a[1:5:2]
 star = [*a, b]
 o.x = 5
 xs[0] += 1
+print('hi')
+f()
+f(1, 2)
+f(x=1)
+obj.m(1)
+g(h(1))
+r = len(xs)
+es = set()
+mixed = f(1, *a, x=2, **d)

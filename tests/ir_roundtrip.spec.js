@@ -176,6 +176,28 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // Calls slice (Tier B) through REAL Blockly load->save: no-arg, positional, keyword,
+  // *args/**kwargs, method calls, nesting, and a call-as-statement (print).
+  test('calls survive a real Blockly load->save', async ({ page }) => {
+    const cases = ["print('hi')", 'f()', 'f(1, 2)', 'f(x=1)', 'obj.m(1)', 'g(h(1))',
+      'r = len(xs)', 'es = set()', 'mixed = f(1, *a, x=2, **d)'];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push((await B.irToPython(window.__pyodide, back)).trim());
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

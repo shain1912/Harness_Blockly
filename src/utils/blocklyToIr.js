@@ -64,6 +64,16 @@ const BLOCK_TO_EXPR = {
     upper: b.inputs.UPPER ? blockToExpr(b.inputs.UPPER.block) : null,
     step: b.inputs.STEP ? blockToExpr(b.inputs.STEP.block) : null }),
   ir_starred: (b) => ({ type: 'Starred', value: blockToExpr(b.inputs.VALUE.block) }),
+  ir_call: (b) => {
+    const nargs = (b.extraState && b.extraState.nargs) || 0;
+    const kw = (b.extraState && b.extraState.kw) || [];
+    const args = [];
+    for (let i = 0; i < nargs; i++) args.push(blockToExpr(b.inputs['ARG' + i].block));
+    const keywords = kw.map((name, i) => ({
+      type: 'keyword', arg: name, value: blockToExpr(b.inputs['KW' + i].block),
+    }));
+    return { type: 'Call', func: blockToExpr(b.inputs.FUNC.block), args, keywords };
+  },
 };
 
 const BLOCK_TO_STMT = {
@@ -80,6 +90,7 @@ const BLOCK_TO_STMT = {
     annotation: blockToExpr(b.inputs.ANNOTATION.block),
     value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null,   // optional
     simple: (b.extraState && typeof b.extraState.simple === 'number') ? b.extraState.simple : 1 }),
+  ir_exprstmt: (b) => ({ type: 'Expr', value: blockToExpr(b.inputs.VALUE.block) }),
 };
 
 // Blockly omits `inputs` entirely when a block has no connected inputs (e.g. an empty
