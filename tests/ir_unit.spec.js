@@ -100,11 +100,11 @@ test('handlerless try without a valid finally form fails loud (invalid Python, n
 });
 
 test('PENDING (unimplemented) nodes fail loudly with policy status, never silently', () => {
-  // AsyncWith is on the worklist (PENDING, #13 async) — converting it must throw an explicit
-  // error naming the node and its policy, not produce a wrong/empty block.
+  // Match is on the worklist (PENDING, #15) — converting it must throw an explicit error
+  // naming the node and its policy, not produce a wrong/empty block.
   const mod = { type: 'Module', type_ignores: [],
-    body: [{ type: 'AsyncWith', items: [], body: [{ type: 'Pass' }] }] };
-  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/AsyncWith \(policy=PENDING\)/);
+    body: [{ type: 'Match', subject: { type: 'Name', id: 'x' }, cases: [] }] };
+  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/Match \(policy=PENDING\)/);
 });
 
 test('ClassDef (bases + keyword + body) round-trips losslessly (IR -> Blockly -> IR)', () => {
@@ -207,6 +207,41 @@ test('ListComp (multi-generator + multi-if) and DictComp round-trip losslessly',
   ] };
   const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
   expect(back).toEqual(IR);
+});
+
+test('async statements (AsyncFunctionDef/AsyncFor/AsyncWith) round-trip losslessly', () => {
+  // Async-ness is encoded in the block type (ir_asyncfuncdef / ir_asyncfor / ir_asyncwith),
+  // reusing the FunctionDef/For/With shapes.
+  const fnArgs = { type: 'arguments', posonlyargs: [], args: [], vararg: null,
+    kwonlyargs: [], kw_defaults: [], kwarg: null, defaults: [] };
+  const IR = { type: 'Module', type_ignores: [], body: [{
+    type: 'AsyncFunctionDef', name: 'f', args: fnArgs, decorator_list: [],
+    returns: null, type_params: [], body: [
+      { type: 'AsyncFor', target: { type: 'Name', id: 'x' }, iter: { type: 'Name', id: 'it' },
+        body: [{ type: 'Pass' }], orelse: [] },
+      { type: 'AsyncWith', items: [
+        { type: 'withitem', context_expr: { type: 'Name', id: 'cm' },
+          optional_vars: { type: 'Name', id: 'c' } }], body: [{ type: 'Pass' }] },
+    ] }] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
+test('Await / Yield (bare + value) / YieldFrom / NamedExpr round-trip losslessly', () => {
+  const expr = (e) => ({ type: 'Module', type_ignores: [],
+    body: [{ type: 'Expr', value: e }] });
+  const cases = [
+    { type: 'Await', value: { type: 'Name', id: 'x' } },
+    { type: 'Yield', value: null },
+    { type: 'Yield', value: { type: 'Constant', value: 1 } },
+    { type: 'YieldFrom', value: { type: 'Name', id: 'xs' } },
+    { type: 'NamedExpr', target: { type: 'Name', id: 'n' }, value: { type: 'Constant', value: 5 } },
+  ];
+  for (const e of cases) {
+    const IR = expr(e);
+    const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+    expect(back).toEqual(IR);
+  }
 });
 
 test('multiple disconnected top-level stacks are all converted (none dropped)', () => {

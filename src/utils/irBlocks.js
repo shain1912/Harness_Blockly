@@ -351,15 +351,18 @@ if (Blockly) {
       stmt(this, '#a0734a');
     },
   };
-  Blockly.Blocks['ir_for'] = {
+  // For / AsyncFor share one shape; async-ness is the block type (the factory's isAsync const).
+  const forDef = (isAsync) => ({
     init() {
-      this.appendValueInput('TARGET').appendField('for');
+      this.appendValueInput('TARGET').appendField(isAsync ? 'async for' : 'for');
       this.appendValueInput('ITER').appendField('in');
       this.appendStatementInput('BODY');
       this.appendStatementInput('ORELSE').appendField('else');
       stmt(this, '#a0734a');
     },
-  };
+  });
+  Blockly.Blocks['ir_for'] = forDef(false);
+  Blockly.Blocks['ir_asyncfor'] = forDef(true);
   Blockly.Blocks['ir_pass'] = { init() { this.appendDummyInput().appendField('pass'); stmt(this, '#888888'); } };
   Blockly.Blocks['ir_break'] = { init() { this.appendDummyInput().appendField('break'); stmt(this, '#a0734a'); } };
   Blockly.Blocks['ir_continue'] = { init() { this.appendDummyInput().appendField('continue'); stmt(this, '#a0734a'); } };
@@ -407,7 +410,8 @@ if (Blockly) {
     },
   };
   // with CTX [as VAR], ...: BODY — items_ is [{as}], so save/load rebuilds CTX<i>/VAR<i>.
-  Blockly.Blocks['ir_with'] = {
+  // With / AsyncWith share the factory; async-ness is the block type (isAsync const).
+  const withDef = (isAsync) => ({
     items_: [],
     init() { this.items_ = [{ as: false }]; this.updateShape_(); stmt(this, '#a0734a'); },
     saveExtraState() { return { items: this.items_ }; },
@@ -418,12 +422,14 @@ if (Blockly) {
     updateShape_() {
       this.inputList.map((inp) => inp.name).filter(Boolean).forEach((nm) => this.removeInput(nm));
       this.items_.forEach((it, i) => {
-        this.appendValueInput('CTX' + i).appendField(i === 0 ? 'with' : ',');
+        this.appendValueInput('CTX' + i).appendField(i === 0 ? (isAsync ? 'async with' : 'with') : ',');
         if (it.as) this.appendValueInput('VAR' + i).appendField('as');
       });
       this.appendStatementInput('BODY');
     },
-  };
+  });
+  Blockly.Blocks['ir_with'] = withDef(false);
+  Blockly.Blocks['ir_asyncwith'] = withDef(true);
   // try: BODY (except[*] [TYPE [as name]]: HBODY)* [else: ELSE] [finally: FINALLY].
   // handlers_ is [{type:bool, name:str|null}]; star_ toggles except / except*. Every input is
   // named (incl. the bare-except row EXCROW<i>) so the rebuild-on-load removes them all cleanly
@@ -516,6 +522,32 @@ if (Blockly) {
   Blockly.Blocks['ir_setcomp'] = compBlockDef('set');
   Blockly.Blocks['ir_genexp'] = compBlockDef('gen');
   Blockly.Blocks['ir_dictcomp'] = compBlockDef('dict');
+
+  // Async / generator value expressions.
+  const exprPrefix = (type, kw, colour) => {
+    Blockly.Blocks[type] = {
+      init() {
+        this.appendValueInput('VALUE').appendField(kw);
+        this.setInputsInline(true);
+        this.setOutput(true);
+        this.setColour(colour);
+      },
+    };
+  };
+  exprPrefix('ir_await', 'await', '#5b80a5');
+  exprPrefix('ir_yieldfrom', 'yield from', '#5b80a5');
+  // yield's value is optional (bare `yield`); the empty VALUE input is simply left unconnected.
+  exprPrefix('ir_yield', 'yield', '#5b80a5');
+  // Walrus TARGET := VALUE.
+  Blockly.Blocks['ir_namedexpr'] = {
+    init() {
+      this.appendValueInput('TARGET');
+      this.appendValueInput('VALUE').appendField(':=');
+      this.setInputsInline(true);
+      this.setOutput(true);
+      this.setColour('#5b80a5');
+    },
+  };
 }
 
 if (Blockly) {
@@ -531,11 +563,13 @@ if (Blockly) {
     });
   };
 
-  Blockly.Blocks['ir_funcdef'] = {
+  // FunctionDef / AsyncFunctionDef share the factory; async-ness is the block type. The keyword
+  // ('def' / 'async def') lives in the stable NAMEROW set once in init from the isAsync const.
+  const funcdefDef = (isAsync) => ({
     params_: [], tparams_: [], ndec_: 0, ret_: false,
     init() {
       this.params_ = []; this.tparams_ = []; this.ndec_ = 0; this.ret_ = false;
-      this.appendDummyInput('NAMEROW').appendField('def')
+      this.appendDummyInput('NAMEROW').appendField(isAsync ? 'async def' : 'def')
         .appendField(new Blockly.FieldTextInput('f'), 'NAME');
       this.updateShape_();
       this.setPreviousStatement(true, null);
@@ -569,7 +603,9 @@ if (Blockly) {
       if (this.ret_) this.appendValueInput('RETURNS').appendField('->');
       this.appendStatementInput('BODY');
     },
-  };
+  });
+  Blockly.Blocks['ir_funcdef'] = funcdefDef(false);
+  Blockly.Blocks['ir_asyncfuncdef'] = funcdefDef(true);
 
   // ClassDef: NAME + decorators + type params + bases + keywords (metaclass/**), then BODY.
   // Variable-arity bits (nbases_, kw_, tparams_, ndec_) live in extraState so a real

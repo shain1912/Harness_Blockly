@@ -85,6 +85,11 @@ const BLOCK_TO_EXPR = {
   ir_setcomp: (b) => compToIr('SetComp', b, false),
   ir_genexp: (b) => compToIr('GeneratorExp', b, false),
   ir_dictcomp: (b) => compToIr('DictComp', b, true),
+  ir_await: (b) => ({ type: 'Await', value: blockToExpr(b.inputs.VALUE.block) }),
+  ir_yield: (b) => ({ type: 'Yield', value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null }),
+  ir_yieldfrom: (b) => ({ type: 'YieldFrom', value: blockToExpr(b.inputs.VALUE.block) }),
+  ir_namedexpr: (b) => ({ type: 'NamedExpr',
+    target: blockToExpr(b.inputs.TARGET.block), value: blockToExpr(b.inputs.VALUE.block) }),
 };
 
 // Rebuild a comprehension expr from its gens fragment + ELT/KEY/VAL, TARGET<i>/ITER<i>, and
@@ -124,9 +129,8 @@ const BLOCK_TO_STMT = {
     body: stmtListOrPass(b.inputs.BODY), orelse: stmtList(b.inputs.ORELSE) }),
   ir_while: (b) => ({ type: 'While', test: blockToExpr(b.inputs.TEST.block),
     body: stmtListOrPass(b.inputs.BODY), orelse: stmtList(b.inputs.ORELSE) }),
-  ir_for: (b) => ({ type: 'For', target: blockToExpr(b.inputs.TARGET.block),
-    iter: blockToExpr(b.inputs.ITER.block),
-    body: stmtListOrPass(b.inputs.BODY), orelse: stmtList(b.inputs.ORELSE) }),
+  ir_for: (b) => forToIr('For', b),
+  ir_asyncfor: (b) => forToIr('AsyncFor', b),
   ir_pass: () => ({ type: 'Pass' }),
   ir_break: () => ({ type: 'Break' }),
   ir_continue: () => ({ type: 'Continue' }),
@@ -150,20 +154,11 @@ const BLOCK_TO_STMT = {
     test: blockToExpr(b.inputs.TEST.block),
     msg: b.inputs.MSG ? blockToExpr(b.inputs.MSG.block) : null }),
   ir_with: (b) => withToIr('With', b),
+  ir_asyncwith: (b) => withToIr('AsyncWith', b),
   ir_try: (b) => tryToIr('Try', b),
   ir_trystar: (b) => tryToIr('TryStar', b),
-  ir_funcdef: (b) => {
-    const params = (b.extraState && b.extraState.params) || [];
-    const ndec = (b.extraState && b.extraState.ndec) || 0;
-    const decorator_list = [];
-    for (let i = 0; i < ndec; i++) decorator_list.push(blockToExpr(b.inputs['DEC' + i].block));
-    return { type: 'FunctionDef', name: b.fields.NAME,
-      args: fragmentToArgs(params, b.inputs),
-      body: stmtListOrPass(b.inputs.BODY),
-      decorator_list,
-      returns: b.inputs.RETURNS ? blockToExpr(b.inputs.RETURNS.block) : null,
-      type_params: fragmentToTparams((b.extraState && b.extraState.tparams) || [], b.inputs) };
-  },
+  ir_funcdef: (b) => funcDefToIr('FunctionDef', b),
+  ir_asyncfuncdef: (b) => funcDefToIr('AsyncFunctionDef', b),
   ir_classdef: (b) => {
     const es = b.extraState || {};
     const ndec = es.ndec || 0;
@@ -217,6 +212,27 @@ function stmtList(inp) {
 function stmtListOrPass(inp) {
   const list = stmtList(inp);
   return list.length ? list : [{ type: 'Pass' }];
+}
+
+// For/AsyncFor share one shape; the block type carries async-ness.
+function forToIr(typeName, b) {
+  return { type: typeName, target: blockToExpr(b.inputs.TARGET.block),
+    iter: blockToExpr(b.inputs.ITER.block),
+    body: stmtListOrPass(b.inputs.BODY), orelse: stmtList(b.inputs.ORELSE) };
+}
+
+// FunctionDef/AsyncFunctionDef share one shape; the block type carries async-ness.
+function funcDefToIr(typeName, b) {
+  const params = (b.extraState && b.extraState.params) || [];
+  const ndec = (b.extraState && b.extraState.ndec) || 0;
+  const decorator_list = [];
+  for (let i = 0; i < ndec; i++) decorator_list.push(blockToExpr(b.inputs['DEC' + i].block));
+  return { type: typeName, name: b.fields.NAME,
+    args: fragmentToArgs(params, b.inputs),
+    body: stmtListOrPass(b.inputs.BODY),
+    decorator_list,
+    returns: b.inputs.RETURNS ? blockToExpr(b.inputs.RETURNS.block) : null,
+    type_params: fragmentToTparams((b.extraState && b.extraState.tparams) || [], b.inputs) };
 }
 
 // Rebuild a With/AsyncWith from its item fragment + CTX<i>/VAR<i> inputs. withitem is a

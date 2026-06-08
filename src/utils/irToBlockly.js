@@ -19,15 +19,15 @@
 const NODE_POLICY = {
   Module: 'ROOT',
   // statements — only Assign implemented so far; the rest are the worklist (PENDING)
-  FunctionDef: 'DB', AsyncFunctionDef: 'PENDING', ClassDef: 'DB', Return: 'DB',
+  FunctionDef: 'DB', AsyncFunctionDef: 'DB', ClassDef: 'DB', Return: 'DB',
   Delete: 'DB', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'DB',
-  AsyncFor: 'PENDING', While: 'DB', If: 'DB', With: 'DB', AsyncWith: 'PENDING',
+  AsyncFor: 'DB', While: 'DB', If: 'DB', With: 'DB', AsyncWith: 'DB',
   Match: 'PENDING', Raise: 'DB', Try: 'DB', TryStar: 'DB', Assert: 'DB',
   Import: 'DB', ImportFrom: 'DB', Global: 'DB', Nonlocal: 'DB', Pass: 'DB',
   Break: 'DB', Continue: 'DB', TypeAlias: 'PENDING', Expr: 'DB',
   // expressions — only Name/Constant implemented so far
-  BoolOp: 'DB', NamedExpr: 'PENDING', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'DB',
-  Dict: 'DB', Set: 'DB', Await: 'PENDING', Yield: 'PENDING', YieldFrom: 'PENDING',
+  BoolOp: 'DB', NamedExpr: 'DB', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'DB',
+  Dict: 'DB', Set: 'DB', Await: 'DB', Yield: 'DB', YieldFrom: 'DB',
   Compare: 'DB', Call: 'DB', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'DB',
   Subscript: 'DB', Starred: 'DB', Name: 'DB', List: 'DB', Tuple: 'DB',
   // sugar (dedicated block + desugar pass) — all pending
@@ -121,6 +121,31 @@ function tparamsFragment(tparams, inputs) {
     }
     return t;
   });
+}
+
+// For/AsyncFor share one shape; async-ness is encoded in the block type (ir_for vs ir_asyncfor).
+function forBlock(type, n) {
+  const inputs = {
+    TARGET: { block: exprToBlock(n.target) },
+    ITER: { block: exprToBlock(n.iter) },
+    BODY: stmtStack(n.body),
+  };
+  const orelse = stmtStack(n.orelse);
+  if (orelse) inputs.ORELSE = orelse;
+  return blk(type, {}, inputs);
+}
+
+// FunctionDef/AsyncFunctionDef share one shape; async-ness is the block type (ir_funcdef vs
+// ir_asyncfuncdef). Signature/decorators/return/body all match FunctionDef exactly.
+function funcDefBlock(type, n) {
+  const inputs = {};
+  const params = argsFragment(n.args, inputs);
+  const tparams = tparamsFragment(n.type_params, inputs);
+  (n.decorator_list || []).forEach((d, i) => { inputs['DEC' + i] = { block: exprToBlock(d) }; });
+  if (n.returns !== null && n.returns !== undefined) inputs.RETURNS = { block: exprToBlock(n.returns) };
+  inputs.BODY = stmtStack(n.body);
+  return { type, fields: { NAME: n.name },
+    extraState: { params, tparams, ndec: (n.decorator_list || []).length, ret: n.returns != null }, inputs };
 }
 
 // With/AsyncWith body: one CTX<i> input per item, plus VAR<i> when it binds `as`. The per-
@@ -260,6 +285,17 @@ const EXPR_HANDLERS = {
   SetComp: (n) => compBlock('ir_setcomp', n, false),
   GeneratorExp: (n) => compBlock('ir_genexp', n, false),
   DictComp: (n) => compBlock('ir_dictcomp', n, true),
+  // Async/generator expressions. await/yield from take a required value; yield's value is
+  // optional (bare `yield`). NamedExpr is the walrus `target := value` (target is a Name).
+  Await: (n) => blk('ir_await', {}, { VALUE: { block: exprToBlock(n.value) } }),
+  Yield: (n) => {
+    const inputs = {};
+    if (n.value !== null && n.value !== undefined) inputs.VALUE = { block: exprToBlock(n.value) };
+    return blk('ir_yield', {}, inputs);
+  },
+  YieldFrom: (n) => blk('ir_yieldfrom', {}, { VALUE: { block: exprToBlock(n.value) } }),
+  NamedExpr: (n) => blk('ir_namedexpr', {},
+    { TARGET: { block: exprToBlock(n.target) }, VALUE: { block: exprToBlock(n.value) } }),
 };
 
 // Comprehension family. The element (ELT, or KEY/VAL for dict) plus N generators. comprehension
@@ -326,16 +362,8 @@ const STMT_HANDLERS = {
     if (orelse) inputs.ORELSE = orelse;
     return blk('ir_while', {}, inputs);
   },
-  For: (n) => {
-    const inputs = {
-      TARGET: { block: exprToBlock(n.target) },
-      ITER: { block: exprToBlock(n.iter) },
-      BODY: stmtStack(n.body),
-    };
-    const orelse = stmtStack(n.orelse);
-    if (orelse) inputs.ORELSE = orelse;
-    return blk('ir_for', {}, inputs);
-  },
+  For: (n) => forBlock('ir_for', n),
+  AsyncFor: (n) => forBlock('ir_asyncfor', n),
   Pass: () => blk('ir_pass', {}, {}),
   Break: () => blk('ir_break', {}, {}),
   Continue: () => blk('ir_continue', {}, {}),
@@ -362,22 +390,14 @@ const STMT_HANDLERS = {
   // with ctx as var, ...: body — withitem is a HELPER. Per item: CTX<i> input always, VAR<i>
   // input when an `as` target is present (item.as flag in extraState). Body is mandatory.
   With: (n) => withBlock('ir_with', n),
-  // AsyncWith stays PENDING (#13 async slice).
+  AsyncWith: (n) => withBlock('ir_asyncwith', n),
   // try/except/else/finally and except* (TryStar share an identical shape). ExceptHandler is
   // a HELPER: per handler TYPE<i> input (when an exception class is given) + HBODY<i> suite,
   // with the optional `as name` carried in extraState. orelse/finalbody are optional suites.
   Try: (n) => tryBlock('ir_try', n),
   TryStar: (n) => tryBlock('ir_trystar', n),
-  FunctionDef: (n) => {
-    const inputs = {};
-    const params = argsFragment(n.args, inputs);
-    const tparams = tparamsFragment(n.type_params, inputs);
-    (n.decorator_list || []).forEach((d, i) => { inputs['DEC' + i] = { block: exprToBlock(d) }; });
-    if (n.returns !== null && n.returns !== undefined) inputs.RETURNS = { block: exprToBlock(n.returns) };
-    inputs.BODY = stmtStack(n.body);
-    return { type: 'ir_funcdef', fields: { NAME: n.name },
-      extraState: { params, tparams, ndec: (n.decorator_list || []).length, ret: n.returns != null }, inputs };
-  },
+  FunctionDef: (n) => funcDefBlock('ir_funcdef', n),
+  AsyncFunctionDef: (n) => funcDefBlock('ir_asyncfuncdef', n),
   // ClassDef = FunctionDef's decorators/type_params/body plus Call-style bases + keywords.
   // bases are BASE* expr inputs; keywords (metaclass=..., **kw) mirror Call's kw encoding
   // (arg name, or null for **) with KW* value inputs. Body is a mandatory suite.

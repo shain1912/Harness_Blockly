@@ -433,6 +433,43 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // Async slice through REAL Blockly load->save: async def (with await body, decorator, return
+  // type), async for, async with (single/multi item), await/yield/yield-from expressions, and
+  // the walrus operator (NamedExpr) in if-test, comprehension filter, and call-arg positions.
+  test('async, yield and walrus survive a real Blockly load->save', async ({ page }) => {
+    const cases = [
+      'async def f():\n    pass',
+      'async def f(x):\n    await x',
+      '@deco\nasync def f() -> int:\n    return 1',
+      'async def f():\n    async for x in it:\n        pass',
+      'async def f():\n    async with cm as c:\n        pass',
+      'async def f():\n    async with a, b:\n        pass',
+      'r = await x',
+      'def g():\n    yield',
+      'def g():\n    yield 1',
+      'def g():\n    yield from xs',
+      'def g():\n    x = (yield)',
+      'if (n := len(a)) > 10:\n    pass',
+      'y = [v for v in data if (t := v) > 0]',
+      'print((n := 5))',
+    ];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push((await B.irToPython(window.__pyodide, back)).replace(/\n$/, ''));
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.
