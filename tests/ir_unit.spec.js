@@ -67,12 +67,44 @@ test('empty mandatory body synthesizes pass (block->IR stays valid Python)', () 
   expect(ir.body[0].orelse).toEqual([]);
 });
 
+test('raise ... from <cause> without an exception fails loud (invalid Python, never silent)', () => {
+  // A user can connect ir_raise's CAUSE input while leaving EXC empty; that is unroundtrippable
+  // (`raise from x` is a SyntaxError), so block->IR must throw rather than emit invalid IR.
+  const ws = { blocks: { languageVersion: 0, blocks: [
+    { type: 'ir_raise', inputs: { CAUSE: { block: { type: 'ir_name', fields: { ID: 'c' } } } } }] } };
+  expect(() => global.BlockPyIR.blocklyToIr(ws)).toThrow(/requires an exception/);
+});
+
+test('bare except* (TryStar handler without a type) fails loud (invalid Python, never silent)', () => {
+  // `except*:` is a SyntaxError — except* always needs an exception type. A typeless handler
+  // in an ir_trystar block must throw on block->IR, not emit unparse-invalid IR.
+  const ws = { blocks: { languageVersion: 0, blocks: [
+    { type: 'ir_trystar', extraState: { handlers: [{ type: false, name: null }] },
+      inputs: { BODY: { block: { type: 'ir_pass' } },
+        HBODY0: { block: { type: 'ir_pass' } } } }] } };
+  expect(() => global.BlockPyIR.blocklyToIr(ws)).toThrow(/requires an exception type/);
+});
+
+test('handlerless try without a valid finally form fails loud (invalid Python, never silent)', () => {
+  // A try with no except must be finally-only (non-empty finally, no else). A bare `try:` and
+  // a `try...else` without except are SyntaxErrors, so block->IR must throw, not emit them.
+  const bareTry = { blocks: { languageVersion: 0, blocks: [
+    { type: 'ir_try', extraState: { handlers: [] },
+      inputs: { BODY: { block: { type: 'ir_pass' } } } }] } };
+  expect(() => global.BlockPyIR.blocklyToIr(bareTry)).toThrow(/must have a finally and no else/);
+  const tryElseNoExcept = { blocks: { languageVersion: 0, blocks: [
+    { type: 'ir_try', extraState: { handlers: [] },
+      inputs: { BODY: { block: { type: 'ir_pass' } }, ELSE: { block: { type: 'ir_pass' } },
+        FINALLY: { block: { type: 'ir_pass' } } } }] } };
+  expect(() => global.BlockPyIR.blocklyToIr(tryElseNoExcept)).toThrow(/must have a finally and no else/);
+});
+
 test('PENDING (unimplemented) nodes fail loudly with policy status, never silently', () => {
-  // Delete is on the worklist (PENDING) — converting it must throw an explicit error
-  // naming the node and its policy, not produce a wrong/empty block.
+  // AsyncWith is on the worklist (PENDING, #13 async) — converting it must throw an explicit
+  // error naming the node and its policy, not produce a wrong/empty block.
   const mod = { type: 'Module', type_ignores: [],
-    body: [{ type: 'Delete', targets: [{ type: 'Name', id: 'x' }] }] };
-  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/Delete \(policy=PENDING\)/);
+    body: [{ type: 'AsyncWith', items: [], body: [{ type: 'Pass' }] }] };
+  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/AsyncWith \(policy=PENDING\)/);
 });
 
 test('ClassDef (bases + keyword + body) round-trips losslessly (IR -> Blockly -> IR)', () => {
@@ -103,6 +135,39 @@ test('Import / ImportFrom round-trip losslessly incl. asname and relative level 
       { type: 'alias', name: 'c', asname: null }] },
     { type: 'ImportFrom', module: null, level: 1, names: [
       { type: 'alias', name: 'x', asname: null }] },
+  ] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
+test('Try (typed+named + bare handler, else, finally) round-trips losslessly (IR -> Blockly -> IR)', () => {
+  // ExceptHandler is a HELPER (no block): handlers live in the Try block's extraState +
+  // TYPE<i>/HBODY<i> inputs. Its exception-class field is `_field_type` (bridge-remapped to
+  // dodge the `type` discriminator collision). orelse/finalbody are optional stmt suites.
+  const IR = { type: 'Module', type_ignores: [], body: [{
+    type: 'Try',
+    body: [{ type: 'Pass' }],
+    handlers: [
+      { type: 'ExceptHandler', _field_type: { type: 'Name', id: 'ValueError' },
+        name: 'e', body: [{ type: 'Pass' }] },
+      { type: 'ExceptHandler', _field_type: null, name: null, body: [{ type: 'Pass' }] },
+    ],
+    orelse: [{ type: 'Pass' }],
+    finalbody: [{ type: 'Pass' }],
+  }] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
+test('With (multi-item, with/without as) and Delete (multi-target) round-trip losslessly', () => {
+  // withitem is a HELPER: items live in the With block's extraState + CTX<i>/VAR<i> inputs.
+  const IR = { type: 'Module', type_ignores: [], body: [
+    { type: 'With', items: [
+      { type: 'withitem', context_expr: { type: 'Name', id: 'a' },
+        optional_vars: { type: 'Name', id: 'x' } },
+      { type: 'withitem', context_expr: { type: 'Name', id: 'b' }, optional_vars: null },
+    ], body: [{ type: 'Pass' }] },
+    { type: 'Delete', targets: [{ type: 'Name', id: 'x' }, { type: 'Name', id: 'y' }] },
   ] };
   const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
   expect(back).toEqual(IR);

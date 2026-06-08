@@ -36,6 +36,26 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // ExceptHandler's field is literally named `type`, which collides with the IR node
+  // discriminator key. The bridge remaps any such field to `_field_type`; verify the
+  // collision is handled so try/except round-trips at the pure bridge level (python->IR->python).
+  test('python->IR->python handles the ExceptHandler `type` field-name collision', async ({ page }) => {
+    const cases = [
+      'try:\n    pass\nexcept Exception as e:\n    pass',
+      'try:\n    pass\nexcept:\n    pass',
+    ];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        out.push((await B.irToPython(window.__pyodide, ir)).replace(/\n$/, ''));
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
   // Regression (Codex review round 2, Task 1.1): big ints must not lose precision
   // through JS JSON.parse, and non-finite complex components must not break JSON.
   test('python->IR->python preserves big ints and non-finite complex', async ({ page }) => {
@@ -316,6 +336,51 @@ test.describe('AST-IR bridge round-trip', () => {
       'from ..pkg import z',
       'from .. import x',
       'from os import *',
+    ];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push((await B.irToPython(window.__pyodide, back)).replace(/\n$/, ''));
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
+  // Exceptions/with slice (multi-line) through REAL Blockly load->save: del (multi-target),
+  // raise (bare / exc / exc-from-cause), assert (with and without msg), with (single/multi
+  // items, with and without `as`), try/except (bare, typed, named, multiple handlers),
+  // else/finally, finally-only, and except* (TryStar). ExceptHandler/withitem are HELPERs.
+  test('exceptions and with survive a real Blockly load->save', async ({ page }) => {
+    const cases = [
+      'del x',
+      'del x, y',
+      'del obj.attr',
+      'raise',
+      'raise ValueError',
+      "raise ValueError('bad')",
+      'raise Err from cause',
+      'assert x',
+      "assert x, 'msg'",
+      'with open(f) as fh:\n    pass',
+      'with a, b:\n    pass',
+      'with open(f) as fh, lock:\n    pass',
+      'with a as x, b as y:\n    pass',
+      'try:\n    pass\nexcept:\n    pass',
+      'try:\n    pass\nexcept Exception:\n    pass',
+      'try:\n    pass\nexcept Exception as e:\n    pass',
+      'try:\n    pass\nexcept ValueError:\n    pass\nexcept KeyError as e:\n    pass',
+      'try:\n    pass\nexcept Exception:\n    pass\nelse:\n    pass\nfinally:\n    pass',
+      'try:\n    pass\nfinally:\n    pass',
+      'try:\n    pass\nexcept* ValueError:\n    pass',
+      'try:\n    pass\nexcept* ValueError as e:\n    pass',
     ];
     const codes = await page.evaluate(async (srcs) => {
       const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;

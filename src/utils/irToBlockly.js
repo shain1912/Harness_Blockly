@@ -20,9 +20,9 @@ const NODE_POLICY = {
   Module: 'ROOT',
   // statements — only Assign implemented so far; the rest are the worklist (PENDING)
   FunctionDef: 'DB', AsyncFunctionDef: 'PENDING', ClassDef: 'DB', Return: 'DB',
-  Delete: 'PENDING', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'DB',
-  AsyncFor: 'PENDING', While: 'DB', If: 'DB', With: 'PENDING', AsyncWith: 'PENDING',
-  Match: 'PENDING', Raise: 'PENDING', Try: 'PENDING', TryStar: 'PENDING', Assert: 'PENDING',
+  Delete: 'DB', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'DB',
+  AsyncFor: 'PENDING', While: 'DB', If: 'DB', With: 'DB', AsyncWith: 'PENDING',
+  Match: 'PENDING', Raise: 'DB', Try: 'DB', TryStar: 'DB', Assert: 'DB',
   Import: 'DB', ImportFrom: 'DB', Global: 'DB', Nonlocal: 'DB', Pass: 'DB',
   Break: 'DB', Continue: 'DB', TypeAlias: 'PENDING', Expr: 'DB',
   // expressions — only Name/Constant implemented so far
@@ -121,6 +121,45 @@ function tparamsFragment(tparams, inputs) {
     }
     return t;
   });
+}
+
+// With/AsyncWith body: one CTX<i> input per item, plus VAR<i> when it binds `as`. The per-
+// item `as` flag lives in extraState so a real save/load rebuilds the matching inputs.
+function withBlock(type, n) {
+  const inputs = {};
+  const items = (n.items || []).map((it, i) => {
+    inputs['CTX' + i] = { block: exprToBlock(it.context_expr) };
+    const item = { as: false };
+    if (it.optional_vars !== null && it.optional_vars !== undefined) {
+      item.as = true;
+      inputs['VAR' + i] = { block: exprToBlock(it.optional_vars) };
+    }
+    return item;
+  });
+  inputs.BODY = stmtStack(n.body);
+  return { type, extraState: { items }, inputs };
+}
+
+// Try/TryStar body: BODY suite + N handlers + optional ELSE/FINALLY suites. Each handler's
+// exception class is the bridge-remapped `_field_type` (TYPE<i> input when present); its
+// `as name` and type-presence flag live in extraState; its suite is HBODY<i>.
+function tryBlock(type, n) {
+  const inputs = { BODY: stmtStack(n.body) };
+  const handlers = (n.handlers || []).map((h, i) => {
+    const hd = { type: false, name: h.name !== null && h.name !== undefined ? h.name : null };
+    if (h._field_type !== null && h._field_type !== undefined) {
+      hd.type = true;
+      inputs['TYPE' + i] = { block: exprToBlock(h._field_type) };
+    }
+    const body = stmtStack(h.body);
+    if (body) inputs['HBODY' + i] = body;
+    return hd;
+  });
+  const orelse = stmtStack(n.orelse);
+  if (orelse) inputs.ELSE = orelse;
+  const finalbody = stmtStack(n.finalbody);
+  if (finalbody) inputs.FINALLY = finalbody;
+  return { type, extraState: { handlers }, inputs };
 }
 
 // A collection of element expressions (List/Tuple/Set) -> variable-arity block.
@@ -267,6 +306,35 @@ const STMT_HANDLERS = {
   Pass: () => blk('ir_pass', {}, {}),
   Break: () => blk('ir_break', {}, {}),
   Continue: () => blk('ir_continue', {}, {}),
+  // del a, b — variable-arity targets (each a Store-context expr), like Assign's targets.
+  Delete: (n) => {
+    const inputs = {};
+    n.targets.forEach((t, i) => { inputs['TARGET' + i] = { block: exprToBlock(t) }; });
+    return { type: 'ir_delete', extraState: { n: n.targets.length }, inputs };
+  },
+  // raise / raise exc / raise exc from cause — both exprs optional (cause implies exc in
+  // valid Python, so we never emit CAUSE without EXC).
+  Raise: (n) => {
+    const inputs = {};
+    if (n.exc !== null && n.exc !== undefined) inputs.EXC = { block: exprToBlock(n.exc) };
+    if (n.cause !== null && n.cause !== undefined) inputs.CAUSE = { block: exprToBlock(n.cause) };
+    return blk('ir_raise', {}, inputs);
+  },
+  // assert test, msg — test required, msg optional.
+  Assert: (n) => {
+    const inputs = { TEST: { block: exprToBlock(n.test) } };
+    if (n.msg !== null && n.msg !== undefined) inputs.MSG = { block: exprToBlock(n.msg) };
+    return blk('ir_assert', {}, inputs);
+  },
+  // with ctx as var, ...: body — withitem is a HELPER. Per item: CTX<i> input always, VAR<i>
+  // input when an `as` target is present (item.as flag in extraState). Body is mandatory.
+  With: (n) => withBlock('ir_with', n),
+  // AsyncWith stays PENDING (#13 async slice).
+  // try/except/else/finally and except* (TryStar share an identical shape). ExceptHandler is
+  // a HELPER: per handler TYPE<i> input (when an exception class is given) + HBODY<i> suite,
+  // with the optional `as name` carried in extraState. orelse/finalbody are optional suites.
+  Try: (n) => tryBlock('ir_try', n),
+  TryStar: (n) => tryBlock('ir_trystar', n),
   FunctionDef: (n) => {
     const inputs = {};
     const params = argsFragment(n.args, inputs);

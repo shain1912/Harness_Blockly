@@ -366,6 +366,105 @@ if (Blockly) {
 }
 
 if (Blockly) {
+  const stmt = (b, colour) => {
+    b.setPreviousStatement(true, null);
+    b.setNextStatement(true, null);
+    b.setColour(colour);
+  };
+  // del a, b — variable-arity Store-context targets (count in extraState).
+  Blockly.Blocks['ir_delete'] = {
+    itemCount_: 1,
+    init() { this.itemCount_ = 1; this.updateShape_(); stmt(this, '#a0734a'); this.setInputsInline(true); },
+    saveExtraState() { return { n: this.itemCount_ }; },
+    loadExtraState(state) {
+      this.itemCount_ = (state && typeof state.n === 'number' && state.n >= 1) ? state.n : 1;
+      this.updateShape_();
+    },
+    updateShape_() {
+      let i = 0;
+      while (this.getInput('TARGET' + i)) { this.removeInput('TARGET' + i); i++; }
+      for (let t = 0; t < this.itemCount_; t++) {
+        this.appendValueInput('TARGET' + t).appendField(t === 0 ? 'del' : ',');
+      }
+    },
+  };
+  // raise [EXC [from CAUSE]] — both optional value inputs.
+  Blockly.Blocks['ir_raise'] = {
+    init() {
+      this.appendValueInput('EXC').appendField('raise');
+      this.appendValueInput('CAUSE').appendField('from');
+      this.setInputsInline(true);
+      stmt(this, '#a0734a');
+    },
+  };
+  // assert TEST [, MSG]
+  Blockly.Blocks['ir_assert'] = {
+    init() {
+      this.appendValueInput('TEST').appendField('assert');
+      this.appendValueInput('MSG').appendField(',');
+      this.setInputsInline(true);
+      stmt(this, '#a0734a');
+    },
+  };
+  // with CTX [as VAR], ...: BODY — items_ is [{as}], so save/load rebuilds CTX<i>/VAR<i>.
+  Blockly.Blocks['ir_with'] = {
+    items_: [],
+    init() { this.items_ = [{ as: false }]; this.updateShape_(); stmt(this, '#a0734a'); },
+    saveExtraState() { return { items: this.items_ }; },
+    loadExtraState(s) {
+      this.items_ = (s && Array.isArray(s.items) && s.items.length) ? s.items : [{ as: false }];
+      this.updateShape_();
+    },
+    updateShape_() {
+      this.inputList.map((inp) => inp.name).filter(Boolean).forEach((nm) => this.removeInput(nm));
+      this.items_.forEach((it, i) => {
+        this.appendValueInput('CTX' + i).appendField(i === 0 ? 'with' : ',');
+        if (it.as) this.appendValueInput('VAR' + i).appendField('as');
+      });
+      this.appendStatementInput('BODY');
+    },
+  };
+  // try: BODY (except[*] [TYPE [as name]]: HBODY)* [else: ELSE] [finally: FINALLY].
+  // handlers_ is [{type:bool, name:str|null}]; star_ toggles except / except*. Every input is
+  // named (incl. the bare-except row EXCROW<i>) so the rebuild-on-load removes them all cleanly
+  // (unnamed dummies would leak and duplicate). TRYROW is the stable kept row.
+  const tryInit = (star) => ({
+    handlers_: [], star_: star,
+    init() {
+      this.handlers_ = [{ type: false, name: null }]; this.star_ = star;
+      this.appendDummyInput('TRYROW').appendField('try');
+      this.updateShape_(); stmt(this, '#a0734a');
+    },
+    saveExtraState() { return { handlers: this.handlers_ }; },
+    loadExtraState(s) {
+      // An empty handlers array is a VALID restored state (finally-only / else-only try), so
+      // only fall back to the new-block default when handlers is absent, never when it is [].
+      this.handlers_ = (s && Array.isArray(s.handlers)) ? s.handlers : [{ type: false, name: null }];
+      this.updateShape_();
+    },
+    updateShape_() {
+      this.inputList.map((inp) => inp.name).filter((nm) => nm && nm !== 'TRYROW')
+        .forEach((nm) => this.removeInput(nm));
+      this.appendStatementInput('BODY');
+      const kw = this.star_ ? 'except*' : 'except';
+      this.handlers_.forEach((h, i) => {
+        if (h.type) {
+          const row = this.appendValueInput('TYPE' + i).appendField(kw);
+          if (h.name !== null && h.name !== undefined) row.appendField('as ' + h.name);
+        } else {
+          this.appendDummyInput('EXCROW' + i).appendField(kw + ':');
+        }
+        this.appendStatementInput('HBODY' + i);
+      });
+      this.appendStatementInput('ELSE').appendField('else');
+      this.appendStatementInput('FINALLY').appendField('finally');
+    },
+  });
+  Blockly.Blocks['ir_try'] = tryInit(false);
+  Blockly.Blocks['ir_trystar'] = tryInit(true);
+}
+
+if (Blockly) {
   // Rebuild ANN<i>/DEF<i> inputs from a param list (shared by funcdef + lambda). Removes
   // every input except the named stable rows, then recreates the signature inputs so a real
   // Blockly load restores connections to matching names.

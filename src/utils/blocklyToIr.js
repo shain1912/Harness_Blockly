@@ -104,6 +104,28 @@ const BLOCK_TO_STMT = {
   ir_pass: () => ({ type: 'Pass' }),
   ir_break: () => ({ type: 'Break' }),
   ir_continue: () => ({ type: 'Continue' }),
+  ir_delete: (b) => {
+    const n = (b.extraState && b.extraState.n) || 0;
+    const targets = [];
+    for (let i = 0; i < n; i++) targets.push(blockToExpr(b.inputs['TARGET' + i].block));
+    return { type: 'Delete', targets };
+  },
+  ir_raise: (b) => {
+    const exc = b.inputs.EXC ? blockToExpr(b.inputs.EXC.block) : null;
+    const cause = b.inputs.CAUSE ? blockToExpr(b.inputs.CAUSE.block) : null;
+    // `raise from <cause>` with no exception is invalid Python (CPython rejects it at unparse).
+    // The two inputs are independent in the UI, so guard rather than emit unroundtrippable IR.
+    if (cause !== null && exc === null) {
+      throw new Error('blocklyToIr: `raise ... from <cause>` requires an exception (EXC is empty)');
+    }
+    return { type: 'Raise', exc, cause };
+  },
+  ir_assert: (b) => ({ type: 'Assert',
+    test: blockToExpr(b.inputs.TEST.block),
+    msg: b.inputs.MSG ? blockToExpr(b.inputs.MSG.block) : null }),
+  ir_with: (b) => withToIr('With', b),
+  ir_try: (b) => tryToIr('Try', b),
+  ir_trystar: (b) => tryToIr('TryStar', b),
   ir_funcdef: (b) => {
     const params = (b.extraState && b.extraState.params) || [];
     const ndec = (b.extraState && b.extraState.ndec) || 0;
@@ -169,6 +191,47 @@ function stmtList(inp) {
 function stmtListOrPass(inp) {
   const list = stmtList(inp);
   return list.length ? list : [{ type: 'Pass' }];
+}
+
+// Rebuild a With/AsyncWith from its item fragment + CTX<i>/VAR<i> inputs. withitem is a
+// HELPER node: optional_vars is present only when the item bound `as` (the .as flag).
+function withToIr(typeName, b) {
+  const items = ((b.extraState && b.extraState.items) || []).map((it, i) => ({
+    type: 'withitem',
+    context_expr: blockToExpr(b.inputs['CTX' + i].block),
+    optional_vars: it.as ? blockToExpr(b.inputs['VAR' + i].block) : null,
+  }));
+  return { type: typeName, items, body: stmtListOrPass(b.inputs.BODY) };
+}
+
+// Rebuild a Try/TryStar from its handler fragment + TYPE<i>/HBODY<i> inputs. ExceptHandler is
+// a HELPER; its exception class uses the bridge-remapped `_field_type` key (dodging the `type`
+// discriminator collision). Each handler suite is mandatory; orelse/finalbody are optional.
+function tryToIr(typeName, b) {
+  const handlers = ((b.extraState && b.extraState.handlers) || []).map((h, i) => {
+    // `except*` (TryStar) always requires an exception type — a bare `except*:` is a
+    // SyntaxError. The UI can produce a typeless handler, so guard rather than emit invalid IR.
+    if (typeName === 'TryStar' && !h.type) {
+      throw new Error('blocklyToIr: `except*` requires an exception type (bare except* is invalid Python)');
+    }
+    return {
+      type: 'ExceptHandler',
+      _field_type: h.type ? blockToExpr(b.inputs['TYPE' + i].block) : null,
+      name: (h.name !== null && h.name !== undefined) ? h.name : null,
+      body: stmtListOrPass(b.inputs['HBODY' + i]),
+    };
+  });
+  const orelse = stmtList(b.inputs.ELSE);
+  const finalbody = stmtList(b.inputs.FINALLY);
+  // Python requires a try to have at least one except, or else a finally; and `else` is only
+  // legal alongside an except. So the only valid handlerless form is finally-only (non-empty
+  // finally, no else). Anything else (bare `try:`, `try...else` without except) is invalid —
+  // fail loud rather than emit unparse-invalid code.
+  if (handlers.length === 0 && (orelse.length > 0 || finalbody.length === 0)) {
+    throw new Error('blocklyToIr: a try with no except handlers must have a finally and no else '
+      + '(bare try / try-else without except is invalid Python)');
+  }
+  return { type: typeName, body: stmtListOrPass(b.inputs.BODY), handlers, orelse, finalbody };
 }
 
 // Rebuild PEP-695 type parameters from their fragment + TPB<i>/TPD<i> inputs.

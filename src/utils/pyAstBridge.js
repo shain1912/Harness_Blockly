@@ -43,11 +43,16 @@ def _enc_prim(v):
     if v is Ellipsis:
         return {"__py__": "ellipsis"}
     return v
+# A field literally named "type" (only ExceptHandler in the closed 3.12 set) collides with
+# the node-discriminator key, which is also "type". Remap such a field to "_field_type" in
+# both directions so the discriminator and the field coexist losslessly.
+def _key(f):
+    return "_field_" + f if f == "type" else f
 def _to_ir(node):
     if isinstance(node, ast.AST):
         d = {"type": type(node).__name__}
         for f in node._fields:
-            d[f] = _to_ir(getattr(node, f, None))
+            d[_key(f)] = _to_ir(getattr(node, f, None))
         if hasattr(node, "lineno"):
             d["_loc"] = [node.lineno, getattr(node, "col_offset", 0)]
         return d
@@ -74,10 +79,12 @@ def _dec_prim(d):
     if t == "ellipsis": return Ellipsis
     if t == "float":   return float(d["repr"])  # 'inf' / '-inf' / 'nan'
     raise ValueError("unknown __py__ tag: " + str(t))
+def _key(f):
+    return "_field_" + f if f == "type" else f
 def _from_ir(d):
     if isinstance(d, dict) and "type" in d:
         cls = getattr(ast, d["type"])
-        kwargs = {f: _from_ir(d.get(f)) for f in cls._fields}
+        kwargs = {f: _from_ir(d.get(_key(f))) for f in cls._fields}
         return ast.fix_missing_locations(cls(**kwargs))
     if isinstance(d, dict) and "__py__" in d:
         return _dec_prim(d)
