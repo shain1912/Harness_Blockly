@@ -68,11 +68,11 @@ test('empty mandatory body synthesizes pass (block->IR stays valid Python)', () 
 });
 
 test('PENDING (unimplemented) nodes fail loudly with policy status, never silently', () => {
-  // Return is on the worklist (PENDING) — converting it must throw an explicit error
+  // Delete is on the worklist (PENDING) — converting it must throw an explicit error
   // naming the node and its policy, not produce a wrong/empty block.
   const mod = { type: 'Module', type_ignores: [],
-    body: [{ type: 'Return', value: { type: 'Constant', value: 1 } }] };
-  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/Return \(policy=PENDING\)/);
+    body: [{ type: 'Delete', targets: [{ type: 'Name', id: 'x' }] }] };
+  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/Delete \(policy=PENDING\)/);
 });
 
 test('multiple disconnected top-level stacks are all converted (none dropped)', () => {

@@ -19,14 +19,14 @@
 const NODE_POLICY = {
   Module: 'ROOT',
   // statements — only Assign implemented so far; the rest are the worklist (PENDING)
-  FunctionDef: 'PENDING', AsyncFunctionDef: 'PENDING', ClassDef: 'PENDING', Return: 'PENDING',
+  FunctionDef: 'DB', AsyncFunctionDef: 'PENDING', ClassDef: 'PENDING', Return: 'DB',
   Delete: 'PENDING', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'DB',
   AsyncFor: 'PENDING', While: 'DB', If: 'DB', With: 'PENDING', AsyncWith: 'PENDING',
   Match: 'PENDING', Raise: 'PENDING', Try: 'PENDING', TryStar: 'PENDING', Assert: 'PENDING',
-  Import: 'PENDING', ImportFrom: 'PENDING', Global: 'PENDING', Nonlocal: 'PENDING', Pass: 'DB',
+  Import: 'PENDING', ImportFrom: 'PENDING', Global: 'DB', Nonlocal: 'DB', Pass: 'DB',
   Break: 'DB', Continue: 'DB', TypeAlias: 'PENDING', Expr: 'DB',
   // expressions — only Name/Constant implemented so far
-  BoolOp: 'DB', NamedExpr: 'PENDING', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'PENDING',
+  BoolOp: 'DB', NamedExpr: 'PENDING', BinOp: 'DB', UnaryOp: 'DB', Lambda: 'DB',
   Dict: 'DB', Set: 'DB', Await: 'PENDING', Yield: 'PENDING', YieldFrom: 'PENDING',
   Compare: 'DB', Call: 'DB', JoinedStr: 'PENDING', Constant: 'DB', Attribute: 'DB',
   Subscript: 'DB', Starred: 'DB', Name: 'DB', List: 'DB', Tuple: 'DB',
@@ -74,6 +74,53 @@ function stmtStack(stmts) {
   const blocks = stmts.map(stmtToBlock);
   for (let i = 0; i < blocks.length - 1; i++) blocks[i].next = { block: blocks[i + 1] };
   return { block: blocks[0] };
+}
+
+// Flatten a CPython `arguments` node into a unified ordered param list + writes the
+// annotation/default EXPRESSION children into `inputs` keyed ANN<i>/DEF<i> (i = flat order).
+// The param list (name + kind + ann/def flags) is structural metadata for extraState.
+function argsFragment(a, inputs) {
+  const params = [];
+  const push = (arg, kind, defExpr) => {
+    const i = params.length;
+    const p = { name: arg.arg, kind };
+    if (arg.annotation !== null && arg.annotation !== undefined) {
+      p.ann = true; inputs['ANN' + i] = { block: exprToBlock(arg.annotation) };
+    }
+    if (defExpr !== null && defExpr !== undefined) {
+      p.def = true; inputs['DEF' + i] = { block: exprToBlock(defExpr) };
+    }
+    params.push(p);
+  };
+  const posonly = a.posonlyargs || [];
+  const norm = a.args || [];
+  const defaults = a.defaults || [];           // align with TAIL of posonly+norm
+  const defStart = (posonly.length + norm.length) - defaults.length;
+  posonly.forEach((arg, idx) => push(arg, 'posonly', idx >= defStart ? defaults[idx - defStart] : null));
+  norm.forEach((arg, idx) => {
+    const g = posonly.length + idx;
+    push(arg, 'arg', g >= defStart ? defaults[g - defStart] : null);
+  });
+  if (a.vararg) push(a.vararg, 'vararg', null);
+  (a.kwonlyargs || []).forEach((arg, idx) => push(arg, 'kwonly', (a.kw_defaults || [])[idx]));
+  if (a.kwarg) push(a.kwarg, 'kwarg', null);
+  return params;
+}
+
+// PEP-695 type parameters (def f[T], class C[T: int], def g[*Ts], def h[**P]). Encodes the
+// name + kind + optional bound/default exprs (bound only on TypeVar; default_value is 3.13+
+// so a no-op on Pyodide 3.12). Shared by FunctionDef/ClassDef/TypeAlias.
+function tparamsFragment(tparams, inputs) {
+  return (tparams || []).map((tp, i) => {
+    const t = { name: tp.name, kind: tp.type };
+    if (tp.bound !== null && tp.bound !== undefined) {
+      t.bound = true; inputs['TPB' + i] = { block: exprToBlock(tp.bound) };
+    }
+    if (tp.default_value !== null && tp.default_value !== undefined) {
+      t.def = true; inputs['TPD' + i] = { block: exprToBlock(tp.default_value) };
+    }
+    return t;
+  });
 }
 
 // A collection of element expressions (List/Tuple/Set) -> variable-arity block.
@@ -142,6 +189,13 @@ const EXPR_HANDLERS = {
     return blk('ir_slice', {}, inputs);
   },
   Starred: (n) => blk('ir_starred', {}, { VALUE: { block: exprToBlock(n.value) } }),
+  // Lambda shares the arguments encoding; its body is a single expression.
+  Lambda: (n) => {
+    const inputs = {};
+    const params = argsFragment(n.args, inputs);
+    inputs.BODY = { block: exprToBlock(n.body) };
+    return { type: 'ir_lambda', extraState: { params }, inputs };
+  },
   // Call: func + N positional args (may include *a Starred) + M keywords. Each keyword is
   // (arg, value); arg=null encodes ** unpacking. arg names + arity live in extraState; the
   // keyword VALUES are KW* inputs. This is the Tier-B representation for any library call.
@@ -213,6 +267,23 @@ const STMT_HANDLERS = {
   Pass: () => blk('ir_pass', {}, {}),
   Break: () => blk('ir_break', {}, {}),
   Continue: () => blk('ir_continue', {}, {}),
+  FunctionDef: (n) => {
+    const inputs = {};
+    const params = argsFragment(n.args, inputs);
+    const tparams = tparamsFragment(n.type_params, inputs);
+    (n.decorator_list || []).forEach((d, i) => { inputs['DEC' + i] = { block: exprToBlock(d) }; });
+    if (n.returns !== null && n.returns !== undefined) inputs.RETURNS = { block: exprToBlock(n.returns) };
+    inputs.BODY = stmtStack(n.body);
+    return { type: 'ir_funcdef', fields: { NAME: n.name },
+      extraState: { params, tparams, ndec: (n.decorator_list || []).length, ret: n.returns != null }, inputs };
+  },
+  Return: (n) => {
+    const inputs = {};
+    if (n.value !== null && n.value !== undefined) inputs.VALUE = { block: exprToBlock(n.value) };
+    return blk('ir_return', {}, inputs);
+  },
+  Global: (n) => blk('ir_global', { NAMES: n.names.join(', ') }, {}),
+  Nonlocal: (n) => blk('ir_nonlocal', { NAMES: n.names.join(', ') }, {}),
 };
 
 // Fail loud (never silently wrong) for a node we cannot yet turn into a block. The policy

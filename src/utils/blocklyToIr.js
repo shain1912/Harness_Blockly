@@ -64,6 +64,9 @@ const BLOCK_TO_EXPR = {
     upper: b.inputs.UPPER ? blockToExpr(b.inputs.UPPER.block) : null,
     step: b.inputs.STEP ? blockToExpr(b.inputs.STEP.block) : null }),
   ir_starred: (b) => ({ type: 'Starred', value: blockToExpr(b.inputs.VALUE.block) }),
+  ir_lambda: (b) => ({ type: 'Lambda',
+    args: fragmentToArgs((b.extraState && b.extraState.params) || [], b.inputs),
+    body: blockToExpr(b.inputs.BODY.block) }),
   ir_call: (b) => {
     const nargs = (b.extraState && b.extraState.nargs) || 0;
     const kw = (b.extraState && b.extraState.kw) || [];
@@ -101,6 +104,21 @@ const BLOCK_TO_STMT = {
   ir_pass: () => ({ type: 'Pass' }),
   ir_break: () => ({ type: 'Break' }),
   ir_continue: () => ({ type: 'Continue' }),
+  ir_funcdef: (b) => {
+    const params = (b.extraState && b.extraState.params) || [];
+    const ndec = (b.extraState && b.extraState.ndec) || 0;
+    const decorator_list = [];
+    for (let i = 0; i < ndec; i++) decorator_list.push(blockToExpr(b.inputs['DEC' + i].block));
+    return { type: 'FunctionDef', name: b.fields.NAME,
+      args: fragmentToArgs(params, b.inputs),
+      body: stmtListOrPass(b.inputs.BODY),
+      decorator_list,
+      returns: b.inputs.RETURNS ? blockToExpr(b.inputs.RETURNS.block) : null,
+      type_params: fragmentToTparams((b.extraState && b.extraState.tparams) || [], b.inputs) };
+  },
+  ir_return: (b) => ({ type: 'Return', value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null }),
+  ir_global: (b) => ({ type: 'Global', names: b.fields.NAMES.split(', ') }),
+  ir_nonlocal: (b) => ({ type: 'Nonlocal', names: b.fields.NAMES.split(', ') }),
 };
 
 // Walk a statement-input stack (first block + next-chain) into an IR statement list.
@@ -117,6 +135,33 @@ function stmtList(inp) {
 function stmtListOrPass(inp) {
   const list = stmtList(inp);
   return list.length ? list : [{ type: 'Pass' }];
+}
+
+// Rebuild PEP-695 type parameters from their fragment + TPB<i>/TPD<i> inputs.
+function fragmentToTparams(tps, inputs) {
+  return (tps || []).map((t, i) => {
+    const node = { type: t.kind, name: t.name };
+    if (t.kind === 'TypeVar') node.bound = t.bound ? blockToExpr(inputs['TPB' + i].block) : null;
+    if (t.def) node.default_value = blockToExpr(inputs['TPD' + i].block);
+    return node;
+  });
+}
+
+// Rebuild a CPython `arguments` node from the unified param list + ANN<i>/DEF<i> inputs.
+function fragmentToArgs(params, inputs) {
+  const a = { type: 'arguments', posonlyargs: [], args: [], vararg: null,
+    kwonlyargs: [], kw_defaults: [], kwarg: null, defaults: [] };
+  params.forEach((p, i) => {
+    const arg = { type: 'arg', arg: p.name,
+      annotation: p.ann ? blockToExpr(inputs['ANN' + i].block) : null };
+    const def = p.def ? blockToExpr(inputs['DEF' + i].block) : null;
+    if (p.kind === 'posonly') { a.posonlyargs.push(arg); if (p.def) a.defaults.push(def); }
+    else if (p.kind === 'arg') { a.args.push(arg); if (p.def) a.defaults.push(def); }
+    else if (p.kind === 'vararg') a.vararg = arg;
+    else if (p.kind === 'kwonly') { a.kwonlyargs.push(arg); a.kw_defaults.push(p.def ? def : null); }
+    else if (p.kind === 'kwarg') a.kwarg = arg;
+  });
+  return a;
 }
 
 // Blockly omits `inputs` entirely when a block has no connected inputs (e.g. an empty

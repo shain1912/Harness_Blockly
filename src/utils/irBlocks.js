@@ -365,4 +365,106 @@ if (Blockly) {
   Blockly.Blocks['ir_continue'] = { init() { this.appendDummyInput().appendField('continue'); stmt(this, '#a0734a'); } };
 }
 
+if (Blockly) {
+  // Rebuild ANN<i>/DEF<i> inputs from a param list (shared by funcdef + lambda). Removes
+  // every input except the named stable rows, then recreates the signature inputs so a real
+  // Blockly load restores connections to matching names.
+  const rebuildParamInputs = (block, params, keep) => {
+    block.inputList.map((inp) => inp.name).filter((nm) => nm && keep.indexOf(nm) < 0)
+      .forEach((nm) => block.removeInput(nm));
+    params.forEach((p, i) => {
+      if (p.ann) block.appendValueInput('ANN' + i).appendField(p.name + ':');
+      if (p.def) block.appendValueInput('DEF' + i).appendField(p.name + '=');
+    });
+  };
+
+  Blockly.Blocks['ir_funcdef'] = {
+    params_: [], tparams_: [], ndec_: 0, ret_: false,
+    init() {
+      this.params_ = []; this.tparams_ = []; this.ndec_ = 0; this.ret_ = false;
+      this.appendDummyInput('NAMEROW').appendField('def')
+        .appendField(new Blockly.FieldTextInput('f'), 'NAME');
+      this.updateShape_();
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#9a6a8a');
+    },
+    saveExtraState() {
+      return { params: this.params_, tparams: this.tparams_, ndec: this.ndec_, ret: this.ret_ };
+    },
+    loadExtraState(s) {
+      this.params_ = (s && Array.isArray(s.params)) ? s.params : [];
+      this.tparams_ = (s && Array.isArray(s.tparams)) ? s.tparams : [];
+      this.ndec_ = (s && typeof s.ndec === 'number') ? s.ndec : 0;
+      this.ret_ = !!(s && s.ret);
+      this.updateShape_();
+    },
+    updateShape_() {
+      // remove everything except NAMEROW, then rebuild decorators, type params, params,
+      // returns, body
+      this.inputList.map((inp) => inp.name).filter((nm) => nm && nm !== 'NAMEROW')
+        .forEach((nm) => this.removeInput(nm));
+      for (let i = 0; i < this.ndec_; i++) this.appendValueInput('DEC' + i).appendField('@');
+      this.tparams_.forEach((t, i) => {
+        if (t.bound) this.appendValueInput('TPB' + i).appendField('[' + t.name + ':');
+        if (t.def) this.appendValueInput('TPD' + i).appendField('[' + t.name + '=');
+      });
+      this.params_.forEach((p, i) => {
+        if (p.ann) this.appendValueInput('ANN' + i).appendField(p.name + ':');
+        if (p.def) this.appendValueInput('DEF' + i).appendField(p.name + '=');
+      });
+      if (this.ret_) this.appendValueInput('RETURNS').appendField('->');
+      this.appendStatementInput('BODY');
+    },
+  };
+
+  Blockly.Blocks['ir_lambda'] = {
+    params_: [],
+    init() {
+      this.params_ = [];
+      this.appendDummyInput('LROW').appendField('lambda');
+      this.updateShape_();
+      this.setOutput(true);
+      this.setColour('#9a6a8a');
+    },
+    saveExtraState() { return { params: this.params_ }; },
+    loadExtraState(s) {
+      this.params_ = (s && Array.isArray(s.params)) ? s.params : [];
+      this.updateShape_();
+    },
+    updateShape_() {
+      if (this.getInput('BODY')) this.removeInput('BODY');
+      rebuildParamInputs(this, this.params_, ['LROW']);
+      this.appendValueInput('BODY').appendField(':');
+    },
+  };
+
+  Blockly.Blocks['ir_return'] = {
+    init() {
+      this.appendValueInput('VALUE').appendField('return');
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#9a6a8a');
+    },
+  };
+  Blockly.Blocks['ir_global'] = {
+    init() {
+      this.appendDummyInput().appendField('global')
+        .appendField(new Blockly.FieldTextInput('x'), 'NAMES');
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#888888');
+    },
+  };
+  Blockly.Blocks['ir_nonlocal'] = {
+    init() {
+      this.appendDummyInput().appendField('nonlocal')
+        .appendField(new Blockly.FieldTextInput('x'), 'NAMES');
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#888888');
+    },
+  };
+}
+
 if (typeof module !== 'undefined') module.exports = {};
