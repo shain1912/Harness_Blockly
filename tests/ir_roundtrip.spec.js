@@ -507,6 +507,44 @@ test.describe('AST-IR bridge round-trip', () => {
     for (const { a, b } of pairs) expect(b).toBe(a);
   });
 
+  // match slice through REAL Blockly load->save. All 8 pattern nodes + match_case are HELPERs
+  // encoded in the ir_match block's extraState (with embedded exprs as C<i>E<k> inputs), so this
+  // asserts the round-trip PROPERTY (unparse(ir) === unparse(back)) over every pattern form:
+  // value/singleton/sequence/star/mapping/class/as/or, capture, wildcard, guard, multi-case.
+  test('match statements survive a real Blockly load->save (round-trip property)', async ({ page }) => {
+    const cases = [
+      'match p:\n    case 1:\n        pass',
+      'match p:\n    case None:\n        pass',
+      'match p:\n    case x.y:\n        pass',
+      'match p:\n    case [a, b]:\n        pass',
+      'match p:\n    case [a, *rest]:\n        pass',
+      'match p:\n    case {"k": v, **rest}:\n        pass',
+      'match p:\n    case Point(x, y=0):\n        pass',
+      'match p:\n    case 1 | 2 | 3:\n        pass',
+      'match p:\n    case [1] as y:\n        pass',
+      'match p:\n    case x:\n        pass',
+      'match p:\n    case _:\n        pass',
+      'match p:\n    case 1 if x > 0:\n        pass',
+      'match p:\n    case 1:\n        result = 1\n    case _:\n        result = 0',
+    ];
+    const pairs = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push({ a: await B.irToPython(window.__pyodide, ir),
+            b: await B.irToPython(window.__pyodide, back) });
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    for (const { a, b } of pairs) expect(b).toBe(a);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

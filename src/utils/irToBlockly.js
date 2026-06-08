@@ -22,7 +22,7 @@ const NODE_POLICY = {
   FunctionDef: 'DB', AsyncFunctionDef: 'DB', ClassDef: 'DB', Return: 'DB',
   Delete: 'DB', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'DB',
   AsyncFor: 'DB', While: 'DB', If: 'DB', With: 'DB', AsyncWith: 'DB',
-  Match: 'PENDING', Raise: 'DB', Try: 'DB', TryStar: 'DB', Assert: 'DB',
+  Match: 'DB', Raise: 'DB', Try: 'DB', TryStar: 'DB', Assert: 'DB',
   Import: 'DB', ImportFrom: 'DB', Global: 'DB', Nonlocal: 'DB', Pass: 'DB',
   Break: 'DB', Continue: 'DB', TypeAlias: 'PENDING', Expr: 'DB',
   // expressions — only Name/Constant implemented so far
@@ -121,6 +121,32 @@ function tparamsFragment(tparams, inputs) {
     }
     return t;
   });
+}
+
+// Serialize a match pattern (all 8 nodes are HELPERs) into a plain structural object. Embedded
+// expressions are pushed into the block inputs via addExpr, which returns their index (the
+// pattern object stores indices, not the exprs). Inverse: decPattern in blocklyToIr.
+function encPattern(pat, addExpr) {
+  switch (pat.type) {
+    case 'MatchValue':     return { p: 'V', e: addExpr(pat.value) };
+    case 'MatchSingleton': return { p: 'S', v: pat.value };   // raw None/True/False
+    case 'MatchSequence':  return { p: 'Seq', items: (pat.patterns || []).map((x) => encPattern(x, addExpr)) };
+    case 'MatchMapping':   return { p: 'Map',
+      keys: (pat.keys || []).map(addExpr),
+      pats: (pat.patterns || []).map((x) => encPattern(x, addExpr)),
+      rest: pat.rest !== null && pat.rest !== undefined ? pat.rest : null };
+    case 'MatchClass':     return { p: 'Cls',
+      cls: addExpr(pat.cls),
+      pats: (pat.patterns || []).map((x) => encPattern(x, addExpr)),
+      kwd_attrs: pat.kwd_attrs || [],
+      kwd_pats: (pat.kwd_patterns || []).map((x) => encPattern(x, addExpr)) };
+    case 'MatchStar':      return { p: 'Star', name: pat.name !== null && pat.name !== undefined ? pat.name : null };
+    case 'MatchAs':        return { p: 'As',
+      name: pat.name !== null && pat.name !== undefined ? pat.name : null,
+      sub: pat.pattern !== null && pat.pattern !== undefined ? encPattern(pat.pattern, addExpr) : null };
+    case 'MatchOr':        return { p: 'Or', items: (pat.patterns || []).map((x) => encPattern(x, addExpr)) };
+    default: throw new Error('irToBlockly: unknown match pattern ' + pat.type);
+  }
 }
 
 // For/AsyncFor share one shape; async-ness is encoded in the block type (ir_for vs ir_asyncfor).
@@ -419,6 +445,23 @@ const STMT_HANDLERS = {
   // with the optional `as name` carried in extraState. orelse/finalbody are optional suites.
   Try: (n) => tryBlock('ir_try', n),
   TryStar: (n) => tryBlock('ir_trystar', n),
+  // match subject: case <pattern> [if guard]: body ... — Match is the only DB node here;
+  // match_case + the 8 pattern nodes are HELPERs encoded structurally in extraState. Embedded
+  // expressions (MatchValue.value, MatchMapping.keys, MatchClass.cls) become C<i>E<k> inputs.
+  Match: (n) => {
+    const inputs = { SUBJECT: { block: exprToBlock(n.subject) } };
+    const cases = (n.cases || []).map((c, i) => {
+      let k = 0;
+      const addExpr = (e) => { inputs['C' + i + 'E' + k] = { block: exprToBlock(e) }; return k++; };
+      const pattern = encPattern(c.pattern, addExpr);
+      const guard = c.guard !== null && c.guard !== undefined;
+      if (guard) inputs['GUARD' + i] = { block: exprToBlock(c.guard) };
+      const body = stmtStack(c.body);
+      if (body) inputs['BODY' + i] = body;
+      return { pattern, nexpr: k, guard };
+    });
+    return { type: 'ir_match', extraState: { cases }, inputs };
+  },
   FunctionDef: (n) => funcDefBlock('ir_funcdef', n),
   AsyncFunctionDef: (n) => funcDefBlock('ir_asyncfuncdef', n),
   // ClassDef = FunctionDef's decorators/type_params/body plus Call-style bases + keywords.

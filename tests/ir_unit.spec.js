@@ -100,11 +100,12 @@ test('handlerless try without a valid finally form fails loud (invalid Python, n
 });
 
 test('PENDING (unimplemented) nodes fail loudly with policy status, never silently', () => {
-  // Match is on the worklist (PENDING, #15) — converting it must throw an explicit error
+  // TypeAlias is on the worklist (PENDING, #16) — converting it must throw an explicit error
   // naming the node and its policy, not produce a wrong/empty block.
   const mod = { type: 'Module', type_ignores: [],
-    body: [{ type: 'Match', subject: { type: 'Name', id: 'x' }, cases: [] }] };
-  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/Match \(policy=PENDING\)/);
+    body: [{ type: 'TypeAlias', name: { type: 'Name', id: 'X' }, type_params: [],
+      value: { type: 'Name', id: 'int' } }] };
+  expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/TypeAlias \(policy=PENDING\)/);
 });
 
 test('ClassDef (bases + keyword + body) round-trips losslessly (IR -> Blockly -> IR)', () => {
@@ -259,6 +260,41 @@ test('JoinedStr / FormattedValue (conversion + nested format_spec) round-trip lo
             format_spec: null }] } },
       { type: 'Constant', value: ' post' },
     ] } }] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
+test('Match: all 8 pattern nodes + match_case (guard, multi-case) round-trip losslessly', () => {
+  // Match is the only DB node; match_case + the 8 pattern nodes are HELPERs encoded in the
+  // ir_match extraState (embedded exprs become C<i>E<k> inputs). This one case nests every
+  // pattern kind so the encoder/decoder is exercised end to end.
+  const nm = (id) => ({ type: 'Name', id });
+  const con = (v) => ({ type: 'Constant', value: v });
+  const IR = { type: 'Module', type_ignores: [], body: [{
+    type: 'Match', subject: nm('p'), cases: [
+      // MatchClass(positional MatchValue + kwd MatchAs), guard
+      { type: 'match_case',
+        pattern: { type: 'MatchClass', cls: nm('Point'),
+          patterns: [{ type: 'MatchValue', value: con(0) }],
+          kwd_attrs: ['y'], kwd_patterns: [{ type: 'MatchAs', name: 'yy', pattern: null }] },
+        guard: nm('flag'), body: [{ type: 'Pass' }] },
+      // MatchSequence with MatchStar + MatchSingleton, no guard
+      { type: 'match_case',
+        pattern: { type: 'MatchSequence', patterns: [
+          { type: 'MatchSingleton', value: null },
+          { type: 'MatchStar', name: 'rest' }] },
+        guard: null, body: [{ type: 'Pass' }] },
+      // MatchMapping (key expr + rest) and MatchOr inside MatchAs(as y)
+      { type: 'match_case',
+        pattern: { type: 'MatchAs', name: 'y', pattern: { type: 'MatchOr', patterns: [
+          { type: 'MatchMapping', keys: [con('k')],
+            patterns: [{ type: 'MatchValue', value: con(1) }], rest: 'r' },
+          { type: 'MatchValue', value: con(2) }] } },
+        guard: null, body: [{ type: 'Pass' }] },
+      // wildcard MatchAs(name=null, pattern=null)
+      { type: 'match_case', pattern: { type: 'MatchAs', name: null, pattern: null },
+        guard: null, body: [{ type: 'Pass' }] },
+    ] }] };
   const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
   expect(back).toEqual(IR);
 });

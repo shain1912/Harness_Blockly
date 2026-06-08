@@ -468,6 +468,37 @@ if (Blockly) {
   });
   Blockly.Blocks['ir_try'] = tryInit(false);
   Blockly.Blocks['ir_trystar'] = tryInit(true);
+
+  // match SUBJECT: (case <C<i>E<k> exprs> [if GUARD<i>]: BODY<i>)+. The pattern structure (all
+  // HELPER nodes) lives in extraState cases_=[{pattern, nexpr, guard}]; only the embedded
+  // expressions surface as inputs. SUBJECT is the stable kept row; CASEROW<i> are named so the
+  // rebuild-on-load removes them cleanly.
+  Blockly.Blocks['ir_match'] = {
+    cases_: [],
+    init() {
+      this.cases_ = [];
+      this.appendValueInput('SUBJECT').appendField('match');
+      this.updateShape_();
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#a0734a');
+    },
+    saveExtraState() { return { cases: this.cases_ }; },
+    loadExtraState(s) {
+      this.cases_ = (s && Array.isArray(s.cases)) ? s.cases : [];
+      this.updateShape_();
+    },
+    updateShape_() {
+      this.inputList.map((inp) => inp.name).filter((nm) => nm && nm !== 'SUBJECT')
+        .forEach((nm) => this.removeInput(nm));
+      this.cases_.forEach((c, i) => {
+        this.appendDummyInput('CASEROW' + i).appendField('case');
+        for (let k = 0; k < (c.nexpr || 0); k++) this.appendValueInput('C' + i + 'E' + k);
+        if (c.guard) this.appendValueInput('GUARD' + i).appendField('if');
+        this.appendStatementInput('BODY' + i);
+      });
+    },
+  };
 }
 
 if (Blockly) {

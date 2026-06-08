@@ -176,6 +176,16 @@ const BLOCK_TO_STMT = {
     msg: b.inputs.MSG ? blockToExpr(b.inputs.MSG.block) : null }),
   ir_with: (b) => withToIr('With', b),
   ir_asyncwith: (b) => withToIr('AsyncWith', b),
+  ir_match: (b) => {
+    const cases = ((b.extraState && b.extraState.cases) || []).map((c, i) => {
+      const getExpr = (idx) => blockToExpr(b.inputs['C' + i + 'E' + idx].block);
+      return { type: 'match_case',
+        pattern: decPattern(c.pattern, getExpr),
+        guard: c.guard ? blockToExpr(b.inputs['GUARD' + i].block) : null,
+        body: stmtListOrPass(b.inputs['BODY' + i]) };
+    });
+    return { type: 'Match', subject: blockToExpr(b.inputs.SUBJECT.block), cases };
+  },
   ir_try: (b) => tryToIr('Try', b),
   ir_trystar: (b) => tryToIr('TryStar', b),
   ir_funcdef: (b) => funcDefToIr('FunctionDef', b),
@@ -233,6 +243,31 @@ function stmtList(inp) {
 function stmtListOrPass(inp) {
   const list = stmtList(inp);
   return list.length ? list : [{ type: 'Pass' }];
+}
+
+// Rebuild a match pattern from its structural object (inverse of encPattern). getExpr(idx)
+// resolves an embedded expression input by its stored index.
+function decPattern(s, getExpr) {
+  switch (s.p) {
+    case 'V':   return { type: 'MatchValue', value: getExpr(s.e) };
+    case 'S':   return { type: 'MatchSingleton', value: s.v };
+    case 'Seq': return { type: 'MatchSequence', patterns: (s.items || []).map((x) => decPattern(x, getExpr)) };
+    case 'Map': return { type: 'MatchMapping',
+      keys: (s.keys || []).map(getExpr),
+      patterns: (s.pats || []).map((x) => decPattern(x, getExpr)),
+      rest: s.rest !== null && s.rest !== undefined ? s.rest : null };
+    case 'Cls': return { type: 'MatchClass',
+      cls: getExpr(s.cls),
+      patterns: (s.pats || []).map((x) => decPattern(x, getExpr)),
+      kwd_attrs: s.kwd_attrs || [],
+      kwd_patterns: (s.kwd_pats || []).map((x) => decPattern(x, getExpr)) };
+    case 'Star': return { type: 'MatchStar', name: s.name !== null && s.name !== undefined ? s.name : null };
+    case 'As':  return { type: 'MatchAs',
+      name: s.name !== null && s.name !== undefined ? s.name : null,
+      pattern: s.sub !== null && s.sub !== undefined ? decPattern(s.sub, getExpr) : null };
+    case 'Or':  return { type: 'MatchOr', patterns: (s.items || []).map((x) => decPattern(x, getExpr)) };
+    default: throw new Error('blocklyToIr: unknown match pattern code ' + s.p);
+  }
 }
 
 // For/AsyncFor share one shape; the block type carries async-ness.
