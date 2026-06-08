@@ -68,8 +68,15 @@ save(ws) → blocklyToIr(json) → await irToPython(py, ir) → onCodeChange(cod
 ### 4. Legacy retirement (conversion path only)
 
 Remove only the `astToBlockly` / `workspaceToCode` / `desugar` *calls*. Keep `parser.js`,
-sprite/cv2 block defs, dynamic library engine, and the toolbox XML loaded but inert for
-conversion. Aligning the toolbox to `ir_*` blocks is explicit future work.
+sprite/cv2 block defs, and the dynamic library engine loaded but inert for conversion.
+
+**Empty the legacy toolbox** (`index.html`): the old categories offered blocks (`text_print`,
+`controls_if`, …) the IR `block→code` path cannot consume — dragging one would make
+`blocklyToIr` throw and silently stop regenerating Python (a broken block-first workflow).
+Since `block→code` is now IR-only and no `ir_*` toolbox exists yet, the toolbox is emptied so
+there are no draggable blocks that break the round-trip. The conversion path is
+Python → Convert → `ir_*` blocks (edit fields) → Python. An `ir_*` toolbox is explicit future
+work. (Resolves a P1 from Codex review.)
 
 ## Testing
 
@@ -81,7 +88,7 @@ conversion. Aligning the toolbox to `ir_*` blocks is explicit future work.
 
 ## Risks / notes
 
-- Legacy toolbox offers blocks the IR path can't consume → mitigated by graceful catch, flagged
-  as future toolbox work.
+- Legacy toolbox blocks the IR path can't consume → toolbox emptied (see §4); `blocklyToIr`'s
+  throw on an unknown block is still caught (defence in depth) but is now unreachable from the UI.
 - Block→code now requires Pyodide; before warmup, block edits don't regenerate code (acceptable;
   Convert is the primary entry and warms it).

@@ -116,6 +116,18 @@ async function irToPython(pyodide, ir) {
   }
 }
 
-const BlockPyAstBridge = { pythonToIR, irToPython, PY_AST_TO_JSON, PY_IR_TO_CODE };
+// Resolve the live Pyodide instance for the conversion path. Prefer the readiness promise: it
+// resolves only after FULL init (micropip + builtins), so awaiting it avoids racing a runPython
+// against in-flight setup (window.__pyodide is set mid-init, before setup completes). Awaiting an
+// already-resolved promise is immediate. Fall back to the live handle only when no promise exists
+// (e.g. a runtime injected directly). Throws if Pyodide was never initialized.
+async function getPyodide() {
+  if (typeof window === 'undefined') throw new Error('getPyodide: no window');
+  if (window.__pyodideReadyPromise) return window.__pyodideReadyPromise;
+  if (window.__pyodide) return window.__pyodide;
+  throw new Error('getPyodide: Pyodide not initialized (initPyodide/prewarmEnvironment must run first)');
+}
+
+const BlockPyAstBridge = { pythonToIR, irToPython, getPyodide, PY_AST_TO_JSON, PY_IR_TO_CODE };
 if (typeof window !== 'undefined') window.BlockPyAstBridge = BlockPyAstBridge;
 if (typeof module !== 'undefined') module.exports = BlockPyAstBridge;

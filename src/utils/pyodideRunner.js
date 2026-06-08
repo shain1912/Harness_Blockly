@@ -174,6 +174,10 @@ export async function initPyodide(onStatus) {
     return pyodide;
   })();
 
+  // Expose the init promise so the IR conversion path (pyAstBridge.getPyodide) can await
+  // readiness without importing this ES module (it runs as a window-global side-effect file).
+  if (typeof window !== 'undefined') window.__pyodideReadyPromise = _initPromise;
+
   return _initPromise;
 }
 

@@ -66,51 +66,30 @@ export default function App() {
     return clean(codeA) === clean(codeB);
   };
 
-  // Compile Python to Blockly blocks
-  const syncCodeToBlocks = (currentCode) => {
+  // Compile Python to Blockly blocks via the CPython-3.12 ast single-IR pipeline (Pyodide):
+  //   python -> pythonToIR -> irToBlockly -> Blockly workspace load.
+  // Async because the parse runs in Pyodide. The legacy BlockPyParser/Desugarer path is retired
+  // from conversion; IR keeps SUGAR blocks (no desugar — desugar-as-feature is a later phase).
+  const syncCodeToBlocks = async (currentCode) => {
     if (!currentCode.trim() || currentCode.startsWith('# Start dragging')) return;
     if (!workspaceRef.current) return;
 
     isSyncingFromCodeRef.current = true;
 
     try {
-      // Snapshot Recovery Check
+      // Snapshot Recovery Check: unchanged Python since the last block edit restores the saved
+      // workspace JSON verbatim (no re-parse, no block drift).
       if (blocklySnapshotRef.current && arePythonScriptsEquivalent(currentCode, associatedPythonRef.current)) {
         window.Blockly.serialization.workspaces.load(blocklySnapshotRef.current, workspaceRef.current);
         setLogs(prev => [...prev, '[Sync-Engine] Python matches active snapshot. Restored layout without block drift.']);
         setSyntaxStatus({ valid: true, error: '' });
-        isSyncingFromCodeRef.current = false;
         return;
       }
 
-      // Compile, desugaring only when the "Auto Desugar" toggle is on.
-      // Desugar off → advanced syntax keeps its dedicated blocks (ternary, list comp).
-      let parsedAST = null;
-      if (shouldDesugar) {
-        const result = window.BlockPyDesugarer.desugarPythonCode(currentCode);
-        if (!result.success) {
-          throw new SyntaxError(result.error);
-        }
-        parsedAST = result.desugaredAST;
-      } else {
-        const lexer = new window.BlockPyParser.Tokenizer(currentCode);
-        const tokens = lexer.tokenize();
-        const parser = new window.BlockPyParser.Parser(tokens);
-        parsedAST = parser.parse();
-      }
-
-      const blocklyJson = window.BlockPyParser.astToBlockly(parsedAST);
+      const pyodide = await window.BlockPyAstBridge.getPyodide();
+      const ir = await window.BlockPyAstBridge.pythonToIR(pyodide, currentCode);
+      const blocklyJson = window.BlockPyIR.irToBlockly(ir);
       window.Blockly.serialization.workspaces.load(blocklyJson, workspaceRef.current);
-
-      // Pick up any dynamic library blocks the parser auto-registered during astToBlockly.
-      const engine = abstractionEngineRef.current;
-      if (engine && engine.activeBlocks && engine.activeBlocks.length > 0) {
-        setInstalledBlocks((prev) => {
-          const known = new Set(prev.map((p) => p.type));
-          const added = engine.activeBlocks.filter((b) => !known.has(b.type));
-          return added.length ? [...prev, ...added] : prev;
-        });
-      }
 
       // Ensure the freshly-loaded blocks actually render and are in view. Loading into a
       // hidden/zero-size workspace (e.g. while the Python tab is active) leaves blocks
@@ -125,7 +104,7 @@ export default function App() {
       associatedPythonRef.current = currentCode;
       refreshGrayBlocks(); // update the gray (unconverted) block inspector
 
-      setLogs(prev => [...prev, `[Sync-Engine] Successfully parsed Python AST. Desugared = ${shouldDesugar}.`]);
+      setLogs(prev => [...prev, '[Sync-Engine] Converted Python → blocks via CPython-3.12 ast IR.']);
       setSyntaxStatus({ valid: true, error: '' });
     } catch (err) {
       console.error(err);

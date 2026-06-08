@@ -92,7 +92,27 @@ export default function BlocklyEditor({
       }
     }
 
-    // Listener for changes
+    // Block -> Python via the CPython-3.12 ast single-IR pipeline (Pyodide):
+    //   workspace JSON -> blocklyToIr -> irToPython. Async (Pyodide) + debounced so rapid edits
+    // coalesce into one regeneration. The legacy Blockly.Python generator path is retired.
+    let codeGenTimer = null;
+    const regenerate = async () => {
+      if (isSyncingFromCode.current) return;
+      try {
+        const snapshot = window.Blockly.serialization.workspaces.save(ws);
+        const pyodide = await window.BlockPyAstBridge.getPyodide();
+        const ir = window.BlockPyIR.blocklyToIr(snapshot);
+        const code = await window.BlockPyAstBridge.irToPython(pyodide, ir);
+        if (isSyncingFromCode.current) return; // a code->block sync may have started during await
+        onCodeChange(code);
+        onSnapshotChange(snapshot);
+      } catch (err) {
+        // A block outside the IR vocabulary (e.g. a legacy toolbox block) makes blocklyToIr
+        // throw; surface it without crashing the editor. Toolbox alignment is future work.
+        console.error('Error generating code on workspace change (IR path):', err);
+      }
+    };
+
     const changeListener = (event) => {
       if (isSyncingFromCode.current) return;
 
@@ -102,14 +122,8 @@ export default function BlocklyEditor({
         event.type === window.Blockly.Events.BLOCK_CHANGE ||
         event.type === window.Blockly.Events.BLOCK_MOVE
       ) {
-        try {
-          const code = window.Blockly.Python.workspaceToCode(ws);
-          const snapshot = window.Blockly.serialization.workspaces.save(ws);
-          onCodeChange(code);
-          onSnapshotChange(snapshot);
-        } catch (err) {
-          console.error('Error generating code on workspace change:', err);
-        }
+        clearTimeout(codeGenTimer);
+        codeGenTimer = setTimeout(regenerate, 200);
       }
     };
 
@@ -118,6 +132,7 @@ export default function BlocklyEditor({
     // Cleanup
     return () => {
       clearTimeout(paintTimer);
+      clearTimeout(codeGenTimer);
       ws.removeChangeListener(changeListener);
       ws.dispose();
       workspaceRef.current = null;
