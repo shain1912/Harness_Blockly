@@ -116,6 +116,24 @@ const BLOCK_TO_STMT = {
       returns: b.inputs.RETURNS ? blockToExpr(b.inputs.RETURNS.block) : null,
       type_params: fragmentToTparams((b.extraState && b.extraState.tparams) || [], b.inputs) };
   },
+  ir_classdef: (b) => {
+    const es = b.extraState || {};
+    const ndec = es.ndec || 0;
+    const nbases = es.nbases || 0;
+    const kw = es.kw || [];
+    const decorator_list = [];
+    for (let i = 0; i < ndec; i++) decorator_list.push(blockToExpr(b.inputs['DEC' + i].block));
+    const bases = [];
+    for (let i = 0; i < nbases; i++) bases.push(blockToExpr(b.inputs['BASE' + i].block));
+    const keywords = kw.map((name, i) => ({
+      type: 'keyword', arg: name, value: blockToExpr(b.inputs['KW' + i].block),
+    }));
+    return { type: 'ClassDef', name: b.fields.NAME,
+      bases, keywords,
+      body: stmtListOrPass(b.inputs.BODY),
+      decorator_list,
+      type_params: fragmentToTparams(es.tparams || [], b.inputs) };
+  },
   ir_return: (b) => ({ type: 'Return', value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null }),
   ir_global: (b) => ({ type: 'Global', names: b.fields.NAMES.split(', ') }),
   ir_nonlocal: (b) => ({ type: 'Nonlocal', names: b.fields.NAMES.split(', ') }),

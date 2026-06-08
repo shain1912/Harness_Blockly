@@ -265,6 +265,38 @@ test.describe('AST-IR bridge round-trip', () => {
     expect(codes).toEqual(cases);
   });
 
+  // Classes slice (multi-line) through REAL Blockly load->save: bare class, single/multiple
+  // bases, metaclass + ** keywords, decorators, PEP-695 type params (with bound), and a
+  // body with members (attribute + method).
+  test('classes survive a real Blockly load->save', async ({ page }) => {
+    const cases = [
+      'class C:\n    pass',
+      'class C(Base):\n    pass',
+      'class A(B, C):\n    pass',
+      'class C(Base, metaclass=Meta):\n    pass',
+      '@deco\nclass C:\n    pass',
+      'class C(B, **kw):\n    pass',
+      'class C[T]:\n    pass',
+      'class C[T: int](Base):\n    pass',
+      'class C:\n    x = 1\n\n    def m(self):\n        return self.x',
+    ];
+    const codes = await page.evaluate(async (srcs) => {
+      const B = window.BlockPyAstBridge, IRm = window.BlockPyIR, Bk = window.Blockly;
+      const out = [];
+      for (const s of srcs) {
+        const ir = await B.pythonToIR(window.__pyodide, s + '\n');
+        const ws = new Bk.Workspace();
+        try {
+          Bk.serialization.workspaces.load(IRm.irToBlockly(ir), ws);
+          const back = IRm.blocklyToIr(Bk.serialization.workspaces.save(ws));
+          out.push((await B.irToPython(window.__pyodide, back)).replace(/\n$/, ''));
+        } finally { ws.dispose(); }
+      }
+      return out;
+    }, cases);
+    expect(codes).toEqual(cases);
+  });
+
   // Codex review (round 2): exercise the REAL Blockly serialization path — load the
   // generated JSON into an actual workspace, save it back, then to IR/Python. This
   // catches mutator-input mismatches that the pure-JSON round-trip cannot.

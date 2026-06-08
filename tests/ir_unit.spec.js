@@ -75,6 +75,22 @@ test('PENDING (unimplemented) nodes fail loudly with policy status, never silent
   expect(() => global.BlockPyIR.irToBlockly(mod)).toThrow(/Delete \(policy=PENDING\)/);
 });
 
+test('ClassDef (bases + keyword + body) round-trips losslessly (IR -> Blockly -> IR)', () => {
+  // A class carrying a base, a metaclass keyword, and a body member exercises the
+  // variable-arity bases/keywords mutator plus the mandatory body suite.
+  const IR = { type: 'Module', type_ignores: [], body: [{
+    type: 'ClassDef', name: 'C',
+    bases: [{ type: 'Name', id: 'Base' }],
+    keywords: [{ type: 'keyword', arg: 'metaclass', value: { type: 'Name', id: 'Meta' } }],
+    body: [{ type: 'Assign', targets: [{ type: 'Name', id: 'x' }],
+      value: { type: 'Constant', value: 1 } }],
+    decorator_list: [],
+    type_params: [],
+  }] };
+  const back = global.BlockPyIR.blocklyToIr(global.BlockPyIR.irToBlockly(IR));
+  expect(back).toEqual(IR);
+});
+
 test('multiple disconnected top-level stacks are all converted (none dropped)', () => {
   // Simulate a saved workspace with TWO separate top-level stacks.
   const stack = (id) => ({ type: 'ir_assign', extraState: { n: 1 },

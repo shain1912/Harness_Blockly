@@ -418,6 +418,51 @@ if (Blockly) {
     },
   };
 
+  // ClassDef: NAME + decorators + type params + bases + keywords (metaclass/**), then BODY.
+  // Variable-arity bits (nbases_, kw_, tparams_, ndec_) live in extraState so a real
+  // save/load rebuilds the matching inputs before connections are restored.
+  Blockly.Blocks['ir_classdef'] = {
+    nbases_: 0, kw_: [], tparams_: [], ndec_: 0,
+    init() {
+      this.nbases_ = 0; this.kw_ = []; this.tparams_ = []; this.ndec_ = 0;
+      this.appendDummyInput('NAMEROW').appendField('class')
+        .appendField(new Blockly.FieldTextInput('C'), 'NAME');
+      this.updateShape_();
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#9a6a8a');
+    },
+    saveExtraState() {
+      return { nbases: this.nbases_, kw: this.kw_, tparams: this.tparams_, ndec: this.ndec_ };
+    },
+    loadExtraState(s) {
+      this.nbases_ = (s && typeof s.nbases === 'number') ? s.nbases : 0;
+      this.kw_ = (s && Array.isArray(s.kw)) ? s.kw : [];
+      this.tparams_ = (s && Array.isArray(s.tparams)) ? s.tparams : [];
+      this.ndec_ = (s && typeof s.ndec === 'number') ? s.ndec : 0;
+      this.updateShape_();
+    },
+    updateShape_() {
+      this.inputList.map((inp) => inp.name).filter((nm) => nm && nm !== 'NAMEROW')
+        .forEach((nm) => this.removeInput(nm));
+      for (let i = 0; i < this.ndec_; i++) this.appendValueInput('DEC' + i).appendField('@');
+      this.tparams_.forEach((t, i) => {
+        if (t.bound) this.appendValueInput('TPB' + i).appendField('[' + t.name + ':');
+        if (t.def) this.appendValueInput('TPD' + i).appendField('[' + t.name + '=');
+      });
+      for (let i = 0; i < this.nbases_; i++) {
+        this.appendValueInput('BASE' + i).appendField(i === 0 ? '(' : ',');
+      }
+      for (let i = 0; i < this.kw_.length; i++) {
+        const name = this.kw_[i];
+        const label = (name === null || name === undefined) ? '**' : name + '=';
+        this.appendValueInput('KW' + i)
+          .appendField((i === 0 && this.nbases_ === 0) ? '(' + label : ',' + label);
+      }
+      this.appendStatementInput('BODY');
+    },
+  };
+
   Blockly.Blocks['ir_lambda'] = {
     params_: [],
     init() {

@@ -19,7 +19,7 @@
 const NODE_POLICY = {
   Module: 'ROOT',
   // statements — only Assign implemented so far; the rest are the worklist (PENDING)
-  FunctionDef: 'DB', AsyncFunctionDef: 'PENDING', ClassDef: 'PENDING', Return: 'DB',
+  FunctionDef: 'DB', AsyncFunctionDef: 'PENDING', ClassDef: 'DB', Return: 'DB',
   Delete: 'PENDING', Assign: 'DB', AugAssign: 'DB', AnnAssign: 'DB', For: 'DB',
   AsyncFor: 'PENDING', While: 'DB', If: 'DB', With: 'PENDING', AsyncWith: 'PENDING',
   Match: 'PENDING', Raise: 'PENDING', Try: 'PENDING', TryStar: 'PENDING', Assert: 'PENDING',
@@ -276,6 +276,24 @@ const STMT_HANDLERS = {
     inputs.BODY = stmtStack(n.body);
     return { type: 'ir_funcdef', fields: { NAME: n.name },
       extraState: { params, tparams, ndec: (n.decorator_list || []).length, ret: n.returns != null }, inputs };
+  },
+  // ClassDef = FunctionDef's decorators/type_params/body plus Call-style bases + keywords.
+  // bases are BASE* expr inputs; keywords (metaclass=..., **kw) mirror Call's kw encoding
+  // (arg name, or null for **) with KW* value inputs. Body is a mandatory suite.
+  ClassDef: (n) => {
+    const inputs = {};
+    (n.decorator_list || []).forEach((d, i) => { inputs['DEC' + i] = { block: exprToBlock(d) }; });
+    const tparams = tparamsFragment(n.type_params, inputs);
+    (n.bases || []).forEach((b, i) => { inputs['BASE' + i] = { block: exprToBlock(b) }; });
+    const kw = [];
+    (n.keywords || []).forEach((k, i) => {
+      kw.push(k.arg === null || k.arg === undefined ? null : k.arg);
+      inputs['KW' + i] = { block: exprToBlock(k.value) };
+    });
+    inputs.BODY = stmtStack(n.body);
+    return { type: 'ir_classdef', fields: { NAME: n.name },
+      extraState: { nbases: (n.bases || []).length, kw, tparams, ndec: (n.decorator_list || []).length },
+      inputs };
   },
   Return: (n) => {
     const inputs = {};
