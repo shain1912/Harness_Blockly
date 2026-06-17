@@ -36,6 +36,18 @@ test.describe('comment extraction (browser)', () => {
     expect(y._comments).toBeUndefined();     // no comment on y
   });
 
+  test('a comment-only module round-trips (no statement to anchor to)', async ({ page }) => {
+    const out = await page.evaluate(async () => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const src = ['# just a note', '# second line'].join('\n');
+      const ir = await window.BlockPyAstBridge.pythonToIR(py, src);
+      const code = await window.BlockPyAstBridge.irToPython(py, ir);
+      return { module: ir._comments, code };
+    });
+    expect(out.module).toEqual({ leading: ['# just a note', '# second line'] });
+    expect(out.code).toBe('# just a note\n# second line');
+  });
+
   test('irToPython re-injects comments; python->IR->python round-trips them', async ({ page }) => {
     const out = await page.evaluate(async () => {
       const py = await window.BlockPyAstBridge.getPyodide();

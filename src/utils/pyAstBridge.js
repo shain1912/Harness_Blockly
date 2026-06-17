@@ -75,6 +75,11 @@ def _attach_comments(tree, src):
     if not comments:
         return
     stmts = [n for n in ast.walk(tree) if isinstance(n, ast.stmt) and hasattr(n, 'lineno')]
+    if not stmts:
+        # comment-only module: nothing to anchor to -> carry on the Module node itself.
+        for c in comments:
+            _set_cmt(tree, 'leading', c['text'], True)
+        return
     for c in comments:
         if not c['standalone']:
             same = [s for s in stmts if s.lineno == c['line']]
@@ -152,6 +157,15 @@ def _from_ir(d):
     return d
 
 class _CommentUnparser(ast._Unparser):
+    def visit_Module(self, node):
+        cm = getattr(node, '_cmt', None)
+        if cm:
+            for lead in cm.get('leading', []):
+                self.fill(lead)
+        super().visit_Module(node)
+        if cm:
+            for aft in cm.get('after', []):
+                self.fill(aft)
     def traverse(self, node):
         cm = getattr(node, '_cmt', None)
         if isinstance(node, ast.stmt) and cm:
