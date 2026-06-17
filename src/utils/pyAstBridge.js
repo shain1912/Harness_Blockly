@@ -20,7 +20,7 @@
 // Serialize an ast tree to a JSON-able IR dict. Primitives are JSON-encoded (with
 // non-JSON constants tagged); lists map; AST nodes become { type, <fields...>, _loc? }.
 const PY_AST_TO_JSON = `
-import ast, json, base64
+import ast, json, base64, tokenize, io
 _SAFE_INT = 2**53 - 1  # JS Number.MAX_SAFE_INTEGER; ints beyond this lose precision in JSON.parse
 def _enc_float(x):
     # inf / nan are not valid JSON tokens for the JS parser -> tag them
@@ -48,6 +48,58 @@ def _enc_prim(v):
 # both directions so the discriminator and the field coexist losslessly.
 def _key(f):
     return "_field_" + f if f == "type" else f
+def _collect_comments(src):
+    out = []
+    lines = src.splitlines()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type == tokenize.COMMENT:
+                srow, scol = tok.start
+                line = lines[srow - 1] if 0 <= srow - 1 < len(lines) else ''
+                out.append({'line': srow, 'col': scol, 'text': tok.string,
+                            'standalone': line[:scol].strip() == ''})
+    except (tokenize.TokenError, IndentationError):
+        pass  # ast.parse already succeeded; tokenize is best-effort on the same source
+    return out
+def _set_cmt(node, key, val, append):
+    cm = getattr(node, '_cmt', None)
+    if cm is None:
+        cm = {}
+        node._cmt = cm
+    if append:
+        cm.setdefault(key, []).append(val)
+    else:
+        cm[key] = val
+def _attach_comments(tree, src):
+    comments = _collect_comments(src)
+    if not comments:
+        return
+    stmts = [n for n in ast.walk(tree) if isinstance(n, ast.stmt) and hasattr(n, 'lineno')]
+    for c in comments:
+        if not c['standalone']:
+            same = [s for s in stmts if s.lineno == c['line']]
+            if same:
+                _set_cmt(max(same, key=lambda s: s.col_offset), 'trailing', c['text'], False)
+            continue
+        after = [s for s in stmts if s.lineno > c['line']]
+        if after:
+            nxt = min(after, key=lambda s: s.lineno)
+            # If the comment is more indented than the next stmt it's a dangling end-of-block
+            # comment, not a leading comment for the next stmt. Attach as 'after' to the last
+            # statement that is at least as indented as this comment.
+            if c['col'] > nxt.col_offset:
+                before = [s for s in stmts if s.lineno < c['line'] and s.col_offset >= c['col']]
+                if not before:
+                    # fall back: same or any deeper col
+                    before = [s for s in stmts if s.lineno < c['line']]
+                if before:
+                    _set_cmt(max(before, key=lambda s: s.lineno), 'after', c['text'], True)
+            else:
+                _set_cmt(nxt, 'leading', c['text'], True)
+        else:
+            before = [s for s in stmts if s.lineno < c['line']]
+            if before:
+                _set_cmt(max(before, key=lambda s: s.lineno), 'after', c['text'], True)
 def _to_ir(node):
     if isinstance(node, ast.AST):
         d = {"type": type(node).__name__}
@@ -55,12 +107,16 @@ def _to_ir(node):
             d[_key(f)] = _to_ir(getattr(node, f, None))
         if hasattr(node, "lineno"):
             d["_loc"] = [node.lineno, getattr(node, "col_offset", 0)]
+        if isinstance(node, ast.AST) and getattr(node, '_cmt', None):
+            d["_comments"] = node._cmt
         return d
     if isinstance(node, list):
         return [_to_ir(x) for x in node]
     return _enc_prim(node)
 def _parse(src):
-    return json.dumps(_to_ir(ast.parse(src)))
+    tree = ast.parse(src)
+    _attach_comments(tree, src)
+    return json.dumps(_to_ir(tree))
 `;
 
 // Rebuild ast nodes from the IR and unparse back to Python source.
