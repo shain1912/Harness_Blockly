@@ -479,13 +479,10 @@ function readBlockComments(b) {
     try { stored = JSON.parse(b.data); } catch (_) { stored = null; }
   }
   const bubble = b.icons && b.icons.comment ? b.icons.comment.text : undefined;
-  const render = (c) => {
-    if (!c) return '';
-    const parts = [...(c.leading || [])];
-    if (c.trailing) parts.push(c.trailing);
-    parts.push(...(c.after || []));
-    return parts.join('\n');
-  };
+  // Reuse irToBlockly's renderComments (exported on BlockPyIR). irToBlockly loads before
+  // blocklyToIr in both main.jsx and the test requires, and readBlockComments runs only at
+  // conversion time (post-load), so BlockPyIR.renderComments is defined by call time. No duplication.
+  const render = (typeof window !== 'undefined' ? window : global).BlockPyIR.renderComments;
   if (typeof bubble === 'string' && stored && bubble !== render(stored)) {
     // user edited the bubble -> simplify to leading lines
     const leading = bubble.split('\n').filter((l) => l.trim() !== '');
@@ -498,8 +495,6 @@ function readBlockComments(b) {
   return stored;
 }
 ```
-
-> Note: `readBlockComments` inlines the same render logic as `irToBlockly.renderComments` (4 lines) to avoid a load-order dependency between the two side-effect modules. Keep them in sync.
 
 - [ ] **Step 4: Run test to verify it passes**
 
