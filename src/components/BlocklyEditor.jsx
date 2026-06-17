@@ -42,8 +42,9 @@ export default function BlocklyEditor({
       });
     };
 
-    // Grab toolbox element from document
-    const toolbox = document.getElementById('toolbox');
+    // The ir_* toolbox is built in JS (irToolbox.js) from the ir_* block table, not the
+    // retired XML stub — blocklyToIr only understands ir_* types, so the palette must too.
+    const toolbox = window.BlockPyIrToolbox;
 
     // Inject Blockly
     const ws = window.Blockly.inject(containerRef.current, {

@@ -258,11 +258,17 @@ export default function App() {
     }
   }, [activeEditorTab]);
 
-  // Update dynamic toolbox XML when blocks list updates
+  // Dynamic-library palette (cv2 / AI-registered blocks) — INTENTIONALLY INERT under the IR
+  // engine. It targeted the old <xml id="toolbox"> stub (removed in index.html) and emits
+  // legacy non-ir_* block types; the live palette is now window.BlockPyIrToolbox (built in JS),
+  // and dragging a non-ir_* block would make blocklyToIr throw anyway. Restoring this means
+  // making library blocks IR-aware + adding a Library category via updateToolbox(jsonObject) —
+  // that is Phase 5 (dynamic/AI library blocks), deferred. getElementById returns null today, so
+  // this no-ops; the guard is kept (not deleted) so Phase 5 can adapt it. See the IR toolbox spec.
   useEffect(() => {
     if (workspaceRef.current && installedBlocks.length > 0) {
       const toolboxXml = document.getElementById('toolbox');
-      if (!toolboxXml) return;
+      if (!toolboxXml) return;  // IR engine has no XML toolbox — inert until Phase 5
 
       const category = toolboxXml.querySelector('#abstract-lib-category');
       if (!category) return;

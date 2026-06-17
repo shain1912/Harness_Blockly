@@ -11,6 +11,7 @@ import './utils/pyAstBridge.js';
 import './utils/irToBlockly.js';
 import './utils/blocklyToIr.js';
 import './utils/irBlocks.js';
+import './utils/irToolbox.js';   // builds window.BlockPyIrToolbox (load-order only matters for the live coverage test, which compares against the irBlocks.js registry)
 import './examples/snippets.js';
 
 ReactDOM.createRoot(document.getElementById('root')).render(

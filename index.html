@@ -24,12 +24,8 @@
 
   <div id="root"></div>
 
-  <!-- Hidden Custom Toolbox definition for Blockly -->
-  <xml id="toolbox" style="display: none">
-    <!-- Legacy toolbox retired during the IR engine swap (2026-06-08). The conversion path
-         is now Python -> Convert -> ir_* blocks (edit fields) -> Python; there are no draggable
-         legacy blocks because blocklyToIr only knows ir_* types. An ir_* toolbox is future work. -->
-  </xml>
+  <!-- The Blockly toolbox is built in JS from the ir_* block table (src/utils/irToolbox.js)
+       and injected by BlocklyEditor.jsx as window.BlockPyIrToolbox — no static XML stub. -->
 
   <script type="module" src="/src/main.jsx"></script>
 </body>

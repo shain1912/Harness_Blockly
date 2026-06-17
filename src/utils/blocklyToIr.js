@@ -106,6 +106,7 @@ function joinedStrToIr(b) {
   return { type: 'JoinedStr', values };
 }
 function fvToIr(b) {
+  normInputs(b);   // FormattedValue is a HELPER: it never reaches the dispatcher, so normalize here too
   const es = b.extraState || {};
   return { type: 'FormattedValue',
     value: blockToExpr(b.inputs.VALUE.block),
@@ -366,18 +367,60 @@ function fragmentToArgs(params, inputs) {
 // Blockly omits `inputs` entirely when a block has no connected inputs (e.g. an empty
 // slice a[:] -> ir_slice with no LOWER/UPPER/STEP). Normalize so handlers can always read
 // b.inputs.X safely (absent -> undefined, handled by their optional guards).
+//
+// Toolbox default children are placed on an input as a *shadow*, which Blockly serializes
+// under `inputs.X.shadow` (not `.block`) until the user drops a real block on top. Our
+// handlers only read `.block`, so collapse a shadow-only input into its block here (a real
+// `block` always wins over the `shadow`). Done once per block at the dispatcher entry; child
+// blocks normalize when they in turn reach blockToExpr/blockToStmt. Mutates the input objects
+// in place — fine, the serialized snapshot is a throwaway passed straight to blocklyToIr.
+function normInputs(b) {
+  if (!b.inputs) { b.inputs = {}; return b; }
+  for (const key of Object.keys(b.inputs)) {
+    const inp = b.inputs[key];
+    if (inp && !inp.block && inp.shadow) inp.block = inp.shadow;
+  }
+  return b;
+}
+
 function blockToExpr(b) {
-  if (!b.inputs) b.inputs = {};
+  normInputs(b);
   const h = BLOCK_TO_EXPR[b.type];
   if (!h) throw new Error('blocklyToIr: no expr handler for ' + b.type);
   return h(b);
 }
 
 function blockToStmt(b) {
-  if (!b.inputs) b.inputs = {};
+  normInputs(b);
   const h = BLOCK_TO_STMT[b.type];
   if (!h) throw new Error('blocklyToIr: no stmt handler for ' + b.type);
   return h(b);
+}
+
+// Block types valid ONLY inside a parent (a subscript's slice, a call/assignment target): as a
+// bare top-level statement they unparse to invalid Python (`:`, `*args`). The toolbox exposes
+// ir_slice/ir_starred so they can be dropped INTO a parent, but a disconnected one on the canvas
+// is an incomplete fragment — skip it rather than emit invalid code; it converts correctly once
+// connected. Keyed by BLOCK type (not IR type) so the skip happens BEFORE blockToExpr runs: an
+// ir_starred from Convert (e.g. `f(*args)`) has no shadow on its VALUE input, so a user can leave
+// it empty, and blockToExpr would throw on the missing child — stalling the WHOLE workspace —
+// before any IR-type check could fire. ir_slice/ir_starred map 1:1 to Slice/Starred, so the
+// block-type test is exact.
+const CONTEXT_ONLY_BLOCKS = new Set(['ir_slice', 'ir_starred']);
+
+// A top-level block is normally a statement. But the toolbox exposes expression-output blocks
+// (ir_name, ir_binop, a call, ...) too, and a user can drag one onto the canvas and leave it
+// disconnected. In Python a bare expression on its own line IS an `Expr` statement, so wrap it
+// — throwing here would break code generation for the WHOLE workspace (regenerate() catches and
+// logs), not just that one dangling block, stalling the editor until it is removed. Returns null
+// for a context-only orphan (caller skips it).
+function topToStmt(b) {
+  if (BLOCK_TO_STMT[b.type]) return blockToStmt(b);
+  if (BLOCK_TO_EXPR[b.type]) {
+    if (CONTEXT_ONLY_BLOCKS.has(b.type)) return null;     // incomplete fragment until connected
+    return { type: 'Expr', value: blockToExpr(b) };
+  }
+  return blockToStmt(b);   // neither: emit the canonical "no stmt handler" error
 }
 
 function blocklyToIr(ws) {
@@ -385,11 +428,22 @@ function blocklyToIr(ws) {
   // A workspace may hold multiple disconnected top-level stacks; Blockly serializes each
   // as an entry in blocks.blocks. Convert every stack (then its next-chain) so none are
   // dropped — starting only at blocks[0] would silently lose the rest.
-  const tops = (ws && ws.blocks && ws.blocks.blocks) || [];
+  //
+  // Deep-clone first: normInputs (and the handlers) collapse shadow defaults by mutating input
+  // objects in place. The caller's snapshot is NOT a throwaway in production — BlocklyEditor's
+  // regenerate() hands the SAME object to onSnapshotChange, which persists it in
+  // blocklySnapshotRef and reloads it on tab-switch / remount. Mutating it would harden shadow
+  // defaults (inp.shadow) into real blocks (inp.block) across one recovery cycle. Cloning here
+  // confines all downstream mutation to a private copy, so the snapshot we convert is the
+  // snapshot we (don't) keep.
+  const tops = (ws && ws.blocks && ws.blocks.blocks)
+    ? JSON.parse(JSON.stringify(ws.blocks.blocks))
+    : [];
   for (const top of tops) {
     let cur = top;
     while (cur) {
-      body.push(blockToStmt(cur));
+      const stmt = topToStmt(cur);
+      if (stmt) body.push(stmt);
       cur = cur.next && cur.next.block;
     }
   }
