@@ -82,9 +82,12 @@ def _attach_comments(tree, src):
         return
     for c in comments:
         if not c['standalone']:
-            same = [s for s in stmts if s.lineno == c['line']]
-            if same:
-                _set_cmt(max(same, key=lambda s: s.col_offset), 'trailing', c['text'], False)
+            # a trailing comment may sit on a continuation line of a multi-line statement, so
+            # match by span (lineno..end_lineno), not just the start line. Innermost wins.
+            span = [s for s in stmts
+                    if s.lineno <= c['line'] <= getattr(s, 'end_lineno', s.lineno)]
+            if span:
+                _set_cmt(max(span, key=lambda s: (s.lineno, s.col_offset)), 'trailing', c['text'], False)
             continue
         after = [s for s in stmts if s.lineno > c['line']]
         if after:

@@ -48,6 +48,17 @@ test.describe('comment extraction (browser)', () => {
     expect(out.code).toBe('# just a note\n# second line');
   });
 
+  test('trailing comment on a continuation line is preserved', async ({ page }) => {
+    const out = await page.evaluate(async () => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const src = 'x = (1 +\n     2)  # keep';
+      const ir = await window.BlockPyAstBridge.pythonToIR(py, src);
+      const code = await window.BlockPyAstBridge.irToPython(py, ir);
+      return code;
+    });
+    expect(out).toContain('# keep');   // Option 3: reformatted, but the comment survives
+  });
+
   test('irToPython re-injects comments; python->IR->python round-trips them', async ({ page }) => {
     const out = await page.evaluate(async () => {
       const py = await window.BlockPyAstBridge.getPyodide();
