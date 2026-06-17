@@ -141,14 +141,31 @@ def _from_ir(d):
     if isinstance(d, dict) and "type" in d:
         cls = getattr(ast, d["type"])
         kwargs = {f: _from_ir(d.get(_key(f))) for f in cls._fields}
-        return ast.fix_missing_locations(cls(**kwargs))
+        node = ast.fix_missing_locations(cls(**kwargs))
+        if d.get("_comments"):
+            node._cmt = d["_comments"]
+        return node
     if isinstance(d, dict) and "__py__" in d:
         return _dec_prim(d)
     if isinstance(d, list):
         return [_from_ir(x) for x in d]
     return d
+
+class _CommentUnparser(ast._Unparser):
+    def traverse(self, node):
+        cm = getattr(node, '_cmt', None)
+        if isinstance(node, ast.stmt) and cm:
+            for lead in cm.get('leading', []):
+                self.fill(lead)
+        super().traverse(node)
+        if isinstance(node, ast.stmt) and cm:
+            if cm.get('trailing'):
+                self.write('  ' + cm['trailing'])
+            for aft in cm.get('after', []):
+                self.fill(aft)
+
 def _unparse(js):
-    return ast.unparse(_from_ir(json.loads(js)))
+    return _CommentUnparser().visit(_from_ir(json.loads(js)))
 `;
 
 async function pythonToIR(pyodide, code) {

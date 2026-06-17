@@ -35,4 +35,29 @@ test.describe('comment extraction (browser)', () => {
     expect(xStmt._comments.after).toEqual(['# tail']);   // dangling at end of body
     expect(y._comments).toBeUndefined();     // no comment on y
   });
+
+  test('irToPython re-injects comments; python->IR->python round-trips them', async ({ page }) => {
+    const out = await page.evaluate(async () => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const src = [
+        '# header',
+        'import os  # std',
+        '',
+        'def f():',
+        '    # body',
+        '    x = 1  # one',
+        '    return x',
+        'y = 2  # last',
+      ].join('\n');
+      const ir = await window.BlockPyAstBridge.pythonToIR(py, src);
+      const code = await window.BlockPyAstBridge.irToPython(py, ir);
+      return code;
+    });
+    // Option 3: blank lines may vanish, but every comment must survive at its position.
+    expect(out).toContain('# header');
+    expect(out).toContain('import os  # std');
+    expect(out).toContain('    # body');           // indented inside the function body
+    expect(out).toContain('    x = 1  # one');
+    expect(out).toContain('y = 2  # last');
+  });
 });
