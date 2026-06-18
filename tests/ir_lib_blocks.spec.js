@@ -42,3 +42,67 @@ test.describe('lib registry (node)', () => {
     expect(cv2.blocks[0]).toHaveProperty('argNames');
   });
 });
+
+// ── lib lower hook (node) ───────────────────────────────────────────────────
+require('../src/utils/irToBlockly.js');   // BlockPyIR.renderComments (used by blocklyToIr)
+require('../src/utils/blocklyToIr.js');
+const IR = global.BlockPyIR;
+
+test.describe('lib lower hook (node)', () => {
+  test.beforeEach(() => REG.clearAll());
+
+  test('output-form lib block lowers to module.func Call IR (as a bare Expr at top level)', () => {
+    REG.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true });
+    const ws = { blocks: { blocks: [
+      { type: 'lib_cv2_imread', inputs: { ARG0: { shadow: { type: 'ir_const', fields: { VALUE: '"x"' } } } } },
+    ] } };
+    const ir = IR.blocklyToIr(ws);
+    expect(ir.body).toHaveLength(1);
+    expect(ir.body[0]).toMatchObject({
+      type: 'Expr',
+      value: {
+        type: 'Call',
+        func: { type: 'Attribute', attr: 'imread', value: { type: 'Name', id: 'cv2' } },
+        args: [{ type: 'Constant', value: 'x' }],
+        keywords: [],
+      },
+    });
+  });
+
+  test('statement-form lib block lowers to a bare-call Expr', () => {
+    REG.registerLibBlock({ module: 'cv2', func: 'imshow', argNames: ['winname', 'mat'], hasOutput: false });
+    const ws = { blocks: { blocks: [
+      { type: 'lib_cv2_imshow_stmt', inputs: {
+        ARG0: { shadow: { type: 'ir_const', fields: { VALUE: '"win"' } } },
+        ARG1: { shadow: { type: 'ir_name', fields: { ID: 'img' } } } } },
+    ] } };
+    const ir = IR.blocklyToIr(ws);
+    expect(ir.body[0]).toMatchObject({ type: 'Expr', value: { type: 'Call', func: { attr: 'imshow' } } });
+    expect(ir.body[0].value.args).toHaveLength(2);
+  });
+
+  test('bare-func (no module) lib block lowers to Name-call', () => {
+    REG.registerLibBlock({ module: '', func: 'helper', argNames: ['x'], hasOutput: true });
+    const ws = { blocks: { blocks: [
+      { type: 'lib__helper', inputs: { ARG0: { shadow: { type: 'ir_name', fields: { ID: 'v' } } } } },
+    ] } };
+    const ir = IR.blocklyToIr(ws);
+    expect(ir.body[0].value.func).toMatchObject({ type: 'Name', id: 'helper' });
+  });
+
+  test('lib block as an ARG of a real ir_call lowers to a bare Call (no Expr wrap)', () => {
+    REG.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true });
+    const ws = { blocks: { blocks: [
+      { type: 'ir_call', extraState: { nargs: 1, kw: [] }, inputs: {
+        FUNC: { shadow: { type: 'ir_name', fields: { ID: 'print' } } },
+        ARG0: { block: { type: 'lib_cv2_imread', inputs: { ARG0: { shadow: { type: 'ir_const', fields: { VALUE: '"x"' } } } } } } } },
+    ] } };
+    const ir = IR.blocklyToIr(ws);
+    expect(ir.body[0].value.args[0]).toMatchObject({ type: 'Call', func: { attr: 'imread' } });
+  });
+
+  test('a truly unknown block type still throws (no silent swallow)', () => {
+    const ws = { blocks: { blocks: [{ type: 'totally_unknown_block' }] } };
+    expect(() => IR.blocklyToIr(ws)).toThrow(/no stmt handler for totally_unknown_block/);
+  });
+});

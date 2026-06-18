@@ -385,18 +385,41 @@ function normInputs(b) {
   return b;
 }
 
+// Phase 5: a registered Tier-A library block lowers to the SAME Call IR as the Tier-B
+// ir_call/ir_attribute path (module.func(args) or func(args)). Returns null for a non-library
+// (truly unknown) type so the caller emits its canonical "no handler" error. Function
+// declaration → hoisted, so the forward reference to blockToExpr is fine.
+function lowerLibBlock(b) {
+  const reg = (typeof window !== 'undefined' ? window : global).BlockPyLibRegistry;
+  const spec = (reg && typeof reg.getLibSpec === 'function') ? reg.getLibSpec(b.type) : null;
+  if (!spec) return null;
+  const args = (spec.argNames || []).map((_, i) => blockToExpr(b.inputs['ARG' + i].block));
+  const func = spec.module
+    ? { type: 'Attribute', value: { type: 'Name', id: spec.module }, attr: spec.func }
+    : { type: 'Name', id: spec.func };
+  return { type: 'Call', func, args, keywords: [] };
+}
+
 function blockToExpr(b) {
   normInputs(b);
   const h = BLOCK_TO_EXPR[b.type];
-  if (!h) throw new Error('blocklyToIr: no expr handler for ' + b.type);
-  return h(b);
+  if (h) return h(b);
+  const lib = lowerLibBlock(b);                 // Phase 5: Tier-A library block -> bare Call
+  if (lib) return lib;
+  throw new Error('blocklyToIr: no expr handler for ' + b.type);
 }
 
 function blockToStmt(b) {
   normInputs(b);
   const h = BLOCK_TO_STMT[b.type];
-  if (!h) throw new Error('blocklyToIr: no stmt handler for ' + b.type);
-  const stmt = h(b);
+  let stmt;
+  if (h) {
+    stmt = h(b);
+  } else {
+    const lib = lowerLibBlock(b);               // Phase 5: statement-form Tier-A block -> Expr(Call)
+    if (!lib) throw new Error('blocklyToIr: no stmt handler for ' + b.type);
+    stmt = { type: 'Expr', value: lib };
+  }
   const cm = readBlockComments(b);
   if (cm) stmt._comments = cm;
   return stmt;
