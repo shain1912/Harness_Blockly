@@ -82,6 +82,18 @@ test.describe('comment block mapping (node)', () => {
     ] } };
     expect(IR.blocklyToIr(ws).body[0]._comments).toEqual({ leading: ['# todo'], trailing: null, after: [] });
   });
+
+  test('deleting the comment bubble (stale data remains) removes the comment, not resurrects it', () => {
+    const ws = { blocks: { blocks: [
+      { type: 'ir_assign', extraState: { n: 1 },
+        data: JSON.stringify({ leading: ['# old'], trailing: null, after: [] }),
+        // NO icons.comment -> the user deleted the bubble
+        inputs: {
+          TARGET0: { shadow: { type: 'ir_name', fields: { ID: 'x' } } },
+          VALUE: { shadow: { type: 'ir_const', fields: { VALUE: '0' } } } } },
+    ] } };
+    expect(IR.blocklyToIr(ws).body[0]._comments).toBeUndefined();
+  });
 });
 
 test.describe('comment extraction (browser)', () => {
@@ -286,5 +298,24 @@ test.describe('comment extraction (browser)', () => {
     });
     expect(out).toContain('# remember this');
     expect(out).not.toMatch(/^remember this$/m);  // must NOT appear as a bare code line
+  });
+
+  test('a deleted comment does not resurrect on round-trip', async ({ page }) => {
+    const out = await page.evaluate(async () => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const Blockly = window.Blockly;
+      const ws = window.__blocklyWorkspace;
+      ws.clear();
+      const ir = await window.BlockPyAstBridge.pythonToIR(py, '# old\nx = 1');
+      Blockly.serialization.workspaces.load(window.BlockPyIR.irToBlockly(ir), ws);
+      const b = ws.getTopBlocks(false)[0];
+      b.setCommentText(null);   // delete the comment bubble
+      const saved = Blockly.serialization.workspaces.save(ws);
+      const back = window.BlockPyIR.blocklyToIr(saved);
+      ws.clear();
+      return window.BlockPyAstBridge.irToPython(py, back);
+    });
+    expect(out).not.toContain('# old');
+    expect(out).toContain('x = 1');
   });
 });

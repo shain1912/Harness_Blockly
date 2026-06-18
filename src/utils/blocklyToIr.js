@@ -417,6 +417,9 @@ function readBlockComments(b) {
     try { stored = JSON.parse(b.data); } catch (_) { stored = null; }
   }
   const bubble = b.icons && b.icons.comment ? b.icons.comment.text : undefined;
+  // The live comment bubble is the source of truth: if it was deleted (no icons.comment), the
+  // comment is gone even though stale `data` may remain. Do not resurrect it.
+  if (typeof bubble !== 'string') return null;
   // Reuse irToBlockly's renderComments (exported on BlockPyIR). irToBlockly loads before
   // blocklyToIr in both main.jsx and the test requires, and readBlockComments runs only at
   // conversion time (post-load), so BlockPyIR.renderComments is defined by call time. No duplication.
