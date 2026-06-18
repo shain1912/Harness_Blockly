@@ -604,21 +604,25 @@ for i in range(4):
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ libName: libKey, customCode, facts }),
       });
-      if (response.status === 503) {
+      // Parse the JSON only when the response looks ok; a 503 (no keys) / 500 (backend outage) body
+      // may not be success-shaped.
+      let data = null;
+      if (response.ok) {
+        try { data = await response.json(); } catch (_) { data = null; }
+      }
+      if (!response.ok || !data || !data.success) {
+        // Any backend failure — 503 (no keys), 500 (outage), or success:false — falls back to the
+        // offline preset when one exists (spec §6: "AI 503/500 -> preset fallback").
         const preset = window.BlockPyAbstraction.AI_PRESETS[libKey];
         if (!preset) {
-          setLogs(prev => [...prev, `[AI Agent] No API keys and no offline preset for "${libKey}".`]);
+          const why = !response.ok ? `backend ${response.status}` : ((data && data.error) || 'AI failed');
+          setLogs(prev => [...prev, `[AI Agent] ${why} and no offline preset for "${libKey}".`]);
           return;
         }
         blocks = preset.blocks;
         thoughts = preset.thoughts;
-        setLogs(prev => [...prev, `[AI Agent] No API keys — using offline preset for "${libKey}".`]);
+        setLogs(prev => [...prev, `[AI Agent] Backend unavailable (${response.ok ? 'AI failed' : response.status}) — using offline preset for "${libKey}".`]);
       } else {
-        const data = await response.json();
-        if (!data.success) {
-          setLogs(prev => [...prev, `[AI Agent Error] ${data.error}`]);
-          return;
-        }
         libName = data.libName || libKey;
         blocks = data.blocks || [];
         thoughts = data.thoughts || [];

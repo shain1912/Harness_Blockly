@@ -268,4 +268,26 @@ test.describe('lib pipeline (browser)', () => {
     const ok = await page.evaluate(() => !!window.BlockPyLibRegistry.getLibSpec('lib_math_sin'));
     expect(ok).toBe(true);
   });
+
+  test('500 (backend outage) falls back to the offline preset', async ({ page }) => {
+    test.setTimeout(300000);
+    await page.route('**/api/ai-abstract', (route) => route.fulfill({
+      status: 500, contentType: 'application/json',
+      body: JSON.stringify({ success: false, error: 'MiniMax upstream error' }),
+    }));
+    await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(
+      () => window.__blocklyWorkspace && window.BlockPyLibRegistry && window.BlockPyAbstraction,
+      null, { timeout: 180000 });
+    await page.evaluate(() => window.BlockPyLibRegistry.clearAll());
+
+    await page.click('#tab-btn-library');
+    await page.selectOption('#abstract-lib-select', 'math');
+    await page.click('#btn-generate-blocks');
+
+    await page.waitForFunction(
+      () => !!window.BlockPyLibRegistry.getLibSpec('lib_math_sqrt'), null, { timeout: 120000 });
+    const ok = await page.evaluate(() => !!window.BlockPyLibRegistry.getLibSpec('lib_math_sin'));
+    expect(ok).toBe(true);
+  });
 });
