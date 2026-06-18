@@ -165,29 +165,114 @@ def _from_ir(d):
     return d
 
 class _CommentUnparser(ast._Unparser):
+    # Re-injects extracted comments with ZERO loss. Three comment kinds per stmt node
+    # (carried on node._cmt): leading (own line(s) before, at stmt indent), trailing
+    # (appended to the END of the stmt's HEADER line), after (own line(s) after, at
+    # stmt indent). The base _Unparser emits some statements WITHOUT calling traverse
+    # (elif-collapse in visit_If; the docstring stmt in _write_docstring_and_traverse_body),
+    # so those bypasses are handled explicitly below. A node reached via traverse must NOT
+    # also be emitted by a visit_* / docstring override -> no double-emission.
+    # Trailing placement is two-staged to land on the HEADER line of a compound stmt:
+    #   _armed_trailing   -> a trailing comment for the stmt currently being entered; it is
+    #                        promoted to _pending_trailing by the FIRST fill() of that stmt
+    #                        (every ast.stmt visitor in _Unparser starts with fill()), i.e.
+    #                        once its header line has been opened and AFTER any leading lines.
+    #   _pending_trailing -> a comment to append at the END of the current line, flushed by
+    #                        maybe_newline() just before the newline that closes the line.
+    # This two-stage hop is what stops a trailing comment from latching onto a leading
+    # comment line, and what keeps it on the for/if/def header rather than the last body line.
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self._pending_trailing = None
+        self._armed_trailing = None
+    def maybe_newline(self):
+        if self._pending_trailing is not None:
+            t = self._pending_trailing
+            self._pending_trailing = None
+            self.write('  ' + t)
+        super().maybe_newline()
+    def fill(self, text=''):
+        super().fill(text)
+        # The first fill() after arming opens the stmt's header line -> promote to pending so
+        # the NEXT maybe_newline appends the trailing to the end of THIS header line.
+        if self._armed_trailing is not None:
+            self._pending_trailing = self._armed_trailing
+            self._armed_trailing = None
+    def _emit_leading(self, node):
+        cm = getattr(node, '_cmt', None)
+        if cm:
+            for lead in cm.get('leading', []):
+                self.fill(lead)
+    def _arm_trailing(self, node):
+        cm = getattr(node, '_cmt', None)
+        if cm and cm.get('trailing'):
+            self._armed_trailing = cm['trailing']
+    def _emit_after(self, node):
+        cm = getattr(node, '_cmt', None)
+        if cm:
+            for aft in cm.get('after', []):
+                self.fill(aft)
     def visit_Module(self, node):
-        cm = getattr(node, '_cmt', None)
-        if cm:
-            for lead in cm.get('leading', []):
-                self.fill(lead)
+        # The Module node itself can carry comments (comment-only module, or a dangling
+        # 'after' at end of file) — it is not reached via traverse, so emit here.
+        self._emit_leading(node)
         super().visit_Module(node)
-        if cm:
-            for aft in cm.get('after', []):
-                self.fill(aft)
+        self._emit_after(node)
     def traverse(self, node):
-        cm = getattr(node, '_cmt', None)
-        if isinstance(node, ast.stmt) and cm:
-            for lead in cm.get('leading', []):
-                self.fill(lead)
-        super().traverse(node)
-        if isinstance(node, ast.stmt) and cm:
-            if cm.get('trailing'):
-                self.write('  ' + cm['trailing'])
-            for aft in cm.get('after', []):
-                self.fill(aft)
+        # Per-statement comment emission for everything reached via traverse (the common path).
+        if isinstance(node, ast.stmt):
+            self._emit_leading(node)
+            self._arm_trailing(node)       # promoted on the stmt's own first fill()
+            super().traverse(node)
+            self._emit_after(node)
+        else:
+            super().traverse(node)
+    def _write_docstring_and_traverse_body(self, node):
+        # Base impl emits node.body[0] (the docstring Expr) via _write_docstring, bypassing
+        # traverse -> its comments would be lost. Emit them here; body[1:] still goes through
+        # traverse normally (no double-emission of the docstring stmt or the rest of the body).
+        if (docstring := self.get_raw_docstring(node)):
+            doc_stmt = node.body[0]
+            self._emit_leading(doc_stmt)
+            self._arm_trailing(doc_stmt)   # _write_docstring's fill() promotes it to the doc line
+            self._write_docstring(docstring)
+            self._emit_after(doc_stmt)
+            self.traverse(node.body[1:])
+        else:
+            self.traverse(node.body)
+    def visit_If(self, node):
+        # Mirrors 3.12 _Unparser.visit_If (elif-collapse), but emits the comments of each
+        # collapsed nested If. The TOP If is reached via traverse, so its leading/trailing/
+        # after are already handled by the traverse override -> do NOT re-emit them here.
+        self.fill('if ')
+        self.traverse(node.test)
+        with self.block():
+            self.traverse(node.body)
+        # collapse nested ifs into equivalent elifs.
+        while node.orelse and len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If):
+            node = node.orelse[0]
+            self._emit_leading(node)        # leading on its own line(s) before the elif line
+            self._arm_trailing(node)        # promoted by the fill('elif ') below -> lands on elif line
+            self.fill('elif ')
+            self.traverse(node.test)
+            with self.block():
+                self.traverse(node.body)
+            self._emit_after(node)          # dangling after the elif's body, at if-indent
+        # final else
+        if node.orelse:
+            self.fill('else')
+            with self.block():
+                self.traverse(node.orelse)
 
 def _unparse(js):
-    return _CommentUnparser().visit(_from_ir(json.loads(js)))
+    up = _CommentUnparser()
+    out = up.visit(_from_ir(json.loads(js)))
+    # A trailing comment on the LAST statement has no following newline to trigger the flush
+    # in maybe_newline -> append whatever is still buffered so it is never lost.
+    tail = up._pending_trailing if up._pending_trailing is not None else up._armed_trailing
+    if tail is not None:
+        out = out + '  ' + tail
+    return out
 `;
 
 async function pythonToIR(pyodide, code) {

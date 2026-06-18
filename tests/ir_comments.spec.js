@@ -118,4 +118,36 @@ test.describe('comment extraction (browser)', () => {
       }
     }
   });
+
+  test('re-injection loses no comment across compound/elif/docstring/nested forms', async ({ page }) => {
+    const cases = [
+      'if x:\n    a = 1\nelif y:  # keep\n    b = 2',
+      'if x:  # head\n    a = 1\nelse:  # otherwise\n    b = 2',
+      'if a:\n    p = 1\nelif b:  # one\n    q = 2\nelif c:  # two\n    r = 3\nelse:  # last\n    s = 4',
+      '# before doc\n"""module doc"""  # after doc\nx = 1',
+      'def f():\n    """fn doc"""  # d\n    return 1',
+      'class C:\n    """cls doc"""  # c\n    x = 1',
+      'for i in r:  # loop\n    pass',
+      'while c:  # w\n    body()',
+      'with open(f) as h:  # ctx\n    read(h)',
+      'def g(a, b):  # sig\n    return a + b',
+      'try:  # t\n    risky()\nexcept E:  # e\n    pass\nfinally:  # f\n    cleanup()',
+      'for i in r:\n    use(i)\n    # dangling in loop\nafter()',
+    ];
+    const results = await page.evaluate(async (cs) => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const out = [];
+      for (const src of cs) {
+        const ir = await window.BlockPyAstBridge.pythonToIR(py, src);
+        const code = await window.BlockPyAstBridge.irToPython(py, ir);
+        out.push({ src, code, comments: (src.match(/#[^\n]*/g) || []).map((s) => s.trim()) });
+      }
+      return out;
+    }, cases);
+    for (const r of results) {
+      for (const c of r.comments) {
+        expect(r.code, `LOST "${c}" for input:\n${r.src}\n--> output:\n${r.code}`).toContain(c);
+      }
+    }
+  });
 });
