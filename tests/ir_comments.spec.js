@@ -328,6 +328,35 @@ test.describe('comment extraction (browser)', () => {
     expect(out).not.toMatch(/^remember this$/m);  // must NOT appear as a bare code line
   });
 
+  const CORPUS = [
+    '# only a module comment\nx = 1',
+    'x = 1  # inline only',
+    'def f():\n    # nested leading\n    return 1',
+    'if a:\n    b = 1  # then\nelse:\n    c = 2  # else',
+    'for i in items:\n    # loop body\n    use(i)\n# after the loop\ndone()',
+    'class C:\n    # class body\n    x = 1  # field',
+    'try:\n    risky()  # may fail\nexcept E:\n    pass  # swallow',
+  ];
+
+  test('comment corpus survives python -> blocks -> python', async ({ page }) => {
+    const results = await page.evaluate(async (corpus) => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const commentsOf = (s) => (s.match(/#[^\n]*/g) || []).map((c) => c.trim()).sort();
+      const out = [];
+      for (const src of corpus) {
+        const ir = await window.BlockPyAstBridge.pythonToIR(py, src);
+        const back = window.BlockPyIR.blocklyToIr(window.BlockPyIR.irToBlockly(ir));
+        const code = await window.BlockPyAstBridge.irToPython(py, back);
+        out.push({ src, code, inComments: commentsOf(src), outComments: commentsOf(code) });
+      }
+      return out;
+    }, CORPUS);
+    for (const r of results) {
+      // Option 3: every comment is preserved (multiset, order-independent).
+      expect(r.outComments, `comments lost for:\n${r.src}\n-> got:\n${r.code}`).toEqual(r.inComments);
+    }
+  });
+
   test('a deleted comment does not resurrect on round-trip', async ({ page }) => {
     const out = await page.evaluate(async () => {
       const py = await window.BlockPyAstBridge.getPyodide();
