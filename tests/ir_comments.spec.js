@@ -1,6 +1,36 @@
 const { test, expect } = require('@playwright/test');
 const APP_URL = 'http://localhost:' + (process.env.PORT || '3000') + '/';
 
+// Node-level tests (no browser needed)
+require('../src/utils/irToBlockly.js');
+require('../src/utils/blocklyToIr.js');
+const IR = global.BlockPyIR;
+
+test.describe('comment block mapping (node)', () => {
+  test('irToBlockly writes data + comment bubble for a commented stmt', () => {
+    const ir = { type: 'Module', type_ignores: [], body: [
+      { type: 'Assign',
+        targets: [{ type: 'Name', id: 'x' }],
+        value: { type: 'Constant', value: 1 },
+        _comments: { leading: ['# header'], trailing: '# one', after: [] } },
+    ] };
+    const ws = IR.irToBlockly(ir);
+    const b = ws.blocks.blocks[0];
+    expect(JSON.parse(b.data)).toEqual({ leading: ['# header'], trailing: '# one', after: [] });
+    expect(b.icons.comment.text).toBe('# header\n# one');
+    expect(b.icons.comment.pinned).toBe(false);
+  });
+
+  test('irToBlockly leaves uncommented stmts untouched (no data, no icons)', () => {
+    const ir = { type: 'Module', type_ignores: [], body: [
+      { type: 'Assign', targets: [{ type: 'Name', id: 'x' }], value: { type: 'Constant', value: 1 } },
+    ] };
+    const b = IR.irToBlockly(ir).blocks.blocks[0];
+    expect(b.data).toBeUndefined();
+    expect(b.icons).toBeUndefined();
+  });
+});
+
 test.describe('comment extraction (browser)', () => {
   test.beforeEach(async ({ page }) => {
     test.setTimeout(220000);

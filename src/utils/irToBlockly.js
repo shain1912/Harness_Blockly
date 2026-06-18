@@ -529,10 +529,28 @@ function exprToBlock(n) {
   return h(n);
 }
 
+// Bubble text rendering: leading lines, then trailing, then after — human-readable, and the
+// exact string blocklyToIr compares against to detect a user edit (Task 4/5).
+function renderComments(c) {
+  if (!c) return '';
+  const parts = [...(c.leading || [])];
+  if (c.trailing) parts.push(c.trailing);
+  parts.push(...(c.after || []));
+  return parts.join('\n');
+}
+
 function stmtToBlock(n) {
   const h = STMT_HANDLERS[n.type];
   if (!h) noHandler('stmt', n.type);
-  return h(n);
+  const block = h(n);
+  if (n._comments && (
+        (n._comments.leading && n._comments.leading.length) ||
+        n._comments.trailing ||
+        (n._comments.after && n._comments.after.length))) {
+    block.data = JSON.stringify(n._comments);
+    block.icons = { comment: { text: renderComments(n._comments), pinned: false, height: 80, width: 160 } };
+  }
+  return block;
 }
 
 function irToBlockly(ir) {
@@ -547,5 +565,5 @@ const __handled = new Set([...Object.keys(EXPR_HANDLERS), ...Object.keys(STMT_HA
 
 const api = (typeof window !== 'undefined' ? window : global);
 api.BlockPyIR = Object.assign(api.BlockPyIR || {},
-  { irToBlockly, exprToBlock, NODE_POLICY, OPTIONAL_DEPRECATED, __handled });
+  { irToBlockly, exprToBlock, NODE_POLICY, OPTIONAL_DEPRECATED, __handled, renderComments });
 if (typeof module !== 'undefined') module.exports = api.BlockPyIR;
