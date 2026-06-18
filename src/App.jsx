@@ -258,34 +258,28 @@ export default function App() {
     }
   }, [activeEditorTab]);
 
-  // Dynamic-library palette (cv2 / AI-registered blocks) — INTENTIONALLY INERT under the IR
-  // engine. It targeted the old <xml id="toolbox"> stub (removed in index.html) and emits
-  // legacy non-ir_* block types; the live palette is now window.BlockPyIrToolbox (built in JS),
-  // and dragging a non-ir_* block would make blocklyToIr throw anyway. Restoring this means
-  // making library blocks IR-aware + adding a Library category via updateToolbox(jsonObject) —
-  // that is Phase 5 (dynamic/AI library blocks), deferred. getElementById returns null today, so
-  // this no-ops; the guard is kept (not deleted) so Phase 5 can adapt it. See the IR toolbox spec.
+  // Dynamic-library palette (Phase 5): when the registry changes (hydrate on mount, or a new
+  // AI/preset registration), rebuild the JSON toolbox so the "Library" category reflects the
+  // live registry. Blockly diffs categoryToolbox JSON on updateToolbox(). Children-first effect
+  // ordering means BlocklyEditor has already injected (workspaceRef set) before this runs.
   useEffect(() => {
-    if (workspaceRef.current && installedBlocks.length > 0) {
-      const toolboxXml = document.getElementById('toolbox');
-      if (!toolboxXml) return;  // IR engine has no XML toolbox — inert until Phase 5
-
-      const category = toolboxXml.querySelector('#abstract-lib-category');
-      if (!category) return;
-
-      category.style.display = 'block';
-      category.removeAttribute('style');
-
-      category.innerHTML = '';
-      installedBlocks.forEach(b => {
-        const blockNode = document.createElement('block');
-        blockNode.setAttribute('type', b.type);
-        category.appendChild(blockNode);
-      });
-
-      workspaceRef.current.updateToolbox(toolboxXml);
+    const ws = workspaceRef.current;
+    if (!ws || typeof window.BlockPyBuildIrToolbox !== 'function') return;
+    try {
+      ws.updateToolbox(window.BlockPyBuildIrToolbox());
+    } catch (e) {
+      console.error('Failed to refresh library toolbox:', e);
     }
-  }, [installedBlocks, workspaceRef.current]);
+  }, [installedBlocks]);
+
+  // Phase 5: restore the persisted library registry on mount (re-registers Blockly.Blocks defs
+  // and repopulates the palette without another AI call).
+  useEffect(() => {
+    const reg = window.BlockPyLibRegistry;
+    if (!reg || typeof reg.hydrate !== 'function') return;
+    const restored = reg.hydrate();
+    if (restored && restored.length) setInstalledBlocks(restored);
+  }, []);
 
   const loadDemoScript = (type) => {
     let demoCode = '';

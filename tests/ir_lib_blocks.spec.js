@@ -123,3 +123,40 @@ test.describe('lib lower hook (node)', () => {
     expect(() => IR.blocklyToIr(ws)).toThrow(/no stmt handler for totally_unknown_block/);
   });
 });
+
+// ── lib toolbox + drag (browser) ────────────────────────────────────────────
+test.describe('lib toolbox + drag (browser)', () => {
+  test('registered lib block produces a Library toolbox category and round-trips to Python', async ({ page }) => {
+    test.setTimeout(300000); // Pyodide WASM load can take up to 3 min on a cold cache
+    await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(
+      () => window.__blocklyWorkspace && window.BlockPyIR && window.BlockPyAstBridge
+        && window.BlockPyLibRegistry && window.BlockPyBuildIrToolbox,
+      null, { timeout: 180000 });
+
+    const out = await page.evaluate(async () => {
+      const reg = window.BlockPyLibRegistry;
+      reg.clearAll();
+      reg.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true, colour: '#06b6d4', title: 'cv2.imread' });
+
+      // toolbox now carries a "Library" category with the registered block + an ARG0 shadow
+      const tb = window.BlockPyBuildIrToolbox();
+      const lib = tb.contents.find((c) => c.name === 'Library');
+      const entry = lib && lib.contents.find((b) => b.type === 'lib_cv2_imread');
+
+      // load a workspace holding the lib block and convert via the IR pipeline
+      const ws = { blocks: { blocks: [
+        { type: 'lib_cv2_imread', inputs: { ARG0: { shadow: { type: 'ir_const', fields: { VALUE: '"x"' } } } } },
+      ] } };
+      const ir = window.BlockPyIR.blocklyToIr(ws);
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const code = await window.BlockPyAstBridge.irToPython(py, ir);
+      return { hasLibCat: !!lib, hasEntry: !!entry, hasArgShadow: !!(entry && entry.inputs && entry.inputs.ARG0), code: code.trim() };
+    });
+
+    expect(out.hasLibCat).toBe(true);
+    expect(out.hasEntry).toBe(true);
+    expect(out.hasArgShadow).toBe(true);
+    expect(out.code).toBe("cv2.imread('x')");
+  });
+});
