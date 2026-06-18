@@ -54,7 +54,7 @@ export default function LibraryManager({
         <div className="form-group">
           <label htmlFor="lib-selector">AI Block Generator — Select Library</label>
           <select
-            id="lib-selector"
+            id="abstract-lib-select"
             value={selectedLib}
             onChange={(e) => setSelectedLib(e.target.value)}
           >
@@ -81,7 +81,7 @@ export default function LibraryManager({
 
         <button
           className="btn btn-primary btn-full"
-          id="btn-abstract-library"
+          id="btn-generate-blocks"
           onClick={handleAbstractClick}
           disabled={isAbstracting}
         >

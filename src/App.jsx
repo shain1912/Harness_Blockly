@@ -583,62 +583,82 @@ for i in range(4):
   const handleAbstractLibrary = async (libKey, customCode) => {
     setIsAbstracting(true);
     setAiThoughts([]);
-    setLogs(prev => [...prev, `[AI Agent] Calling MiniMax-M2.7 to abstract library: "${libKey}"...`]);
+    setLogs(prev => [...prev, `[AI Agent] Abstracting library: "${libKey}"...`]);
+    const reg = window.BlockPyLibRegistry;
 
     try {
-      // Call real MiniMax backend
+      // Best-effort introspection grounding (live Pyodide). Failure is fine — AI works from name.
+      let facts = null;
+      try {
+        const py = await window.BlockPyAstBridge.getPyodide();
+        const engine = new window.BlockPyAbstraction.LibraryAbstractionEngine();
+        facts = await engine.introspectModule(libKey, py);
+      } catch (_) { facts = null; }
+
+      // Ask the backend; on 503 (no keys) fall back to the offline preset.
+      let libName = libKey;
+      let blocks = [];
+      let thoughts = [];
       const response = await fetch('/api/ai-abstract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ libName: libKey, customCode })
+        body: JSON.stringify({ libName: libKey, customCode, facts }),
       });
-
-      const data = await response.json();
-
-      if (!data.success) {
-        setLogs(prev => [...prev, `[AI Agent Error] ${data.error}`]);
-        setIsAbstracting(false);
-        return;
+      if (response.status === 503) {
+        const preset = window.BlockPyAbstraction.AI_PRESETS[libKey];
+        if (!preset) {
+          setLogs(prev => [...prev, `[AI Agent] No API keys and no offline preset for "${libKey}".`]);
+          return;
+        }
+        blocks = preset.blocks;
+        thoughts = preset.thoughts;
+        setLogs(prev => [...prev, `[AI Agent] No API keys — using offline preset for "${libKey}".`]);
+      } else {
+        const data = await response.json();
+        if (!data.success) {
+          setLogs(prev => [...prev, `[AI Agent Error] ${data.error}`]);
+          return;
+        }
+        libName = data.libName || libKey;
+        blocks = data.blocks || [];
+        thoughts = data.thoughts || [];
       }
 
-      const libName = data.libName || libKey;
-
-      // Reveal thoughts one-by-one for dramatic streaming effect
-      const thoughts = data.thoughts || [];
+      // Stream the thoughts for the UI.
       const revealed = [];
       for (const thought of thoughts) {
         revealed.push(thought);
         setAiThoughts([...revealed]);
-        await new Promise(resolve => setTimeout(resolve, 420));
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
-      // Register blocks into workspace
-      const engine = new window.BlockPyAbstraction.LibraryAbstractionEngine(workspaceRef.current);
-      const registeredBlocks = [];
-
-      (data.blocks || []).forEach(b => {
-        const typeName = engine.registerBlock(libName, b.func, b.args, b.hasOutput, b.colour, b.title);
-        registeredBlocks.push({
-          type: typeName,
-          title: b.title,
-          hasOutput: b.hasOutput,
-          func: b.func,
-          args: b.args,
-          colour: b.colour
-        });
-      });
+      // Register each CALL block through the round-trip oracle. Macro-shaped responses (no
+      // func / no args array) are skipped in the MVP. Oracle failures are demoted (not registered).
+      let pyForOracle = null;
+      try { pyForOracle = await window.BlockPyAstBridge.getPyodide(); } catch (_) { pyForOracle = null; }
+      const registered = [];
+      let rejected = 0;
+      for (const b of blocks) {
+        if (typeof b.func !== 'string' || !Array.isArray(b.args)) { rejected++; continue; } // macro/invalid
+        const spec = { module: libName, func: b.func, argNames: b.args, hasOutput: !!b.hasOutput, colour: b.colour, title: b.title };
+        if (pyForOracle) {
+          const ok = await reg.validateSpecParse(spec, window.BlockPyAstBridge.pythonToIR, pyForOracle);
+          if (!ok) { rejected++; setLogs(prev => [...prev, `[AI Agent] Demoted "${spec.title}" (round-trip oracle).`]); continue; }
+        }
+        const res = reg.registerLibBlock(spec);
+        if (!res.ok) { rejected++; setLogs(prev => [...prev, `[AI Agent] Demoted "${spec.title}" (${res.reason}).`]); continue; }
+        registered.push({ type: res.type, title: spec.title, hasOutput: spec.hasOutput, func: spec.func, args: spec.argNames, colour: spec.colour });
+      }
+      reg.persist();
 
       setInstalledBlocks(prev => {
-        const filtered = prev.filter(p => !registeredBlocks.some(r => r.type === p.type));
-        return [...filtered, ...registeredBlocks];
+        const filtered = prev.filter(p => !registered.some(r => r.type === p.type));
+        return [...filtered, ...registered];
       });
-
-      setLogs(prev => [...prev,
-        `[MiniMax] ✅ Registered ${registeredBlocks.length} dynamic blocks for "${libName}".`
-      ]);
+      setLogs(prev => [...prev, `[Library] ✅ Registered ${registered.length} block(s) for "${libName}"${rejected ? `, ${rejected} demoted` : ''}.`]);
     } catch (err) {
       console.error(err);
-      setLogs(prev => [...prev, `[AI Agent Error] Network error: ${err.message}`]);
+      setLogs(prev => [...prev, `[AI Agent Error] ${err.message}`]);
     } finally {
       setIsAbstracting(false);
     }
@@ -738,7 +758,7 @@ for i in range(4):
                 Logs{grayBlocks.length ? ` (${grayBlocks.length})` : ''}
               </button>
               <button
-                id="tab-btn-ai"
+                id="tab-btn-library"
                 className={`tab-btn ${activeAuxTab === 'ai' ? 'active' : ''}`}
                 onClick={() => setActiveAuxTab('ai')}
               >
