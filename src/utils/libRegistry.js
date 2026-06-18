@@ -57,15 +57,20 @@ function defineBlock(type, spec) {
 
 // Build a registry spec from an AI/preset block descriptor {func, args, hasOutput, colour, title}.
 // The visible title (e.g. 'plt.plot', 'df.describe', 'cv2.imread') is the promise, so module+func
-// are derived from it — split on the LAST dot when the prefix is a single Python identifier — so a
-// Tier-A block lowers to EXACTLY the call its title shows (exact-lowering invariant). When the title
-// has no usable single-identifier prefix, fall back to libName + descriptor.func. (Multi-dot
-// receivers like matplotlib.pyplot.plot are not modeled in the MVP; they hit the fallback.)
+// are always derived from it when the title carries a dot (exact-lowering invariant). A multi-dot
+// receiver (e.g. 'matplotlib.pyplot.plot') yields a DOTTED module that staticCheck rejects —
+// registerLibBlock returns {ok:false} and the pipeline demotes the block (Tier-B generic
+// nested-attribute blocks handle those). Only fall back to libName when the title has NO dot.
 function specFromDescriptor(b, libName) {
   const title = (b && typeof b.title === 'string') ? b.title.trim() : '';
   const dot = title.lastIndexOf('.');
   let module, func;
-  if (dot > 0 && dot < title.length - 1 && IDENT.test(title.slice(0, dot))) {
+  if (dot > 0 && dot < title.length - 1) {
+    // Title carries a receiver (e.g. 'cv2.imread', 'plt.plot', or multi-dot 'matplotlib.pyplot.plot').
+    // Derive module+func straight from it so the block lowers to EXACTLY the call shown. A multi-dot
+    // receiver yields a DOTTED module that staticCheck rejects -> registerLibBlock demotes it (Tier-B
+    // generic nested-attribute blocks cover those). NEVER fall back to libName here, which would make
+    // the lowered call differ from the displayed title (exact-lowering invariant).
     module = title.slice(0, dot);
     func = title.slice(dot + 1);
   } else {

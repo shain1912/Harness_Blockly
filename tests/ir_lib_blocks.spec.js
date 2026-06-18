@@ -155,6 +155,14 @@ test.describe('lib spec-from-descriptor (node)', () => {
     const ir = IR.blocklyToIr(ws);
     expect(ir.body[0].value.func).toMatchObject({ type: 'Attribute', attr: 'plot', value: { type: 'Name', id: 'plt' } });
   });
+
+  test('demotes a multi-dot receiver title instead of mis-lowering (matplotlib.pyplot.plot)', () => {
+    const spec = REG.specFromDescriptor({ func: 'plot', args: ['x'], hasOutput: false, title: 'matplotlib.pyplot.plot' }, 'matplotlib');
+    expect(spec.module).toBe('matplotlib.pyplot');   // derived from title, NOT libName
+    const r = REG.registerLibBlock(spec);
+    expect(r.ok).toBe(false);                          // staticCheck rejects the dotted module -> demote
+    expect(REG.getLibSpec('lib_matplotlib.pyplot_plot')).toBeUndefined();
+  });
 });
 
 // ── lib toolbox + drag (browser) ────────────────────────────────────────────
