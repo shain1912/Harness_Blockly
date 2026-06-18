@@ -394,7 +394,34 @@ function blockToStmt(b) {
   normInputs(b);
   const h = BLOCK_TO_STMT[b.type];
   if (!h) throw new Error('blocklyToIr: no stmt handler for ' + b.type);
-  return h(b);
+  const stmt = h(b);
+  const cm = readBlockComments(b);
+  if (cm) stmt._comments = cm;
+  return stmt;
+}
+
+// Restore structured comments from the block's serialized `data`. If the live bubble text was
+// edited away from the stored rendering, adopt the edited text as leading (Option 3 simplification).
+function readBlockComments(b) {
+  let stored = null;
+  if (typeof b.data === 'string' && b.data) {
+    try { stored = JSON.parse(b.data); } catch (_) { stored = null; }
+  }
+  const bubble = b.icons && b.icons.comment ? b.icons.comment.text : undefined;
+  // Reuse irToBlockly's renderComments (exported on BlockPyIR). irToBlockly loads before
+  // blocklyToIr in both main.jsx and the test requires, and readBlockComments runs only at
+  // conversion time (post-load), so BlockPyIR.renderComments is defined by call time. No duplication.
+  const render = (typeof window !== 'undefined' ? window : global).BlockPyIR.renderComments;
+  if (typeof bubble === 'string' && stored && bubble !== render(stored)) {
+    // user edited the bubble -> simplify to leading lines
+    const leading = bubble.split('\n').filter((l) => l.trim() !== '');
+    return leading.length ? { leading, trailing: null, after: [] } : null;
+  }
+  if (typeof bubble === 'string' && !stored && bubble.trim() !== '') {
+    // bubble present with no stored data (user added a comment to a fresh block)
+    return { leading: bubble.split('\n').filter((l) => l.trim() !== ''), trailing: null, after: [] };
+  }
+  return stored;
 }
 
 // Block types valid ONLY inside a parent (a subscript's slice, a call/assignment target): as a

@@ -29,6 +29,16 @@ test.describe('comment block mapping (node)', () => {
     expect(b.data).toBeUndefined();
     expect(b.icons).toBeUndefined();
   });
+
+  test('blocklyToIr restores _comments from block.data (full IR round-trip)', () => {
+    const original = { type: 'Module', type_ignores: [], body: [
+      { type: 'Assign', targets: [{ type: 'Name', id: 'x' }], value: { type: 'Constant', value: 1 },
+        _comments: { leading: ['# header'], trailing: '# one', after: [] } },
+    ] };
+    const ws = IR.irToBlockly(original);
+    const back = IR.blocklyToIr(ws);
+    expect(back.body[0]._comments).toEqual({ leading: ['# header'], trailing: '# one', after: [] });
+  });
 });
 
 test.describe('comment extraction (browser)', () => {
@@ -147,6 +157,20 @@ test.describe('comment extraction (browser)', () => {
         expect(r.code, `lost "${c}" for:\n${r.src}\n-> got:\n${r.code}`).toContain(c);
       }
     }
+  });
+
+  test('full python -> blocks -> python preserves comments', async ({ page }) => {
+    const out = await page.evaluate(async () => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const src = ['# header', 'x = 1  # one', 'def f():', '    return x  # r'].join('\n');
+      const ir = await window.BlockPyAstBridge.pythonToIR(py, src);
+      const ws = window.BlockPyIR.irToBlockly(ir);
+      const back = window.BlockPyIR.blocklyToIr(ws);
+      return window.BlockPyAstBridge.irToPython(py, back);
+    });
+    expect(out).toContain('# header');
+    expect(out).toContain('x = 1  # one');
+    expect(out).toContain('    return x  # r');
   });
 
   test('re-injection loses no comment across compound/elif/docstring/nested forms', async ({ page }) => {
