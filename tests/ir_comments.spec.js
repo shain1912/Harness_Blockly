@@ -39,6 +39,30 @@ test.describe('comment block mapping (node)', () => {
     const back = IR.blocklyToIr(ws);
     expect(back.body[0]._comments).toEqual({ leading: ['# header'], trailing: '# one', after: [] });
   });
+
+  test('a bubble edited to plain text (no #) is normalized to a Python comment', () => {
+    const ws = { blocks: { blocks: [
+      { type: 'ir_assign', extraState: { n: 1 },
+        data: JSON.stringify({ leading: ['# old'], trailing: null, after: [] }),
+        icons: { comment: { text: 'remember this', pinned: false, height: 80, width: 160 } },
+        inputs: {
+          TARGET0: { shadow: { type: 'ir_name', fields: { ID: 'x' } } },
+          VALUE: { shadow: { type: 'ir_const', fields: { VALUE: '0' } } } } },
+    ] } };
+    expect(IR.blocklyToIr(ws).body[0]._comments).toEqual({ leading: ['# remember this'], trailing: null, after: [] });
+  });
+
+  test('an already-# bubble line is kept as-is (idempotent normalization)', () => {
+    const ws = { blocks: { blocks: [
+      { type: 'ir_assign', extraState: { n: 1 },
+        data: JSON.stringify({ leading: ['# old'], trailing: null, after: [] }),
+        icons: { comment: { text: '# explicit', pinned: false, height: 80, width: 160 } },
+        inputs: {
+          TARGET0: { shadow: { type: 'ir_name', fields: { ID: 'x' } } },
+          VALUE: { shadow: { type: 'ir_const', fields: { VALUE: '0' } } } } },
+    ] } };
+    expect(IR.blocklyToIr(ws).body[0]._comments).toEqual({ leading: ['# explicit'], trailing: null, after: [] });
+  });
 });
 
 test.describe('comment extraction (browser)', () => {
@@ -203,5 +227,24 @@ test.describe('comment extraction (browser)', () => {
         expect(r.code, `LOST "${c}" for input:\n${r.src}\n--> output:\n${r.code}`).toContain(c);
       }
     }
+  });
+
+  test('a bubble edited to plain text round-trips as a comment, not code', async ({ page }) => {
+    const out = await page.evaluate(async () => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const Blockly = window.Blockly;
+      const ws = window.__blocklyWorkspace;
+      ws.clear();
+      const ir = await window.BlockPyAstBridge.pythonToIR(py, '# old\nx = 1');
+      Blockly.serialization.workspaces.load(window.BlockPyIR.irToBlockly(ir), ws);
+      const b = ws.getTopBlocks(false)[0];
+      b.setCommentText('remember this');     // user types plain text, no '#'
+      const saved = Blockly.serialization.workspaces.save(ws);
+      const back = window.BlockPyIR.blocklyToIr(saved);
+      ws.clear();
+      return window.BlockPyAstBridge.irToPython(py, back);
+    });
+    expect(out).toContain('# remember this');
+    expect(out).not.toMatch(/^remember this$/m);  // must NOT appear as a bare code line
   });
 });

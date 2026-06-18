@@ -400,6 +400,15 @@ function blockToStmt(b) {
   return stmt;
 }
 
+// A native comment bubble holds human text; our IR stores raw Python comment tokens that the
+// unparser emits verbatim. Normalize each adopted bubble line to a `# ...` comment so edited /
+// freshly-added bubbles round-trip as comments, not as code.
+const toCommentLines = (text) => text
+  .split('\n')
+  .map((l) => l.trim())
+  .filter((l) => l !== '')
+  .map((l) => (l.startsWith('#') ? l : '# ' + l));
+
 // Restore structured comments from the block's serialized `data`. If the live bubble text was
 // edited away from the stored rendering, adopt the edited text as leading (Option 3 simplification).
 function readBlockComments(b) {
@@ -413,13 +422,14 @@ function readBlockComments(b) {
   // conversion time (post-load), so BlockPyIR.renderComments is defined by call time. No duplication.
   const render = (typeof window !== 'undefined' ? window : global).BlockPyIR.renderComments;
   if (typeof bubble === 'string' && stored && bubble !== render(stored)) {
-    // user edited the bubble -> simplify to leading lines
-    const leading = bubble.split('\n').filter((l) => l.trim() !== '');
+    // user edited the bubble -> normalize to leading Python comment lines
+    const leading = toCommentLines(bubble);
     return leading.length ? { leading, trailing: null, after: [] } : null;
   }
   if (typeof bubble === 'string' && !stored && bubble.trim() !== '') {
     // bubble present with no stored data (user added a comment to a fresh block)
-    return { leading: bubble.split('\n').filter((l) => l.trim() !== ''), trailing: null, after: [] };
+    const leading = toCommentLines(bubble);
+    return leading.length ? { leading, trailing: null, after: [] } : null;
   }
   return stored;
 }
