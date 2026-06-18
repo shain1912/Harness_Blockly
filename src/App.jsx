@@ -640,7 +640,7 @@ for i in range(4):
       let rejected = 0;
       for (const b of blocks) {
         if (typeof b.func !== 'string' || !Array.isArray(b.args)) { rejected++; continue; } // macro/invalid
-        const spec = { module: libName, func: b.func, argNames: b.args, hasOutput: !!b.hasOutput, colour: b.colour, title: b.title };
+        const spec = reg.specFromDescriptor(b, libName);
         if (pyForOracle) {
           const ok = await reg.validateSpecParse(spec, window.BlockPyAstBridge.pythonToIR, pyForOracle);
           if (!ok) { rejected++; setLogs(prev => [...prev, `[AI Agent] Demoted "${spec.title}" (round-trip oracle).`]); continue; }

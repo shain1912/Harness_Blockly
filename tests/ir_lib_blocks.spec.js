@@ -124,6 +124,39 @@ test.describe('lib lower hook (node)', () => {
   });
 });
 
+// ── lib spec-from-descriptor (node) ─────────────────────────────────────────
+test.describe('lib spec-from-descriptor (node)', () => {
+  test.beforeEach(() => REG.clearAll());
+
+  test('derives module+func from a method/alias title (plt.plot, df.describe)', () => {
+    expect(REG.specFromDescriptor({ func: 'plot', args: ['x', 'y'], hasOutput: false, title: 'plt.plot' }, 'matplotlib'))
+      .toMatchObject({ module: 'plt', func: 'plot', argNames: ['x', 'y'] });
+    expect(REG.specFromDescriptor({ func: 'describe', args: ['df'], hasOutput: true, title: 'df.describe' }, 'pandas'))
+      .toMatchObject({ module: 'df', func: 'describe' });
+  });
+
+  test('module-prefix title still works (cv2.imread)', () => {
+    expect(REG.specFromDescriptor({ func: 'imread', args: ['filename'], hasOutput: true, title: 'cv2.imread' }, 'cv2'))
+      .toMatchObject({ module: 'cv2', func: 'imread' });
+  });
+
+  test('falls back to libName when the title has no dot', () => {
+    expect(REG.specFromDescriptor({ func: 'sqrt', args: ['x'], hasOutput: true, title: '' }, 'math'))
+      .toMatchObject({ module: 'math', func: 'sqrt' });
+  });
+
+  test('a method/alias preset lowers to the call shown in its title, not libName.func', () => {
+    const spec = REG.specFromDescriptor({ func: 'plot', args: ['x', 'y'], hasOutput: false, title: 'plt.plot' }, 'matplotlib');
+    const r = REG.registerLibBlock(spec);
+    expect(r.ok).toBe(true);
+    const ws = { blocks: { blocks: [ { type: r.type, inputs: {
+      ARG0: { shadow: { type: 'ir_name', fields: { ID: 'x' } } },
+      ARG1: { shadow: { type: 'ir_name', fields: { ID: 'y' } } } } } ] } };
+    const ir = IR.blocklyToIr(ws);
+    expect(ir.body[0].value.func).toMatchObject({ type: 'Attribute', attr: 'plot', value: { type: 'Name', id: 'plt' } });
+  });
+});
+
 // ── lib toolbox + drag (browser) ────────────────────────────────────────────
 test.describe('lib toolbox + drag (browser)', () => {
   test('registered lib block: live updateToolbox + real Blockly load/save round-trips to Python', async ({ page }) => {

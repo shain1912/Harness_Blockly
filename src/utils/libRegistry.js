@@ -55,6 +55,33 @@ function defineBlock(type, spec) {
   };
 }
 
+// Build a registry spec from an AI/preset block descriptor {func, args, hasOutput, colour, title}.
+// The visible title (e.g. 'plt.plot', 'df.describe', 'cv2.imread') is the promise, so module+func
+// are derived from it — split on the LAST dot when the prefix is a single Python identifier — so a
+// Tier-A block lowers to EXACTLY the call its title shows (exact-lowering invariant). When the title
+// has no usable single-identifier prefix, fall back to libName + descriptor.func. (Multi-dot
+// receivers like matplotlib.pyplot.plot are not modeled in the MVP; they hit the fallback.)
+function specFromDescriptor(b, libName) {
+  const title = (b && typeof b.title === 'string') ? b.title.trim() : '';
+  const dot = title.lastIndexOf('.');
+  let module, func;
+  if (dot > 0 && dot < title.length - 1 && IDENT.test(title.slice(0, dot))) {
+    module = title.slice(0, dot);
+    func = title.slice(dot + 1);
+  } else {
+    module = libName || '';
+    func = b.func;
+  }
+  return {
+    module,
+    func,
+    argNames: Array.isArray(b.args) ? b.args : [],
+    hasOutput: !!b.hasOutput,
+    colour: b.colour,
+    title: title || (module ? module + '.' + func : func),
+  };
+}
+
 function registerLibBlock(spec) {
   const reason = staticCheck(spec);
   if (reason) return { ok: false, reason };
@@ -152,6 +179,6 @@ async function validateSpecParse(spec, pythonToIR, pyodide) {
 const api = (typeof window !== 'undefined' ? window : global);
 api.BlockPyLibRegistry = {
   registerLibBlock, getLibSpec, listLibBlocks, removeLibrary, clearAll,
-  persist, hydrate, validateSpecParse, blockType, staticCheck,
+  persist, hydrate, validateSpecParse, blockType, staticCheck, specFromDescriptor,
 };
 if (typeof module !== 'undefined') module.exports = api.BlockPyLibRegistry;
