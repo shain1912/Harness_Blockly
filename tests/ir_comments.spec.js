@@ -63,6 +63,25 @@ test.describe('comment block mapping (node)', () => {
     ] } };
     expect(IR.blocklyToIr(ws).body[0]._comments).toEqual({ leading: ['# explicit'], trailing: null, after: [] });
   });
+
+  test('a comment on a bare top-level expression block is preserved as an Expr comment', () => {
+    const ws = { blocks: { blocks: [
+      { type: 'ir_name', fields: { ID: 'x' },
+        data: JSON.stringify({ leading: ['# note'], trailing: null, after: [] }),
+        icons: { comment: { text: '# note', pinned: false, height: 80, width: 160 } } },
+    ] } };
+    const ir = IR.blocklyToIr(ws);
+    expect(ir.body[0].type).toBe('Expr');
+    expect(ir.body[0]._comments).toEqual({ leading: ['# note'], trailing: null, after: [] });
+  });
+
+  test('a plain-text bubble on a bare top-level expression block is normalized', () => {
+    const ws = { blocks: { blocks: [
+      { type: 'ir_name', fields: { ID: 'y' },
+        icons: { comment: { text: 'todo', pinned: false, height: 80, width: 160 } } },
+    ] } };
+    expect(IR.blocklyToIr(ws).body[0]._comments).toEqual({ leading: ['# todo'], trailing: null, after: [] });
+  });
 });
 
 test.describe('comment extraction (browser)', () => {
@@ -227,6 +246,27 @@ test.describe('comment extraction (browser)', () => {
         expect(r.code, `LOST "${c}" for input:\n${r.src}\n--> output:\n${r.code}`).toContain(c);
       }
     }
+  });
+
+  test('a commented bare top-level call round-trips its comment', async ({ page }) => {
+    const out = await page.evaluate(async () => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const Blockly = window.Blockly;
+      const ws = window.__blocklyWorkspace;
+      ws.clear();
+      // a bare ir_call dropped from the toolbox (NOT wrapped in ir_exprstmt), with a comment bubble
+      Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [
+        { type: 'ir_call', extraState: { nargs: 0, kw: [] },
+          inputs: { FUNC: { shadow: { type: 'ir_name', fields: { ID: 'greet' } } } },
+          icons: { comment: { text: 'call it', pinned: false, height: 80, width: 160 } } },
+      ] } }, ws);
+      const saved = Blockly.serialization.workspaces.save(ws);
+      const back = window.BlockPyIR.blocklyToIr(saved);
+      ws.clear();
+      return window.BlockPyAstBridge.irToPython(py, back);
+    });
+    expect(out).toContain('# call it');
+    expect(out).toContain('greet()');
   });
 
   test('a bubble edited to plain text round-trips as a comment, not code', async ({ page }) => {

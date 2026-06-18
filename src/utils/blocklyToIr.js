@@ -455,7 +455,10 @@ function topToStmt(b) {
   if (BLOCK_TO_STMT[b.type]) return blockToStmt(b);
   if (BLOCK_TO_EXPR[b.type]) {
     if (CONTEXT_ONLY_BLOCKS.has(b.type)) return null;     // incomplete fragment until connected
-    return { type: 'Expr', value: blockToExpr(b) };
+    const stmt = { type: 'Expr', value: blockToExpr(b) };
+    const cm = readBlockComments(b);
+    if (cm) stmt._comments = cm;
+    return stmt;
   }
   return blockToStmt(b);   // neither: emit the canonical "no stmt handler" error
 }
