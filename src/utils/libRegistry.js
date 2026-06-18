@@ -67,7 +67,17 @@ function registerLibBlock(spec) {
     title: spec.title || `${spec.module ? spec.module + '.' : ''}${spec.func}`,
   };
   const type = blockType(stored);
-  if (SPECS.has(type)) return { ok: true, type };  // idempotent: first registration wins; never let SPECS diverge from the already-defined Blockly.Blocks[type] (re-register requires removeLibrary first)
+  const existing = SPECS.get(type);
+  if (existing) {
+    // Same function (module+func) re-registered → idempotent no-op (first signature wins; keeps
+    // SPECS in sync with the already-defined Blockly.Blocks[type]). Re-register to change a
+    // signature requires removeLibrary first.
+    if (existing.module === stored.module && existing.func === stored.func) return { ok: true, type };
+    // Two DIFFERENT functions colliding on the same generated type (lib_${module}_${func} is not
+    // injective, e.g. a_b.c vs a.b_c) → reject, so a Tier-A block never silently lowers to the
+    // wrong call (exact-lowering invariant).
+    return { ok: false, reason: 'block type collision: ' + type };
+  }
   SPECS.set(type, stored);
   defineBlock(type, stored);
   return { ok: true, type };

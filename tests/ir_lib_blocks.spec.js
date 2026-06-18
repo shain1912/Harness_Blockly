@@ -49,6 +49,15 @@ test.describe('lib registry (node)', () => {
     expect(b).toEqual({ ok: true, type: 'lib_cv2_imread' });          // no-op success
     expect(REG.getLibSpec('lib_cv2_imread').argNames).toEqual(['filename']);  // first registration wins
   });
+
+  test('rejects a true type collision between two different functions', () => {
+    const a = REG.registerLibBlock({ module: 'a_b', func: 'c', argNames: [], hasOutput: true });
+    expect(a).toEqual({ ok: true, type: 'lib_a_b_c' });
+    const b = REG.registerLibBlock({ module: 'a', func: 'b_c', argNames: [], hasOutput: true });
+    expect(b.ok).toBe(false);
+    expect(b.reason).toContain('collision');
+    expect(REG.getLibSpec('lib_a_b_c').module).toBe('a_b');  // first registration intact
+  });
 });
 
 // ── lib lower hook (node) ───────────────────────────────────────────────────
