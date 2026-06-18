@@ -599,29 +599,35 @@ for i in range(4):
       let libName = libKey;
       let blocks = [];
       let thoughts = [];
-      const response = await fetch('/api/ai-abstract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ libName: libKey, customCode, facts }),
-      });
-      // Parse the JSON only when the response looks ok; a 503 (no keys) / 500 (backend outage) body
-      // may not be success-shaped.
+      let response = null;
+      try {
+        response = await fetch('/api/ai-abstract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ libName: libKey, customCode, facts }),
+        });
+      } catch (_) {
+        response = null;   // backend unreachable (Express :3001 down / connection refused)
+      }
+      // Parse the JSON only when the response looks ok; a 503 (no keys) / 500 (outage) body may not
+      // be success-shaped.
       let data = null;
-      if (response.ok) {
+      if (response && response.ok) {
         try { data = await response.json(); } catch (_) { data = null; }
       }
-      if (!response.ok || !data || !data.success) {
-        // Any backend failure — 503 (no keys), 500 (outage), or success:false — falls back to the
-        // offline preset when one exists (spec §6: "AI 503/500 -> preset fallback").
+      if (!response || !response.ok || !data || !data.success) {
+        // ANY backend failure — unreachable (fetch threw), 503 (no keys), 500 (outage), or
+        // success:false — falls back to the offline preset when one exists (spec §6).
         const preset = window.BlockPyAbstraction.AI_PRESETS[libKey];
         if (!preset) {
-          const why = !response.ok ? `backend ${response.status}` : ((data && data.error) || 'AI failed');
+          const why = !response ? 'backend unreachable' : (!response.ok ? `backend ${response.status}` : ((data && data.error) || 'AI failed'));
           setLogs(prev => [...prev, `[AI Agent] ${why} and no offline preset for "${libKey}".`]);
           return;
         }
         blocks = preset.blocks;
         thoughts = preset.thoughts;
-        setLogs(prev => [...prev, `[AI Agent] Backend unavailable (${response.ok ? 'AI failed' : response.status}) — using offline preset for "${libKey}".`]);
+        const why = !response ? 'unreachable' : (!response.ok ? String(response.status) : 'AI failed');
+        setLogs(prev => [...prev, `[AI Agent] Backend ${why} — using offline preset for "${libKey}".`]);
       } else {
         libName = data.libName || libKey;
         blocks = data.blocks || [];
