@@ -83,4 +83,39 @@ test.describe('comment extraction (browser)', () => {
     expect(out).toContain('    x = 1  # one');
     expect(out).toContain('y = 2  # last');
   });
+
+  test('multiple inline comments in one multi-line statement are all preserved', async ({ page }) => {
+    const code = await page.evaluate(async () => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const ir = await window.BlockPyAstBridge.pythonToIR(py, 'x = [\n  1,  # a\n  2,  # b\n]');
+      return window.BlockPyAstBridge.irToPython(py, ir);
+    });
+    expect(code).toContain('# a');
+    expect(code).toContain('# b');
+  });
+
+  test('no comment is dropped across a diverse text round-trip (completeness)', async ({ page }) => {
+    const cases = [
+      'x = [\n  1,  # a\n  2,  # b\n]',
+      '@deco  # dec\ndef f():\n    pass',
+      'result = foo(\n    a,  # first\n    b,  # second\n)',
+      '# only a comment',
+      'x = 1  # inline\n# trailing block\n',
+    ];
+    const results = await page.evaluate(async (cs) => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const out = [];
+      for (const src of cs) {
+        const ir = await window.BlockPyAstBridge.pythonToIR(py, src);
+        const code = await window.BlockPyAstBridge.irToPython(py, ir);
+        out.push({ src, code, comments: (src.match(/#[^\n]*/g) || []).map((s) => s.trim()) });
+      }
+      return out;
+    }, cases);
+    for (const r of results) {
+      for (const c of r.comments) {
+        expect(r.code, `lost "${c}" for:\n${r.src}\n-> got:\n${r.code}`).toContain(c);
+      }
+    }
+  });
 });

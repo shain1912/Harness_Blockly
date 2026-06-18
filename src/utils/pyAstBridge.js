@@ -81,33 +81,38 @@ def _attach_comments(tree, src):
             _set_cmt(tree, 'leading', c['text'], True)
         return
     for c in comments:
+        # 1) inline comment whose physical line falls within a statement's span -> trailing.
+        #    Multiple inline comments on one multi-line statement accumulate (no overwrite).
         if not c['standalone']:
-            # a trailing comment may sit on a continuation line of a multi-line statement, so
-            # match by span (lineno..end_lineno), not just the start line. Innermost wins.
-            span = [s for s in stmts
-                    if s.lineno <= c['line'] <= getattr(s, 'end_lineno', s.lineno)]
+            span = [s for s in stmts if s.lineno <= c['line'] <= getattr(s, 'end_lineno', s.lineno)]
             if span:
-                _set_cmt(max(span, key=lambda s: (s.lineno, s.col_offset)), 'trailing', c['text'], False)
-            continue
+                target = max(span, key=lambda s: (s.lineno, s.col_offset))
+                cm = getattr(target, '_cmt', None) or {}
+                prev = cm.get('trailing')
+                _set_cmt(target, 'trailing', (prev + '  ' + c['text']) if prev else c['text'], False)
+                continue
+            # no span match (e.g. a decorator line) -> fall through to own-line placement below.
+        # 2) standalone (or unanchored inline): attach to the next statement's leading, else to
+        #    the nearest preceding statement's 'after'. Guarantees every comment lands on a node.
         after = [s for s in stmts if s.lineno > c['line']]
         if after:
             nxt = min(after, key=lambda s: s.lineno)
-            # If the comment is more indented than the next stmt it's a dangling end-of-block
-            # comment, not a leading comment for the next stmt. Attach as 'after' to the last
-            # statement that is at least as indented as this comment.
-            if c['col'] > nxt.col_offset:
-                before = [s for s in stmts if s.lineno < c['line'] and s.col_offset >= c['col']]
-                if not before:
-                    # fall back: same or any deeper col
-                    before = [s for s in stmts if s.lineno < c['line']]
+            if c['standalone'] and c['col'] > nxt.col_offset:
+                # dangling end-of-block comment: attach to the last preceding deeper statement.
+                before = [s for s in stmts if s.lineno < c['line'] and s.col_offset >= c['col']] \
+                         or [s for s in stmts if s.lineno < c['line']]
                 if before:
                     _set_cmt(max(before, key=lambda s: s.lineno), 'after', c['text'], True)
+                else:
+                    _set_cmt(nxt, 'leading', c['text'], True)
             else:
                 _set_cmt(nxt, 'leading', c['text'], True)
         else:
             before = [s for s in stmts if s.lineno < c['line']]
             if before:
                 _set_cmt(max(before, key=lambda s: s.lineno), 'after', c['text'], True)
+            else:
+                _set_cmt(stmts[0], 'leading', c['text'], True)
 def _to_ir(node):
     if isinstance(node, ast.AST):
         d = {"type": type(node).__name__}
