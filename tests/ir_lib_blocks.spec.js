@@ -41,6 +41,14 @@ test.describe('lib registry (node)', () => {
     expect(cv2.blocks.map((b) => b.type).sort()).toEqual(['lib_cv2_imread', 'lib_cv2_waitKey']);
     expect(cv2.blocks[0]).toHaveProperty('argNames');
   });
+
+  test('re-registering an existing type is idempotent (no Map/visual divergence)', () => {
+    const a = REG.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true });
+    expect(a.ok).toBe(true);
+    const b = REG.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['p1', 'p2', 'p3'], hasOutput: true });
+    expect(b).toEqual({ ok: true, type: 'lib_cv2_imread' });          // no-op success
+    expect(REG.getLibSpec('lib_cv2_imread').argNames).toEqual(['filename']);  // first registration wins
+  });
 });
 
 // ── lib lower hook (node) ───────────────────────────────────────────────────

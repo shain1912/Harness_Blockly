@@ -67,6 +67,7 @@ function registerLibBlock(spec) {
     title: spec.title || `${spec.module ? spec.module + '.' : ''}${spec.func}`,
   };
   const type = blockType(stored);
+  if (SPECS.has(type)) return { ok: true, type };  // idempotent: first registration wins; never let SPECS diverge from the already-defined Blockly.Blocks[type] (re-register requires removeLibrary first)
   SPECS.set(type, stored);
   defineBlock(type, stored);
   return { ok: true, type };

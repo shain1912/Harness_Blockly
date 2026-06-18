@@ -7,6 +7,7 @@ import './index.css';
 import './utils/parser.js';
 import './utils/desugarer.js';
 import './utils/libraryAbstraction.js';
+import './utils/libRegistry.js';   // Phase 5: window.BlockPyLibRegistry (load before irToolbox.js)
 import './utils/pyAstBridge.js';
 import './utils/irToBlockly.js';
 import './utils/blocklyToIr.js';
