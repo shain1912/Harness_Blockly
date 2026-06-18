@@ -94,6 +94,34 @@ test.describe('comment block mapping (node)', () => {
     ] } };
     expect(IR.blocklyToIr(ws).body[0]._comments).toBeUndefined();
   });
+
+  test('editing the bubble away from stored data is adopted as leading', () => {
+    // Simulate a saved workspace where the user changed the comment bubble text.
+    const ws = { blocks: { blocks: [
+      { type: 'ir_assign', extraState: { n: 1 },
+        data: JSON.stringify({ leading: ['# old'], trailing: '# inline', after: [] }),
+        icons: { comment: { text: '# edited note', pinned: false, height: 80, width: 160 } },
+        inputs: {
+          TARGET0: { shadow: { type: 'ir_name', fields: { ID: 'x' } } },
+          VALUE: { shadow: { type: 'ir_const', fields: { VALUE: '0' } } } } },
+    ] } };
+    const ir = IR.blocklyToIr(ws);
+    expect(ir.body[0]._comments).toEqual({ leading: ['# edited note'], trailing: null, after: [] });
+  });
+
+  test('unedited bubble keeps the stored structured comments verbatim', () => {
+    const stored = { leading: ['# keep'], trailing: '# t', after: [] };
+    const bubble = ['# keep', '# t'].join('\n');   // == renderComments(stored)
+    const ws = { blocks: { blocks: [
+      { type: 'ir_assign', extraState: { n: 1 },
+        data: JSON.stringify(stored),
+        icons: { comment: { text: bubble, pinned: false, height: 80, width: 160 } },
+        inputs: {
+          TARGET0: { shadow: { type: 'ir_name', fields: { ID: 'x' } } },
+          VALUE: { shadow: { type: 'ir_const', fields: { VALUE: '0' } } } } },
+    ] } };
+    expect(IR.blocklyToIr(ws).body[0]._comments).toEqual(stored);
+  });
 });
 
 test.describe('comment extraction (browser)', () => {
@@ -317,5 +345,25 @@ test.describe('comment extraction (browser)', () => {
     });
     expect(out).not.toContain('# old');
     expect(out).toContain('x = 1');
+  });
+
+  test('a comment edited in the live workspace survives regeneration', async ({ page }) => {
+    const out = await page.evaluate(async () => {
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const Blockly = window.Blockly;
+      const ws = window.__blocklyWorkspace;
+      ws.clear();
+      const ir = await window.BlockPyAstBridge.pythonToIR(py, '# old\nx = 1');
+      Blockly.serialization.workspaces.load(window.BlockPyIR.irToBlockly(ir), ws);
+      const b = ws.getTopBlocks(false)[0];
+      b.setCommentText('# new note');          // user edits the bubble
+      b.data = b.data;                          // data still holds old structured comment
+      const saved = Blockly.serialization.workspaces.save(ws);
+      const back = window.BlockPyIR.blocklyToIr(saved);
+      ws.clear();
+      return window.BlockPyAstBridge.irToPython(py, back);
+    });
+    expect(out).toContain('# new note');
+    expect(out).not.toContain('# old');
   });
 });
