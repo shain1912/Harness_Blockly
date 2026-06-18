@@ -52,7 +52,7 @@ export default function LibraryManager({
 
         {/* ── AI Block Abstraction ────────────────────────── */}
         <div className="form-group">
-          <label htmlFor="lib-selector">AI Block Generator — Select Library</label>
+          <label htmlFor="abstract-lib-select">AI Block Generator — Select Library</label>
           <select
             id="abstract-lib-select"
             value={selectedLib}
