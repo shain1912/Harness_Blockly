@@ -5,7 +5,9 @@
  * ignores them; they are recomputable or irrelevant to emitted text):
  *   - Name/expr `ctx` (Load/Store/Del) — fully determined by position (target vs value)
  *   - `_loc`, Constant `kind`, `type_comment` — formatting/locations, not semantics
- * Comment preservation (Option 3) is layered later via parso (Phase 3), not here.
+ * Comments ARE carried (Phase 3, Option 3): a statement block's comment is restored from its
+ * `block.data` (and live comment bubble) into `_comments` by readBlockComments; pyAstBridge's
+ * _CommentUnparser re-emits it. The bubble is the source of truth (a deleted bubble => no comment).
  */
 
 // block -> a collection of element expressions (List/Tuple/Set).
