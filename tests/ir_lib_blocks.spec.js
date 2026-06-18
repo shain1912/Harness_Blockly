@@ -126,12 +126,12 @@ test.describe('lib lower hook (node)', () => {
 
 // ── lib toolbox + drag (browser) ────────────────────────────────────────────
 test.describe('lib toolbox + drag (browser)', () => {
-  test('registered lib block produces a Library toolbox category and round-trips to Python', async ({ page }) => {
-    test.setTimeout(300000); // Pyodide WASM load can take up to 3 min on a cold cache
+  test('registered lib block: live updateToolbox + real Blockly load/save round-trips to Python', async ({ page }) => {
+    test.setTimeout(300000);   // Pyodide cold-load exceeds the 60s global timeout
     await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(
       () => window.__blocklyWorkspace && window.BlockPyIR && window.BlockPyAstBridge
-        && window.BlockPyLibRegistry && window.BlockPyBuildIrToolbox,
+        && window.BlockPyLibRegistry && window.BlockPyBuildIrToolbox && window.Blockly,
       null, { timeout: 180000 });
 
     const out = await page.evaluate(async () => {
@@ -139,24 +139,35 @@ test.describe('lib toolbox + drag (browser)', () => {
       reg.clearAll();
       reg.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true, colour: '#06b6d4', title: 'cv2.imread' });
 
-      // toolbox now carries a "Library" category with the registered block + an ARG0 shadow
+      // (1) rebuilt toolbox carries a Library category with the registered block + ARG0 shadow
       const tb = window.BlockPyBuildIrToolbox();
       const lib = tb.contents.find((c) => c.name === 'Library');
       const entry = lib && lib.contents.find((b) => b.type === 'lib_cv2_imread');
 
-      // load a workspace holding the lib block and convert via the IR pipeline
-      const ws = { blocks: { blocks: [
+      // (2) the LIVE workspace accepts the rebuilt toolbox (exercises the revived App effect path)
+      let updateThrew = false;
+      try { window.__blocklyWorkspace.updateToolbox(window.BlockPyBuildIrToolbox()); }
+      catch (e) { updateThrew = true; }
+
+      // (3) REAL Blockly load -> save -> blocklyToIr -> irToPython (not a plain-object shortcut)
+      const ws = window.__blocklyWorkspace;
+      ws.clear();
+      window.Blockly.serialization.workspaces.load({ blocks: { blocks: [
         { type: 'lib_cv2_imread', inputs: { ARG0: { shadow: { type: 'ir_const', fields: { VALUE: '"x"' } } } } },
-      ] } };
-      const ir = window.BlockPyIR.blocklyToIr(ws);
+      ] } }, ws);
+      const saved = window.Blockly.serialization.workspaces.save(ws);
+      const ir = window.BlockPyIR.blocklyToIr(saved);
       const py = await window.BlockPyAstBridge.getPyodide();
-      const code = await window.BlockPyAstBridge.irToPython(py, ir);
-      return { hasLibCat: !!lib, hasEntry: !!entry, hasArgShadow: !!(entry && entry.inputs && entry.inputs.ARG0), code: code.trim() };
+      const code = (await window.BlockPyAstBridge.irToPython(py, ir)).trim();
+      ws.clear();
+      reg.clearAll();
+      return { hasLibCat: !!lib, hasEntry: !!entry, hasArgShadow: !!(entry && entry.inputs && entry.inputs.ARG0), updateThrew, code };
     });
 
     expect(out.hasLibCat).toBe(true);
     expect(out.hasEntry).toBe(true);
     expect(out.hasArgShadow).toBe(true);
+    expect(out.updateThrew).toBe(false);
     expect(out.code).toBe("cv2.imread('x')");
   });
 });
