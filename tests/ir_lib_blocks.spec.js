@@ -238,12 +238,13 @@ test.describe('lib persistence (browser)', () => {
       () => window.__blocklyWorkspace && window.BlockPyLibRegistry && window.BlockPyBuildIrToolbox,
       null, { timeout: 180000 });
 
-    // register + persist
+    // register + persist a NON-preloaded synthetic library (cv2 is always preloaded on mount,
+    // so using it would make this test pass even if persistence were broken — false positive).
     await page.evaluate(() => {
       const reg = window.BlockPyLibRegistry;
       reg.clearAll();
       try { window.localStorage.removeItem('blockpy.libRegistry.v1'); } catch (_) {}
-      reg.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true, colour: '#06b6d4', title: 'cv2.imread' });
+      reg.registerLibBlock({ module: 'mylib', func: 'thing', argNames: ['a'], hasOutput: true, colour: '#888', title: 'mylib.thing' });
       reg.persist();
     });
 
@@ -253,19 +254,38 @@ test.describe('lib persistence (browser)', () => {
       () => window.__blocklyWorkspace && window.BlockPyLibRegistry && window.BlockPyBuildIrToolbox,
       null, { timeout: 180000 });
     await page.waitForFunction(
-      () => !!window.BlockPyLibRegistry.getLibSpec('lib_cv2_imread'), null, { timeout: 30000 });
+      () => !!window.BlockPyLibRegistry.getLibSpec('lib_mylib_thing'), null, { timeout: 30000 });
 
     const out = await page.evaluate(() => {
       const tb = window.BlockPyBuildIrToolbox();
       const lib = tb.contents.find((c) => c.name === 'Library');
-      return { restored: !!window.BlockPyLibRegistry.getLibSpec('lib_cv2_imread'),
-               inToolbox: !!(lib && lib.contents.find((b) => b.type === 'lib_cv2_imread')) };
+      return { restored: !!window.BlockPyLibRegistry.getLibSpec('lib_mylib_thing'),
+               inToolbox: !!(lib && lib.contents.find((b) => b.type === 'lib_mylib_thing')) };
     });
     expect(out.restored).toBe(true);
     expect(out.inToolbox).toBe(true);
 
     // cleanup so the persisted entry doesn't leak into later runs
     await page.evaluate(() => { window.BlockPyLibRegistry.clearAll(); try { window.localStorage.removeItem('blockpy.libRegistry.v1'); } catch (_) {} });
+  });
+
+  test('built-in cv2 palette is registered through the registry on load (Library category populated)', async ({ page }) => {
+    test.setTimeout(300000);
+    await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(
+      () => window.__blocklyWorkspace && window.BlockPyLibRegistry && window.BlockPyBuildIrToolbox,
+      null, { timeout: 180000 });
+    const out = await page.evaluate(() => {
+      const reg = window.BlockPyLibRegistry;
+      const tb = window.BlockPyBuildIrToolbox();
+      const lib = tb.contents.find((c) => c.name === 'Library');
+      return {
+        imreadRegistered: !!reg.getLibSpec('lib_cv2_imread'),
+        inToolbox: !!(lib && lib.contents.find((b) => b.type === 'lib_cv2_imread')),
+      };
+    });
+    expect(out.imreadRegistered).toBe(true);
+    expect(out.inToolbox).toBe(true);
   });
 
   test('a comment on a lib block survives the round-trip', async ({ page }) => {

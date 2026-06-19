@@ -201,31 +201,35 @@ export default function App() {
     }
   };
 
-  // Pre-load the abstraction engine and standard OpenCV blocks
+  // Register the built-in cv2 palette and restore any user-generated libraries — both through the
+  // Phase 5 registry (BlockPyLibRegistry), the single source of truth, so they appear in the Library
+  // toolbox category and lower correctly. The cv2 preload is in-memory only (re-registered each
+  // mount); localStorage/hydrate is reserved for user-generated libraries. A single setInstalledBlocks
+  // here (union, deduped by type) avoids the two-effects clobber.
   useEffect(() => {
-    // Populate preloaded blocks for OpenCV Visual Palette Parity
-    const cv2Preset = window.BlockPyAbstraction.AI_PRESETS['cv2'];
-    {
-      // Persistent abstraction engine — shared with the parser (window.__blockpyEngine)
-      // for on-the-fly dynamic-block registration during Convert.
-      const engine = new window.BlockPyAbstraction.LibraryAbstractionEngine(null);
-      abstractionEngineRef.current = engine;
-      window.__blockpyEngine = engine;
-    }
-    if (cv2Preset) {
-      const engine = abstractionEngineRef.current;
-      const preloaded = cv2Preset.blocks.map(b => {
-        const blockType = engine.registerBlock('cv2', b.func, b.args, b.hasOutput, b.colour, b.title);
-        return {
-          type: blockType,
-          title: b.title,
-          hasOutput: b.hasOutput,
-          func: b.func,
-          args: b.args,
-          colour: b.colour
-        };
-      });
-      setInstalledBlocks(preloaded);
+    // Persistent abstraction engine — kept on window for the legacy parser handle (window.__blockpyEngine).
+    const engine = new window.BlockPyAbstraction.LibraryAbstractionEngine(null);
+    abstractionEngineRef.current = engine;
+    window.__blockpyEngine = engine;
+
+    const reg = window.BlockPyLibRegistry;
+    const installed = [];
+    if (reg) {
+      // Restore user-generated libraries from localStorage (re-registers their Blockly.Blocks defs).
+      const restored = (typeof reg.hydrate === 'function') ? reg.hydrate() : [];
+      if (Array.isArray(restored)) installed.push(...restored);
+      // Register the built-in cv2 palette (idempotent; in-memory, not persisted).
+      const cv2Preset = window.BlockPyAbstraction.AI_PRESETS['cv2'];
+      if (cv2Preset) {
+        cv2Preset.blocks.forEach((b) => {
+          const spec = reg.specFromDescriptor(b, 'cv2');
+          const res = reg.registerLibBlock(spec);
+          if (res.ok && !installed.some((e) => e.type === res.type)) {
+            installed.push({ type: res.type, title: spec.title, hasOutput: spec.hasOutput, func: spec.func, args: spec.argNames, colour: spec.colour });
+          }
+        });
+      }
+      setInstalledBlocks(installed);
     }
 
     // Load initial glowing star demo script
@@ -271,15 +275,6 @@ export default function App() {
       console.error('Failed to refresh library toolbox:', e);
     }
   }, [installedBlocks]);
-
-  // Phase 5: restore the persisted library registry on mount (re-registers Blockly.Blocks defs
-  // and repopulates the palette without another AI call).
-  useEffect(() => {
-    const reg = window.BlockPyLibRegistry;
-    if (!reg || typeof reg.hydrate !== 'function') return;
-    const restored = reg.hydrate();
-    if (restored && restored.length) setInstalledBlocks(restored);
-  }, []);
 
   const loadDemoScript = (type) => {
     let demoCode = '';
