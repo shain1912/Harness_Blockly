@@ -97,6 +97,7 @@ function registerLibBlock(spec) {
     hasOutput: !!spec.hasOutput,
     colour: spec.colour || '#009688',
     title: spec.title || `${spec.module ? spec.module + '.' : ''}${spec.func}`,
+    builtin: !!spec.builtin,
   };
   const type = blockType(stored);
   const existing = SPECS.get(type);
@@ -138,7 +139,7 @@ function persist() {
   try {
     const ls = (typeof window !== 'undefined') ? window.localStorage : null;
     if (!ls) return;
-    ls.setItem(STORAGE_KEY, JSON.stringify([...SPECS.values()]));
+    ls.setItem(STORAGE_KEY, JSON.stringify([...SPECS.values()].filter((s) => !s.builtin)));   // built-ins are re-registered in-memory each mount, never persisted
   } catch (_) { /* non-fatal */ }
 }
 

@@ -288,6 +288,28 @@ test.describe('lib persistence (browser)', () => {
     expect(out.inToolbox).toBe(true);
   });
 
+  test('built-in (preloaded) specs are not persisted to localStorage; user specs are', async ({ page }) => {
+    test.setTimeout(120000);
+    await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => window.BlockPyLibRegistry, null, { timeout: 60000 });
+    const out = await page.evaluate(() => {
+      const reg = window.BlockPyLibRegistry;
+      reg.clearAll();
+      try { window.localStorage.removeItem('blockpy.libRegistry.v1'); } catch (_) {}
+      reg.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true, title: 'cv2.imread', builtin: true });
+      reg.registerLibBlock({ module: 'mylib', func: 'thing', argNames: ['a'], hasOutput: true, title: 'mylib.thing' });
+      reg.persist();
+      const stored = JSON.parse(window.localStorage.getItem('blockpy.libRegistry.v1') || '[]');
+      const types = stored.map((s) => `lib_${s.module}_${s.func}${s.hasOutput ? '' : '_stmt'}`);
+      reg.clearAll();
+      try { window.localStorage.removeItem('blockpy.libRegistry.v1'); } catch (_) {}
+      return { count: stored.length, types };
+    });
+    expect(out.count).toBe(1);                              // only the user lib persisted
+    expect(out.types).toContain('lib_mylib_thing');
+    expect(out.types).not.toContain('lib_cv2_imread');      // built-in filtered out of persistence
+  });
+
   test('a comment on a lib block survives the round-trip', async ({ page }) => {
     test.setTimeout(300000);
     await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });

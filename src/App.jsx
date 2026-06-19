@@ -223,9 +223,10 @@ export default function App() {
       if (cv2Preset) {
         cv2Preset.blocks.forEach((b) => {
           const spec = reg.specFromDescriptor(b, 'cv2');
-          const res = reg.registerLibBlock(spec);
+          const res = reg.registerLibBlock({ ...spec, builtin: true });
           if (res.ok && !installed.some((e) => e.type === res.type)) {
-            installed.push({ type: res.type, title: spec.title, hasOutput: spec.hasOutput, func: spec.func, args: spec.argNames, colour: spec.colour });
+            const stored = reg.getLibSpec(res.type) || spec;
+            installed.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames || stored.args, colour: stored.colour });
           }
         });
       }
@@ -652,7 +653,8 @@ for i in range(4):
         }
         const res = reg.registerLibBlock(spec);
         if (!res.ok) { rejected++; setLogs(prev => [...prev, `[AI Agent] Demoted "${spec.title}" (${res.reason}).`]); continue; }
-        registered.push({ type: res.type, title: spec.title, hasOutput: spec.hasOutput, func: spec.func, args: spec.argNames, colour: spec.colour });
+        const stored = reg.getLibSpec(res.type) || spec;   // idempotent no-op keeps the FIRST spec; mirror the registry, not the new descriptor
+        registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames || stored.args, colour: stored.colour });
       }
       reg.persist();
 
