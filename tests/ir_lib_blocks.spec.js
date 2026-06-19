@@ -229,6 +229,75 @@ test.describe('lib toolbox + drag (browser)', () => {
   });
 });
 
+// ── lib persistence (browser) ───────────────────────────────────────────────
+test.describe('lib persistence (browser)', () => {
+  test('registered library survives a reload (localStorage + hydrate + toolbox)', async ({ page }) => {
+    test.setTimeout(300000);
+    await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(
+      () => window.__blocklyWorkspace && window.BlockPyLibRegistry && window.BlockPyBuildIrToolbox,
+      null, { timeout: 180000 });
+
+    // register + persist
+    await page.evaluate(() => {
+      const reg = window.BlockPyLibRegistry;
+      reg.clearAll();
+      try { window.localStorage.removeItem('blockpy.libRegistry.v1'); } catch (_) {}
+      reg.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true, colour: '#06b6d4', title: 'cv2.imread' });
+      reg.persist();
+    });
+
+    // reload — hydrate() must re-register and the Library category must reappear
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(
+      () => window.__blocklyWorkspace && window.BlockPyLibRegistry && window.BlockPyBuildIrToolbox,
+      null, { timeout: 180000 });
+    await page.waitForFunction(
+      () => !!window.BlockPyLibRegistry.getLibSpec('lib_cv2_imread'), null, { timeout: 30000 });
+
+    const out = await page.evaluate(() => {
+      const tb = window.BlockPyBuildIrToolbox();
+      const lib = tb.contents.find((c) => c.name === 'Library');
+      return { restored: !!window.BlockPyLibRegistry.getLibSpec('lib_cv2_imread'),
+               inToolbox: !!(lib && lib.contents.find((b) => b.type === 'lib_cv2_imread')) };
+    });
+    expect(out.restored).toBe(true);
+    expect(out.inToolbox).toBe(true);
+
+    // cleanup so the persisted entry doesn't leak into later runs
+    await page.evaluate(() => { window.BlockPyLibRegistry.clearAll(); try { window.localStorage.removeItem('blockpy.libRegistry.v1'); } catch (_) {} });
+  });
+
+  test('a comment on a lib block survives the round-trip', async ({ page }) => {
+    test.setTimeout(300000);
+    await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(
+      () => window.BlockPyIR && window.BlockPyAstBridge && window.BlockPyLibRegistry, null, { timeout: 180000 });
+    const code = await page.evaluate(async () => {
+      const reg = window.BlockPyLibRegistry;
+      reg.clearAll();
+      try { window.localStorage.removeItem('blockpy.libRegistry.v1'); } catch (_) {}
+      reg.registerLibBlock({ module: 'cv2', func: 'imshow', argNames: ['winname', 'mat'], hasOutput: false, title: 'cv2.imshow' });
+      const ws = { blocks: { blocks: [
+        { type: 'lib_cv2_imshow_stmt',
+          data: JSON.stringify({ leading: ['# show it'], trailing: null, after: [] }),
+          icons: { comment: { text: '# show it', pinned: false, height: 80, width: 160 } },
+          inputs: {
+            ARG0: { shadow: { type: 'ir_const', fields: { VALUE: '"win"' } } },
+            ARG1: { shadow: { type: 'ir_name', fields: { ID: 'img' } } } } },
+      ] } };
+      const ir = window.BlockPyIR.blocklyToIr(ws);
+      const py = await window.BlockPyAstBridge.getPyodide();
+      const result = (await window.BlockPyAstBridge.irToPython(py, ir)).trim();
+      reg.clearAll();
+      try { window.localStorage.removeItem('blockpy.libRegistry.v1'); } catch (_) {}
+      return result;
+    });
+    expect(code).toContain('# show it');
+    expect(code).toContain("cv2.imshow('win', img)");
+  });
+});
+
 // ── lib pipeline (browser) ──────────────────────────────────────────────────
 test.describe('lib pipeline (browser)', () => {
   test('AI response blocks are oracle-gated, registered, and bad specs rejected', async ({ page }) => {
