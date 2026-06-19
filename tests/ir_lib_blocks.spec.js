@@ -4,6 +4,7 @@ const APP_URL = 'http://localhost:' + (process.env.PORT || '3000') + '/';
 // ── Node-level (no browser) ─────────────────────────────────────────────────
 require('../src/utils/libRegistry.js');
 const REG = global.BlockPyLibRegistry;
+const ABS = require('../src/utils/libraryAbstraction.js');
 
 test.describe('lib registry (node)', () => {
   test.beforeEach(() => REG.clearAll());
@@ -162,6 +163,21 @@ test.describe('lib spec-from-descriptor (node)', () => {
     const r = REG.registerLibBlock(spec);
     expect(r.ok).toBe(false);                          // staticCheck rejects the dotted module -> demote
     expect(REG.getLibSpec('lib_matplotlib.pyplot_plot')).toBeUndefined();
+  });
+
+  test('pandas df.describe preset lowers to df.describe() with no redundant receiver arg', () => {
+    const preset = ABS.AI_PRESETS.pandas.blocks.find((b) => b.title === 'df.describe');
+    expect(preset.args).toEqual([]);                                  // preset data is coherent
+    const spec = REG.specFromDescriptor(preset, 'pandas');
+    expect(spec).toMatchObject({ module: 'df', func: 'describe', argNames: [] });
+    const r = REG.registerLibBlock(spec);
+    expect(r.ok).toBe(true);
+    const ir = IR.blocklyToIr({ blocks: { blocks: [{ type: r.type }] } });   // no ARG inputs
+    expect(ir.body[0].value).toMatchObject({
+      type: 'Call',
+      func: { type: 'Attribute', attr: 'describe', value: { type: 'Name', id: 'df' } },
+      args: [],
+    });
   });
 });
 

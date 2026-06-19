@@ -55,7 +55,7 @@ const AI_PRESETS = {
     ],
     blocks: [
       { func: 'read_csv', args: ['file_path'], hasOutput: true, colour: '#eab308', title: 'pd.read_csv' },
-      { func: 'describe', args: ['df'], hasOutput: true, colour: '#ca8a04', title: 'df.describe' }
+      { func: 'describe', args: [], hasOutput: true, colour: '#ca8a04', title: 'df.describe' }
     ]
   },
   math: {
