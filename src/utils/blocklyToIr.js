@@ -80,7 +80,9 @@ const BLOCK_TO_EXPR = {
   ir_attribute: (b) => {
     const dotted = b.extraState && b.extraState.dotted;
     if (dotted) return dottedToExpr(dotted);   // fixed module attribute (cv2.imread)
-    return { type: 'Attribute', value: blockToExpr(b.inputs.VALUE.block), attr: b.fields.ATTR };
+    // attr is a fixed label in extraState; fall back to the legacy ATTR field for old snapshots.
+    const attr = (b.extraState && b.extraState.attr) || (b.fields && b.fields.ATTR);
+    return { type: 'Attribute', value: blockToExpr(b.inputs.VALUE.block), attr };
   },
   ir_subscript: (b) => ({ type: 'Subscript', value: blockToExpr(b.inputs.VALUE.block),
     slice: blockToExpr(b.inputs.SLICE.block) }),

@@ -248,17 +248,24 @@ if (Blockly) {
 if (Blockly) {
   Blockly.Blocks['ir_attribute'] = {
     dotted_: null,
+    attr_: 'attr',
     init() {
       this.dotted_ = null;
+      this.attr_ = 'attr';
       this.updateShape_();
       this.setInputsInline(true);
       this.setOutput(true);
       this.setColour('#a07a4a');
     },
-    // A module attribute (cv2.imread, cv2.COLOR_BGR2GRAY) renders as a fixed, non-editable dotted
-    // label; a general attribute access is an editable `value . attr`.
-    saveExtraState() { return this.dotted_ ? { dotted: this.dotted_ } : {}; },
-    loadExtraState(state) { this.dotted_ = (state && state.dotted) || null; this.updateShape_(); },
+    // An attribute/method name is a fixed, non-editable label (like a function name) — never an
+    // editable text field. A module-rooted chain (cv2.imread) is one whole dotted label; a general
+    // access on a variable/expression keeps the receiver as a VALUE input + a fixed `.name` label.
+    saveExtraState() { return this.dotted_ ? { dotted: this.dotted_ } : { attr: this.attr_ }; },
+    loadExtraState(state) {
+      this.dotted_ = (state && state.dotted) || null;
+      this.attr_ = (state && state.attr) || 'attr';
+      this.updateShape_();
+    },
     updateShape_() {
       if (this.getInput('VALUE')) this.removeInput('VALUE');
       if (this.getInput('ATTRROW')) this.removeInput('ATTRROW');
@@ -266,7 +273,7 @@ if (Blockly) {
         this.appendDummyInput('ATTRROW').appendField(String(this.dotted_));
       } else {
         this.appendValueInput('VALUE');
-        this.appendDummyInput('ATTRROW').appendField('.').appendField(new Blockly.FieldTextInput('attr'), 'ATTR');
+        this.appendDummyInput('ATTRROW').appendField('.' + String(this.attr_));
       }
     },
   };

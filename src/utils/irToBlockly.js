@@ -282,14 +282,16 @@ const EXPR_HANDLERS = {
     });
     return { type: 'ir_compare', fields, extraState: { n: n.ops.length }, inputs };
   },
-  // Access / unpacking. attr is a plain identifier FIELD; subscript index/slice is an input.
+  // Access / unpacking. attr is a fixed label (extraState); subscript index/slice is an input.
   Attribute: (n) => {
     // module.attr (rooted in an imported module) -> a fixed, non-editable dotted label.
     const dotted = exprToDotted(n);
     if (dotted && _modules && _modules.has(dotted.split('.')[0])) {
       return { type: 'ir_attribute', extraState: { dotted } };
     }
-    return blk('ir_attribute', { ATTR: n.attr }, { VALUE: { block: exprToBlock(n.value) } });
+    // The attr/method name is a fixed label, not an editable field; receiver stays a VALUE input.
+    return { type: 'ir_attribute', extraState: { attr: n.attr },
+      inputs: { VALUE: { block: exprToBlock(n.value) } } };
   },
   Subscript: (n) => blk('ir_subscript', {},
     { VALUE: { block: exprToBlock(n.value) }, SLICE: { block: exprToBlock(n.slice) } }),
