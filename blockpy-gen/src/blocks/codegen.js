@@ -7,12 +7,20 @@ export function makeGenerator(moduleName, entry) {
     const parts = [];
     (entry.params || []).forEach((p, i) => {
       const code = gen.valueToCode(block, 'ARG' + i, ORDER_NONE);
-      if (code === '' || code == null) {
-        if (p.hasDefault) return;          // optional + empty -> omit (Python default applies)
-        parts.push('None');                // required + empty -> explicit None placeholder
+      const empty = code === '' || code == null;
+      // *args / **kwargs keep their unpacking prefix and are always optional (omit when empty).
+      if (p.kind === 'vararg') { if (!empty) parts.push('*' + code); return; }
+      if (p.kind === 'kwarg') { if (!empty) parts.push('**' + code); return; }
+      // keyword-only: name=value; if required and empty, still keyword (name=None) so it never
+      // becomes a trailing positional after earlier keyword args (invalid Python).
+      if (p.kind === 'keyword') {
+        if (!empty) parts.push(`${p.name}=${code}`);
+        else if (!p.hasDefault) parts.push(`${p.name}=None`);
         return;
       }
-      parts.push(p.kind === 'keyword' ? `${p.name}=${code}` : code);
+      // positional: value, or None when required+empty; optional+empty -> omit (default applies).
+      if (!empty) parts.push(code);
+      else if (!p.hasDefault) parts.push('None');
     });
     const argList = parts.join(', ');
     let callee;

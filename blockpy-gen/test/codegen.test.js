@@ -32,3 +32,25 @@ test('constructor: module.Class(args), value form', () => {
   const g = makeGenerator('m', { kind: 'class', name: 'C', params: [], returns: true });
   assert.deepEqual(g(block, fakeGen({})), ['m.C()', 0]);
 });
+
+test('vararg -> *value, kwarg -> **value, ordered after keyword args (valid Python)', () => {
+  const g = makeGenerator('m', { kind: 'function', name: 'f', params: [
+    { name: 'a', kind: 'positional', hasDefault: false },
+    { name: 'opt', kind: 'keyword', hasDefault: true },
+    { name: 'args', kind: 'vararg', hasDefault: false },
+    { name: 'kw', kind: 'kwarg', hasDefault: false },
+  ], returns: true });
+  // all present: positional, *args, keyword, **kwargs — splats keep their prefix
+  assert.deepEqual(g(block, fakeGen({ ARG0: 'a', ARG1: '1', ARG2: 'rest', ARG3: 'd' })),
+    ['m.f(a, opt=1, *rest, **d)', 0]);
+  // empty splats are simply omitted (not rendered as positional None)
+  assert.deepEqual(g(block, fakeGen({ ARG0: 'a' })), ['m.f(a)', 0]);
+});
+
+test('required keyword-only left empty emits name=None (never a trailing positional)', () => {
+  const g = makeGenerator('m', { kind: 'function', name: 'f', params: [
+    { name: 'a', kind: 'positional', hasDefault: false },
+    { name: 'ko', kind: 'keyword', hasDefault: false },
+  ], returns: true });
+  assert.deepEqual(g(block, fakeGen({ ARG0: 'a' })), ['m.f(a, ko=None)', 0]);
+});
