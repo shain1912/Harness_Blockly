@@ -77,7 +77,10 @@ const BLOCK_TO_EXPR = {
     const keywords = kw.map((name, i) => ({
       type: 'keyword', arg: name, value: blockToExpr(b.inputs['KW' + i].block),
     }));
-    return { type: 'Call', func: blockToExpr(b.inputs.FUNC.block), args, keywords };
+    // Fixed-name callee (extraState.funcName) -> a bare Name; otherwise the FUNC input expression.
+    const fn = b.extraState && b.extraState.funcName;
+    const func = (fn !== null && fn !== undefined) ? { type: 'Name', id: fn } : blockToExpr(b.inputs.FUNC.block);
+    return { type: 'Call', func, args, keywords };
   },
   ir_ifexp: (b) => ({ type: 'IfExp',
     test: blockToExpr(b.inputs.TEST.block),

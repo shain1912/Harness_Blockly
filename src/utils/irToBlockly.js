@@ -291,14 +291,19 @@ const EXPR_HANDLERS = {
   // (arg, value); arg=null encodes ** unpacking. arg names + arity live in extraState; the
   // keyword VALUES are KW* inputs. This is the Tier-B representation for any library call.
   Call: (n) => {
-    const inputs = { FUNC: { block: exprToBlock(n.func) } };
+    const inputs = {};
+    // A plain-name callee (print, range, foo) is a FIXED command -> render its name as a
+    // non-editable label (extraState.funcName), not an editable ir_name in a FUNC input. A
+    // complex callee (obj.method, returned callable) keeps the FUNC value input.
+    const funcName = n.func && n.func.type === 'Name' ? n.func.id : null;
+    if (funcName === null) inputs.FUNC = { block: exprToBlock(n.func) };
     n.args.forEach((a, i) => { inputs['ARG' + i] = { block: exprToBlock(a) }; });
     const kw = [];
     n.keywords.forEach((k, i) => {
       kw.push(k.arg === null || k.arg === undefined ? null : k.arg);
       inputs['KW' + i] = { block: exprToBlock(k.value) };
     });
-    return { type: 'ir_call', extraState: { nargs: n.args.length, kw }, inputs };
+    return { type: 'ir_call', extraState: { nargs: n.args.length, kw, funcName }, inputs };
   },
   // SUGAR family (dedicated blocks; the desugar-as-feature pass is Phase 4). ast.unparse
   // re-adds any needed parentheses, so precedence is preserved without tracking it here.

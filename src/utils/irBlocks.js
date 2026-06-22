@@ -300,18 +300,21 @@ if (Blockly) {
   Blockly.Blocks['ir_call'] = {
     nargs_: 0,
     kw_: [],
+    funcName_: null,
     init() {
       this.nargs_ = 0;
       this.kw_ = [];
+      this.funcName_ = null;
       this.updateShape_();
       this.setOutput(true);
       this.setColour('#6a8a5b');
       this.setInputsInline(true);
     },
-    saveExtraState() { return { nargs: this.nargs_, kw: this.kw_ }; },
+    saveExtraState() { return { nargs: this.nargs_, kw: this.kw_, funcName: this.funcName_ }; },
     loadExtraState(state) {
       this.nargs_ = (state && typeof state.nargs === 'number') ? state.nargs : 0;
       this.kw_ = (state && Array.isArray(state.kw)) ? state.kw : [];
+      this.funcName_ = (state && state.funcName !== undefined) ? state.funcName : null;
       this.updateShape_();
     },
     updateShape_() {
@@ -321,7 +324,12 @@ if (Blockly) {
       i = 0;
       while (this.getInput('KW' + i)) { this.removeInput('KW' + i); i++; }
       if (this.getInput('CLOSE')) this.removeInput('CLOSE');
-      this.appendValueInput('FUNC');
+      // A fixed-name callee renders as a non-editable label; a complex callee keeps a value input.
+      if (this.funcName_ !== null && this.funcName_ !== undefined) {
+        this.appendDummyInput('FUNC').appendField(String(this.funcName_));
+      } else {
+        this.appendValueInput('FUNC');
+      }
       // No args/kwargs -> render `()`; otherwise open on the first arg/kw and always CLOSE with `)`.
       if (this.nargs_ === 0 && this.kw_.length === 0) {
         this.appendDummyInput('CLOSE').appendField('()');
