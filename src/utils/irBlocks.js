@@ -78,12 +78,14 @@ if (Blockly) {
         let i = 0;
         while (this.getInput('ELT' + i)) { this.removeInput('ELT' + i); i++; }
         if (this.getInput('EMPTY')) this.removeInput('EMPTY');
+        if (this.getInput('CLOSE')) this.removeInput('CLOSE');
         if (this.itemCount_ === 0) {
           this.appendDummyInput('EMPTY').appendField(open + close);
         } else {
           for (let t = 0; t < this.itemCount_; t++) {
             this.appendValueInput('ELT' + t).appendField(t === 0 ? open : ',');
           }
+          this.appendDummyInput('CLOSE').appendField(close);
         }
       },
     };
@@ -115,6 +117,7 @@ if (Blockly) {
         i++;
       }
       if (this.getInput('EMPTY')) this.removeInput('EMPTY');
+      if (this.getInput('CLOSE')) this.removeInput('CLOSE');
       if (this.itemCount_ === 0) {
         this.appendDummyInput('EMPTY').appendField('{}');
       } else {
@@ -122,6 +125,7 @@ if (Blockly) {
           this.appendValueInput('KEY' + t).appendField(t === 0 ? '{' : ',');
           this.appendValueInput('VAL' + t).appendField(':');
         }
+        this.appendDummyInput('CLOSE').appendField('}');
       }
     },
   };
@@ -316,7 +320,13 @@ if (Blockly) {
       while (this.getInput('ARG' + i)) { this.removeInput('ARG' + i); i++; }
       i = 0;
       while (this.getInput('KW' + i)) { this.removeInput('KW' + i); i++; }
+      if (this.getInput('CLOSE')) this.removeInput('CLOSE');
       this.appendValueInput('FUNC');
+      // No args/kwargs -> render `()`; otherwise open on the first arg/kw and always CLOSE with `)`.
+      if (this.nargs_ === 0 && this.kw_.length === 0) {
+        this.appendDummyInput('CLOSE').appendField('()');
+        return;
+      }
       for (let t = 0; t < this.nargs_; t++) {
         this.appendValueInput('ARG' + t).appendField(t === 0 ? '(' : ',');
       }
@@ -325,6 +335,7 @@ if (Blockly) {
         const label = (name === null || name === undefined) ? '**' : name + '=';
         this.appendValueInput('KW' + t).appendField((t === 0 && this.nargs_ === 0) ? '(' + label : ',' + label);
       }
+      this.appendDummyInput('CLOSE').appendField(')');
     },
   };
 }
