@@ -7,10 +7,12 @@ const Blockly = (typeof window !== 'undefined' && window.Blockly);
 if (Blockly) {
   Blockly.Blocks['ir_name'] = {
     init() {
-      this.appendDummyInput().appendField(new Blockly.FieldTextInput('x'), 'ID');
+      // Traditional block-coding: a variable is a dropdown (FieldVariable) — pick/rename/create —
+      // not a free-text field. Serializes as { ID: { id } } + a workspace variables map.
+      this.appendDummyInput().appendField(new Blockly.FieldVariable('x'), 'ID');
       this.setOutput(true);
       this.setColour('#5b80a5');
-      this.setTooltip('Name (variable reference)');
+      this.setTooltip('Variable');
     },
   };
   Blockly.Blocks['ir_const'] = {

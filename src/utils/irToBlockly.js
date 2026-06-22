@@ -223,9 +223,13 @@ function eltsBlock(blockType) {
   };
 }
 
+// Variable names seen during a conversion -> emitted as the workspace `variables` map so each
+// ir_name's FieldVariable resolves. Reset per irToBlockly() call.
+let _varNames = null;
+
 // expr IR -> block
 const EXPR_HANDLERS = {
-  Name:     (n) => blk('ir_name',  { ID: n.id }),
+  Name:     (n) => { if (_varNames) _varNames.add(n.id); return blk('ir_name', { ID: { id: n.id } }); },
   Constant: (n) => blk('ir_const', { VALUE: JSON.stringify(n.value) }),
   List:  eltsBlock('ir_list'),
   Tuple: eltsBlock('ir_tuple'),
@@ -560,9 +564,13 @@ function stmtToBlock(n) {
 
 function irToBlockly(ir) {
   if (!ir || ir.type !== 'Module') throw new Error('irToBlockly: root must be Module');
+  _varNames = new Set();
   const top = ir.body.map(stmtToBlock);
   for (let i = 0; i < top.length - 1; i++) top[i].next = { block: top[i + 1] };
-  return { blocks: { languageVersion: 0, blocks: top.length ? [top[0]] : [] } };
+  // Use the variable name as its stable id so block fields ({ID:{id}}) resolve back to the name.
+  const variables = [..._varNames].map((name) => ({ name, id: name }));
+  _varNames = null;
+  return { blocks: { languageVersion: 0, blocks: top.length ? [top[0]] : [] }, variables };
 }
 
 // AST node types this module can turn into blocks (for the raw=0 coverage gate).

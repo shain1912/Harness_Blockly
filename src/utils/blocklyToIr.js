@@ -20,8 +20,19 @@ function eltsToExpr(astType) {
   };
 }
 
+// Variable id -> name map for the current blocklyToIr() pass (from the workspace `variables`).
+let _varMap = null;
+
 const BLOCK_TO_EXPR = {
-  ir_name:  (b) => ({ type: 'Name', id: b.fields.ID }),
+  // FieldVariable serializes as { ID: { id } }; resolve to the variable name via _varMap. A legacy
+  // string field (older snapshots / non-variable Name) is used directly.
+  ir_name:  (b) => {
+    const f = b.fields.ID;
+    const id = (f && typeof f === 'object')
+      ? ((_varMap && _varMap[f.id] != null) ? _varMap[f.id] : f.id)
+      : f;
+    return { type: 'Name', id };
+  },
   ir_const: (b) => ({ type: 'Constant', value: JSON.parse(b.fields.VALUE) }),
   ir_list:  eltsToExpr('List'),
   ir_tuple: eltsToExpr('Tuple'),
@@ -499,6 +510,11 @@ function topToStmt(b) {
 }
 
 function blocklyToIr(ws) {
+  // Build the variable id -> name map so ir_name's FieldVariable ({ID:{id}}) resolves to the name.
+  _varMap = {};
+  if (ws && Array.isArray(ws.variables)) {
+    for (const v of ws.variables) if (v && v.id != null) _varMap[v.id] = v.name;
+  }
   const body = [];
   // A workspace may hold multiple disconnected top-level stacks; Blockly serializes each
   // as an entry in blocks.blocks. Convert every stack (then its next-chain) so none are

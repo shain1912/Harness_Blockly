@@ -32,7 +32,10 @@ test.describe('ir_toolbox structure (node)', () => {
       expect(typeof cat.colour).toBe('string');
       expect(Array.isArray(cat.contents)).toBe(true);
       expect(cat.contents.length).toBeGreaterThan(0);
+      // A category may also carry a flyout button (e.g. Variables' "Create variable…"); only the
+      // block entries must be ir_* blocks.
       for (const blk of cat.contents) {
+        if (blk.kind === 'button') { expect(typeof blk.text).toBe('string'); continue; }
         expect(blk.kind).toBe('block');
         expect(typeof blk.type).toBe('string');
         expect(blk.type.startsWith('ir_')).toBe(true);
@@ -174,7 +177,7 @@ test.describe('ir_toolbox in app (browser)', () => {
       const EXCLUDE = ['ir_formattedvalue']; // HELPER-only: valid only inside ir_joinedstr
       const registered = Object.keys(window.Blockly.Blocks).filter((t) => t.startsWith('ir_'));
       const inToolbox = [];
-      window.BlockPyIrToolbox.contents.forEach((c) => c.contents.forEach((b) => inToolbox.push(b.type)));
+      window.BlockPyIrToolbox.contents.forEach((c) => c.contents.forEach((b) => { if (b.kind === 'block') inToolbox.push(b.type); }));
       const expected = registered.filter((t) => EXCLUDE.indexOf(t) < 0);
       return {
         missing: expected.filter((t) => inToolbox.indexOf(t) < 0),
@@ -202,7 +205,7 @@ test.describe('ir_toolbox in app (browser)', () => {
       // empty — no throw. For them we assert body.length === 0 and skip the Python text check.
       const CONTEXT_ONLY = ['ir_slice', 'ir_starred'];
       const entries = [];
-      window.BlockPyIrToolbox.contents.forEach((c) => c.contents.forEach((b) => entries.push(b)));
+      window.BlockPyIrToolbox.contents.forEach((c) => c.contents.forEach((b) => { if (b.kind === 'block') entries.push(b); }));
       const out = [];
       for (const entry of entries) {
         ws.clear();

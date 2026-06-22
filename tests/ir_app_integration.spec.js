@@ -39,16 +39,18 @@ test.describe('IR pipeline app integration', () => {
     });
     expect(regen).toBe(code);
 
-    // Live block->code listener: rename an ir_name field; the editor regenerates Python through
-    // the async (debounced) IR path. Original code has no 'y', so its appearance proves the edit
-    // propagated to the source via blocklyToIr -> irToPython, not the retired generator.
+    // Live block->code listener: edit a constant block; the editor regenerates Python through the
+    // async (debounced) IR path. Original code has no '5', so its appearance proves the edit
+    // propagated to the source via blocklyToIr -> irToPython, not the retired generator. (The
+    // FieldVariable round-trip is covered by ir_roundtrip/ir_toolbox; here we just exercise the
+    // live listener with a plain text field.)
     await page.evaluate(() => {
       const ws = window.__blocklyWorkspace;
-      const blk = ws.getAllBlocks(false).find((b) => b.type === 'ir_name' && b.getFieldValue('ID') === 'x');
-      blk.setFieldValue('y', 'ID');
+      const blk = ws.getAllBlocks(false).find((b) => b.type === 'ir_const' && b.getFieldValue('VALUE') === '1');
+      blk.setFieldValue('5', 'VALUE');
     });
     await page.waitForFunction(
-      () => document.getElementById('python-code').value.includes('y'),
+      () => document.getElementById('python-code').value.includes('x = 5'),
       null, { timeout: 15000 });
   });
 });

@@ -71,6 +71,14 @@ export default function BlocklyEditor({
     workspaceRef.current = ws;
     window.__blocklyWorkspace = ws;
 
+    // Wire the Variables category's "Create variable…" button to Blockly's native variable
+    // creation dialog (the toolbox button declares callbackkey 'IR_CREATE_VARIABLE').
+    try {
+      ws.registerButtonCallback('IR_CREATE_VARIABLE', () => {
+        window.Blockly.Variables.createVariableButtonHandler(ws);
+      });
+    } catch (_) { /* non-fatal */ }
+
     // MakeCode-style toolbox: paint each category label in its own colour-bar hue.
     // Blockly puts the category colour on the row's left border (inline); copy it to the
     // label text so the palette reads like MakeCode (colored bar + colored label).

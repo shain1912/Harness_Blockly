@@ -25,7 +25,7 @@ test('IR -> Blockly produces a loadable ir_assign workspace shape', () => {
   expect(a.type).toBe('ir_assign');
   expect(a.extraState.n).toBe(1);
   expect(a.inputs.TARGET0.block.type).toBe('ir_name');
-  expect(a.inputs.TARGET0.block.fields.ID).toBe('x');
+  expect(a.inputs.TARGET0.block.fields.ID).toEqual({ id: 'x' });   // FieldVariable serialization
   expect(a.inputs.VALUE.block.type).toBe('ir_const');
 });
 

@@ -52,7 +52,7 @@ const IR_TOOLBOX_TABLE = [
     { type: 'ir_slice' },                                  // bounds optional (a[:])
     { type: 'ir_starred', inputs: { VALUE: name('args') } },
   ] },
-  { name: 'Variables', colour: '#5b5ba5', blocks: [
+  { name: 'Variables', colour: '#5b5ba5', button: { text: 'Create variable…', callbackkey: 'IR_CREATE_VARIABLE' }, blocks: [
     { type: 'ir_assign', extraState: { n: 1 }, inputs: { TARGET0: name('x'), VALUE: konst(0) } },
     { type: 'ir_augassign', inputs: { TARGET: name('x'), VALUE: konst(1) } },
     { type: 'ir_annassign', inputs: { TARGET: name('x'), ANNOTATION: name('int') } },
@@ -142,18 +142,21 @@ function libraryCategory() {
 
 // Compile the table to a Blockly categoryToolbox JSON object (+ a dynamic Library category).
 function buildIrToolbox() {
-  const contents = IR_TOOLBOX_TABLE.map((cat) => ({
-    kind: 'category',
-    name: cat.name,
-    colour: cat.colour,
-    contents: cat.blocks.map((b) => {
+  const contents = IR_TOOLBOX_TABLE.map((cat) => {
+    const blocks = cat.blocks.map((b) => {
       const block = { kind: 'block', type: b.type };
       if (b.extraState) block.extraState = b.extraState;
       if (b.fields) block.fields = b.fields;
       if (b.inputs) block.inputs = b.inputs;
       return block;
-    }),
-  }));
+    });
+    // A category may prepend a flyout button (Variables' "Create variable…"); the button's
+    // callbackkey is wired to Blockly.Variables.createVariableButtonHandler in BlocklyEditor.
+    const items = cat.button
+      ? [{ kind: 'button', text: cat.button.text, callbackkey: cat.button.callbackkey }, ...blocks]
+      : blocks;
+    return { kind: 'category', name: cat.name, colour: cat.colour, contents: items };
+  });
   const lib = libraryCategory();
   if (lib) contents.push(lib);
   return { kind: 'categoryToolbox', contents };
