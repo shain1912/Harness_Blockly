@@ -394,6 +394,10 @@ function lowerLibBlock(b) {
   const spec = (reg && typeof reg.getLibSpec === 'function') ? reg.getLibSpec(b.type) : null;
   if (!spec) return null;
   const args = (spec.argNames || []).map((_, i) => blockToExpr(b.inputs['ARG' + i].block));
+  if (spec.method) {
+    // instance method: ARG0 is the receiver object -> `<ARG0>.func(<ARG1..>)` (not module.func(allArgs))
+    return { type: 'Call', func: { type: 'Attribute', value: args[0], attr: spec.func }, args: args.slice(1), keywords: [] };
+  }
   const func = spec.module
     ? { type: 'Attribute', value: { type: 'Name', id: spec.module }, attr: spec.func }
     : { type: 'Name', id: spec.func };

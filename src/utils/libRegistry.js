@@ -16,6 +16,16 @@ function blockType(spec) {
   return `lib_${spec.module || ''}_${spec.func}${spec.hasOutput ? '' : '_stmt'}`;
 }
 
+// An instance-method Tier-A block: the AI abstracts `recv.method(...)` as a descriptor whose title
+// is 'recv.method' AND whose first arg name is the receiver itself (e.g. {title:'image.save',
+// args:['image','filename']}). Detect that (receiver name === argNames[0]) so the block lowers to
+// `<ARG0>.method(<ARG1..>)` instead of the wrong `recv.method(recv, ...)`. A module function
+// (cv2.imread, args ['filename']) does NOT match and stays `module.func(args)`.
+function isMethodSpec(spec) {
+  const args = (spec && spec.argNames) || [];
+  return !!(spec && spec.module && args.length >= 1 && spec.module === args[0]);
+}
+
 // Synchronous half of the round-trip oracle (no Pyodide). Returns an error string or null (ok).
 function staticCheck(spec) {
   if (!spec || typeof spec.func !== 'string' || !IDENT.test(spec.func)) return 'func is not a valid Python identifier';
@@ -99,6 +109,7 @@ function registerLibBlock(spec) {
     title: spec.title || `${spec.module ? spec.module + '.' : ''}${spec.func}`,
     builtin: !!spec.builtin,
   };
+  stored.method = isMethodSpec(stored);   // instance method -> lowering uses ARG0 as the receiver
   const type = blockType(stored);
   const existing = SPECS.get(type);
   if (existing) {
@@ -166,14 +177,23 @@ function hydrate() {
 // Expr(Call) with matching func + arity. pythonToIR(pyodide, code) -> IR Module.
 async function validateSpecParse(spec, pythonToIR, pyodide) {
   try {
-    const argList = (spec.argNames || []).join(', ');
-    const callExpr = spec.module ? `${spec.module}.${spec.func}(${argList})` : `${spec.func}(${argList})`;
+    const args = spec.argNames || [];
+    const method = isMethodSpec(spec);   // validate what lowering ACTUALLY produces
+    // method -> `recv.func(args[1:])`; module fn -> `module.func(args)`; bare -> `func(args)`.
+    const callExpr = method
+      ? `${args[0]}.${spec.func}(${args.slice(1).join(', ')})`
+      : (spec.module ? `${spec.module}.${spec.func}(${args.join(', ')})` : `${spec.func}(${args.join(', ')})`);
     const ir = await pythonToIR(pyodide, callExpr);
     if (!ir || ir.type !== 'Module' || !Array.isArray(ir.body) || ir.body.length !== 1) return false;
     const st = ir.body[0];
     if (st.type !== 'Expr' || !st.value || st.value.type !== 'Call') return false;
     const call = st.value;
-    if ((call.args || []).length !== (spec.argNames || []).length) return false;
+    const expectedArity = method ? args.length - 1 : args.length;
+    if ((call.args || []).length !== expectedArity) return false;
+    if (method) {
+      return !!(call.func && call.func.type === 'Attribute' && call.func.attr === spec.func
+        && call.func.value && call.func.value.type === 'Name' && call.func.value.id === args[0]);
+    }
     if (spec.module) {
       return !!(call.func && call.func.type === 'Attribute' && call.func.attr === spec.func
         && call.func.value && call.func.value.type === 'Name' && call.func.value.id === spec.module);
