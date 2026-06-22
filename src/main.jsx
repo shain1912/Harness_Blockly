@@ -11,6 +11,7 @@ import './utils/libRegistry.js';   // Phase 5: window.BlockPyLibRegistry (load b
 import './utils/pyAstBridge.js';
 import './utils/irToBlockly.js';
 import './utils/blocklyToIr.js';
+import './utils/irDesugar.js';   // Phase 4: window.BlockPyIrDesugar (optional IR->IR desugar pass)
 import './utils/irBlocks.js';
 import './utils/irToolbox.js';   // builds window.BlockPyIrToolbox (load-order only matters for the live coverage test, which compares against the irBlocks.js registry)
 import './examples/snippets.js';
