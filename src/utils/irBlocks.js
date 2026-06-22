@@ -247,12 +247,27 @@ if (Blockly) {
 
 if (Blockly) {
   Blockly.Blocks['ir_attribute'] = {
+    dotted_: null,
     init() {
-      this.appendValueInput('VALUE');
-      this.appendDummyInput().appendField('.').appendField(new Blockly.FieldTextInput('attr'), 'ATTR');
+      this.dotted_ = null;
+      this.updateShape_();
       this.setInputsInline(true);
       this.setOutput(true);
       this.setColour('#a07a4a');
+    },
+    // A module attribute (cv2.imread, cv2.COLOR_BGR2GRAY) renders as a fixed, non-editable dotted
+    // label; a general attribute access is an editable `value . attr`.
+    saveExtraState() { return this.dotted_ ? { dotted: this.dotted_ } : {}; },
+    loadExtraState(state) { this.dotted_ = (state && state.dotted) || null; this.updateShape_(); },
+    updateShape_() {
+      if (this.getInput('VALUE')) this.removeInput('VALUE');
+      if (this.getInput('ATTRROW')) this.removeInput('ATTRROW');
+      if (this.dotted_) {
+        this.appendDummyInput('ATTRROW').appendField(String(this.dotted_));
+      } else {
+        this.appendValueInput('VALUE');
+        this.appendDummyInput('ATTRROW').appendField('.').appendField(new Blockly.FieldTextInput('attr'), 'ATTR');
+      }
     },
   };
   Blockly.Blocks['ir_subscript'] = {

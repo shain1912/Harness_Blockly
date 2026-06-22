@@ -226,6 +226,17 @@ function eltsBlock(blockType) {
 // Variable names seen during a conversion -> emitted as the workspace `variables` map so each
 // ir_name's FieldVariable resolves. Reset per irToBlockly() call.
 let _varNames = null;
+// Imported module binding names (import cv2 / import numpy as np). A `module.attr` chain rooted in
+// one is a fixed dotted label (cv2.imread), not an editable attribute on a variable. Reset per call.
+let _modules = null;
+
+// A pure Name/Attribute chain -> its dotted string ("cv2.imread", "os.path.join"); else null.
+function exprToDotted(e) {
+  if (!e) return null;
+  if (e.type === 'Name') return e.id;
+  if (e.type === 'Attribute') { const b = exprToDotted(e.value); return b == null ? null : b + '.' + e.attr; }
+  return null;
+}
 
 // expr IR -> block
 const EXPR_HANDLERS = {
@@ -272,7 +283,14 @@ const EXPR_HANDLERS = {
     return { type: 'ir_compare', fields, extraState: { n: n.ops.length }, inputs };
   },
   // Access / unpacking. attr is a plain identifier FIELD; subscript index/slice is an input.
-  Attribute: (n) => blk('ir_attribute', { ATTR: n.attr }, { VALUE: { block: exprToBlock(n.value) } }),
+  Attribute: (n) => {
+    // module.attr (rooted in an imported module) -> a fixed, non-editable dotted label.
+    const dotted = exprToDotted(n);
+    if (dotted && _modules && _modules.has(dotted.split('.')[0])) {
+      return { type: 'ir_attribute', extraState: { dotted } };
+    }
+    return blk('ir_attribute', { ATTR: n.attr }, { VALUE: { block: exprToBlock(n.value) } });
+  },
   Subscript: (n) => blk('ir_subscript', {},
     { VALUE: { block: exprToBlock(n.value) }, SLICE: { block: exprToBlock(n.slice) } }),
   // Slice lower/upper/step are each optional (a[1:], a[::2], a[:]) -> omit absent inputs.
@@ -565,12 +583,28 @@ function stmtToBlock(n) {
 function irToBlockly(ir) {
   if (!ir || ir.type !== 'Module') throw new Error('irToBlockly: root must be Module');
   _varNames = new Set();
+  _modules = collectModules(ir);
   const top = ir.body.map(stmtToBlock);
   for (let i = 0; i < top.length - 1; i++) top[i].next = { block: top[i + 1] };
   // Use the variable name as its stable id so block fields ({ID:{id}}) resolve back to the name.
   const variables = [..._varNames].map((name) => ({ name, id: name }));
   _varNames = null;
+  _modules = null;
   return { blocks: { languageVersion: 0, blocks: top.length ? [top[0]] : [] }, variables };
+}
+
+// Imported module binding names from top-level `import` statements (asname, else the top package).
+function collectModules(ir) {
+  const mods = new Set();
+  for (const st of (ir.body || [])) {
+    if (st && st.type === 'Import') {
+      for (const a of (st.names || [])) {
+        const bind = a.asname || ((a.name || '').split('.')[0]);
+        if (bind) mods.add(bind);
+      }
+    }
+  }
+  return mods;
 }
 
 // AST node types this module can turn into blocks (for the raw=0 coverage gate).

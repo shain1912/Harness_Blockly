@@ -23,6 +23,14 @@ function eltsToExpr(astType) {
 // Variable id -> name map for the current blocklyToIr() pass (from the workspace `variables`).
 let _varMap = null;
 
+// "cv2.imread" / "os.path.join" -> the Attribute/Name chain it denotes.
+function dottedToExpr(s) {
+  const parts = String(s).split('.');
+  let e = { type: 'Name', id: parts[0] };
+  for (let i = 1; i < parts.length; i++) e = { type: 'Attribute', value: e, attr: parts[i] };
+  return e;
+}
+
 const BLOCK_TO_EXPR = {
   // FieldVariable serializes as { ID: { id } }; resolve to the variable name via _varMap. A legacy
   // string field (older snapshots / non-variable Name) is used directly.
@@ -69,7 +77,11 @@ const BLOCK_TO_EXPR = {
     }
     return { type: 'Compare', left: blockToExpr(b.inputs.LEFT.block), ops, comparators };
   },
-  ir_attribute: (b) => ({ type: 'Attribute', value: blockToExpr(b.inputs.VALUE.block), attr: b.fields.ATTR }),
+  ir_attribute: (b) => {
+    const dotted = b.extraState && b.extraState.dotted;
+    if (dotted) return dottedToExpr(dotted);   // fixed module attribute (cv2.imread)
+    return { type: 'Attribute', value: blockToExpr(b.inputs.VALUE.block), attr: b.fields.ATTR };
+  },
   ir_subscript: (b) => ({ type: 'Subscript', value: blockToExpr(b.inputs.VALUE.block),
     slice: blockToExpr(b.inputs.SLICE.block) }),
   ir_slice: (b) => ({ type: 'Slice',
