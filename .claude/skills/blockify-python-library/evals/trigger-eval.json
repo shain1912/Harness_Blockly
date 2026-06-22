@@ -1,0 +1,23 @@
+[
+  {"query": "우리 블록코딩 툴박스에 numpy 좀 넣고 싶은데, numpy를 블록으로 만들어줄 수 있어? 학생들이 array랑 mean 같은거 드래그해서 쓰게", "should_trigger": true},
+  {"query": "can you blockify the requests library so the kids in our class can use http get/post as draggable blocks in the visual editor?", "should_trigger": true},
+  {"query": "I want to add PIL.Image to the BlockPy toolbox — generate the block definitions and toolbox json for it", "should_trigger": true},
+  {"query": "여기 우리 회사 파이썬 SDK가 있는데 (robot_sdk 모듈) 이걸 블록코딩으로 쓸 수 있게 블록으로 추상화해줘", "should_trigger": true},
+  {"query": "make blockly blocks for opencv — i need imread, cvtColor, imshow etc as blocks that generate valid python", "should_trigger": true},
+  {"query": "generate a LibrarySpec and a categoryToolbox json for the sympy module and check the generated code is valid", "should_trigger": true},
+  {"query": "does pandas convert cleanly into blocks? i just want to know if the generated python actually parses before i commit to using it", "should_trigger": true},
+  {"query": "turn matplotlib.pyplot into visual blocks for our intro programming students, plot/scatter/show as blocks", "should_trigger": true},
+  {"query": "그 파이썬 라이브러리 넣으면 블록 나오는 엔진 있잖아 그걸로 networkx 한번 돌려줘", "should_trigger": true},
+  {"query": "I have a custom module at ./mylib.py with a few functions and a Counter class — can you make drag-and-drop blocks out of its API?", "should_trigger": true},
+
+  {"query": "the BlockPy app round-trip is broken for f-strings — type one in, click Convert, and screenshot the rendered blocks so we can see what's wrong", "should_trigger": false},
+  {"query": "add a new ir_ block type to the parser for the walrus operator := and wire up its generator", "should_trigger": false},
+  {"query": "pip install numpy and then write me a script that computes a 7-day moving average over this csv of daily sales", "should_trigger": false},
+  {"query": "explain how Blockly's FieldVariable serialization works — i keep getting {ID:{id}} in my saved workspace json and don't get it", "should_trigger": false},
+  {"query": "convert this python file (scraper.py) to equivalent javascript, it's about 200 lines", "should_trigger": false},
+  {"query": "the /blockify endpoint is returning a 500 for paramiko — looks like the introspection subprocess is crashing, can you debug and fix it?", "should_trigger": false},
+  {"query": "write unit tests for the makeGenerator function in blockpy-gen/src/blocks/codegen.js, cover the vararg and kwarg cases", "should_trigger": false},
+  {"query": "make a Blockly toolbox category with my hand-written turtle sprite blocks (sprite_move, sprite_turn) — they're already defined in parser.js", "should_trigger": false},
+  {"query": "how do i import cv2 inside pyodide and actually run a webcam capture loop in the browser?", "should_trigger": false},
+  {"query": "this spec.json file is all on one line, can you pretty-print it with 2-space indentation?", "should_trigger": false}
+]

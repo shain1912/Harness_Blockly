@@ -1,15 +1,18 @@
 ---
 name: blockify-python-library
 description: >-
-  Turn a Python library into Blockly blocks using the blockpy-gen engine (blockpy-gen/ in this
-  repo). Given a module/package name, it introspects the real installed library, generates a
-  LibrarySpec + Blockly block definitions + a categorized toolbox + Python code generators, and
-  verifies every generated call is syntactically valid Python. Use this whenever the user wants
-  to "블록화" / "blockify" / "make blocks for" a Python library or SDK, add a new library to the
-  BlockPy toolbox, generate a LibrarySpec/toolbox JSON for a module, or check whether a library
-  converts cleanly into blocks — even if they just name a library and say "turn this into
-  blocks". Prefer this over hand-writing block definitions: it reads the library's real
-  signatures (functions, classes, methods with the receiver model) so the blocks match the API.
+  Turn a Python library, package, SDK, or local .py module into Blockly blocks using the
+  blockpy-gen engine (blockpy-gen/ in this repo). Given an importable module name OR a path to a
+  custom .py file, it introspects the real code, generates a LibrarySpec + Blockly block
+  definitions + a categorized toolbox + Python code generators, and verifies every generated
+  call is syntactically valid Python. Use this whenever the user wants to "블록화" / "blockify"
+  / "make blocks for" / "turn into blocks" a Python library, SDK, or their own module/.py file;
+  add a new library to the BlockPy toolbox; make functions/classes draggable for students; get a
+  LibrarySpec/toolbox JSON for a module; or check whether a library converts cleanly into blocks
+  (whether the generated Python is valid). Trigger even when the user just names a library or a
+  local module and asks for blocks, without saying "blockify". Prefer this over hand-writing
+  block definitions: it reads the real signatures (functions, classes, methods with the receiver
+  model) so the blocks match the API.
 ---
 
 # Blockify a Python library
