@@ -43,7 +43,11 @@ export default function App() {
 
   // Synced status state
   const [syntaxStatus, setSyntaxStatus] = useState({ valid: true, error: '' });
-  const [shouldDesugar, setShouldDesugar] = useState(true);
+  // Phase 4: desugar-as-feature is OPT-IN. Default OFF -> Convert preserves SUGAR blocks (the
+  // "intended coexistence" IR behavior); ON rewrites sugar to elementary loop/conditional blocks.
+  const [shouldDesugar, setShouldDesugar] = useState(false);
+  // Phase 4 slice 4: the Desugared preview pane shows the REAL IR desugar (computed async).
+  const [desugaredPreview, setDesugaredPreview] = useState('');
 
   // Tabs layout variables
   const [activeEditorTab, setActiveEditorTab] = useState('blockly');
@@ -52,11 +56,16 @@ export default function App() {
 
   // Synchronization refs
   const workspaceRef = useRef(null);
-  const isSyncingFromCodeRef = useRef(false);
+  // Counter (not boolean): a code->block sync increments on entry / decrements on exit, so the
+  // block->code listener stays suppressed until ALL concurrent syncs finish (BlocklyEditor reads it
+  // for truthiness: 0 = idle, >0 = syncing). Guards rapid Auto-Desugar toggles racing each other.
+  const isSyncingFromCodeRef = useRef(0);
+  const syncGenRef = useRef(0);   // monotonic id; only the LATEST sync's workspace load is applied
   const blocklySnapshotRef = useRef(null);
   const associatedPythonRef = useRef('');
   const abstractionEngineRef = useRef(null);
   const shellAbortRef = useRef(null);
+  const desugarToggleMountRef = useRef(true);   // skip the toggle re-Convert on initial mount
 
   // Structural script equivalence helper
   const arePythonScriptsEquivalent = (codeA, codeB) => {
@@ -74,7 +83,8 @@ export default function App() {
     if (!currentCode.trim() || currentCode.startsWith('# Start dragging')) return;
     if (!workspaceRef.current) return;
 
-    isSyncingFromCodeRef.current = true;
+    isSyncingFromCodeRef.current += 1;
+    const myGen = ++syncGenRef.current;
 
     try {
       // Snapshot Recovery Check: unchanged Python since the last block edit restores the saved
@@ -87,8 +97,17 @@ export default function App() {
       }
 
       const pyodide = await window.BlockPyAstBridge.getPyodide();
-      const ir = await window.BlockPyAstBridge.pythonToIR(pyodide, currentCode);
+      let ir = await window.BlockPyAstBridge.pythonToIR(pyodide, currentCode);
+      // Phase 4 (opt-in): rewrite sugar (comprehensions/ternary/chained compare) to elementary
+      // loop/conditional/boolean IR in provably-safe positions; SUGAR is preserved elsewhere. The
+      // pass emits only existing IR nodes, so irToBlockly consumes it unchanged.
+      if (shouldDesugar && window.BlockPyIrDesugar) {
+        ir = window.BlockPyIrDesugar.desugarIr(ir);
+      }
       const blocklyJson = window.BlockPyIR.irToBlockly(ir);
+      // If a newer sync started while we awaited Pyodide/parse (e.g. a quick second Auto-Desugar
+      // toggle), discard this stale result so the workspace always reflects the LATEST request.
+      if (myGen !== syncGenRef.current) return;
       window.Blockly.serialization.workspaces.load(blocklyJson, workspaceRef.current);
 
       // Ensure the freshly-loaded blocks actually render and are in view. Loading into a
@@ -111,7 +130,7 @@ export default function App() {
       setLogs(prev => [...prev, `[Parser Error] ${err.message}`]);
       setSyntaxStatus({ valid: false, error: err.message });
     } finally {
-      isSyncingFromCodeRef.current = false;
+      isSyncingFromCodeRef.current -= 1;
     }
   };
 
@@ -276,6 +295,38 @@ export default function App() {
       console.error('Failed to refresh library toolbox:', e);
     }
   }, [installedBlocks]);
+
+  // Phase 4: toggling "Auto Desugar" must re-Convert the current code so the blocks immediately
+  // reflect the new setting. The saved snapshot was captured under the OLD setting, so invalidate
+  // it first — otherwise snapshot recovery (unchanged Python) would restore the old-setting blocks.
+  useEffect(() => {
+    if (desugarToggleMountRef.current) { desugarToggleMountRef.current = false; return; }
+    blocklySnapshotRef.current = null;
+    if (code && code.trim()) syncCodeToBlocks(code);
+    // Intentionally keyed on shouldDesugar only; reads the current code/closure at toggle time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldDesugar]);
+
+  // Phase 4 slice 4: keep the Desugared preview pane in sync with the REAL IR desugar pass
+  // (pythonToIR -> desugarIr -> irToPython), so the preview matches what "Auto Desugar" produces
+  // in blocks. Computed only while the Desugared tab is active (Pyodide round-trip is async).
+  useEffect(() => {
+    if (activeEditorTab !== 'desugar') return;
+    let cancelled = false;
+    (async () => {
+      if (!code || !code.trim()) { if (!cancelled) setDesugaredPreview(''); return; }
+      try {
+        const py = await window.BlockPyAstBridge.getPyodide();
+        const ir = await window.BlockPyAstBridge.pythonToIR(py, code);
+        const dir = window.BlockPyIrDesugar.desugarIr(ir);
+        const out = await window.BlockPyAstBridge.irToPython(py, dir);
+        if (!cancelled) setDesugaredPreview(out.replace(/\n$/, ''));
+      } catch (e) {
+        if (!cancelled) setDesugaredPreview('# (desugar preview unavailable: ' + (e.message || e) + ')');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [code, activeEditorTab]);
 
   const loadDemoScript = (type) => {
     let demoCode = '';
@@ -712,16 +763,13 @@ for i in range(4):
     }
   };
 
-  // Get desugared code unrolled text
-  const desugaredResult = window.BlockPyDesugarer ? window.BlockPyDesugarer.desugarPythonCode(code) : { success: false };
-  let explanationHtml = 'No advanced syntax sugar detected in active code lines. Standing by...';
-  if (code.includes('[') && code.includes('for') && code.includes('in') && code.includes(']')) {
-    explanationHtml = 'List Comprehension unrolled! Pre-declares lists and injects append statements before iterating.';
-  } else if (code.includes('if') && code.includes('else') && !code.includes(':')) {
-    explanationHtml = 'Ternary unrolled! Extracted inline ternary assignment to complete structural branch blocks.';
-  } else if (/(<=|>=|<|>).*(<=|>=|<|>)/.test(code)) {
-    explanationHtml = 'Chained comparison split! Rewritten into dual comparisons chained with "and".';
-  }
+  // Phase 4 slice 4: the preview pane reflects the REAL IR desugar (desugaredPreview, computed by
+  // the effect above) — the SAME pass "Auto Desugar" applies to blocks — not the legacy text
+  // heuristic. (desugarer.js stays loaded for the server endpoints; just not used here.)
+  const desugarChanged = !!desugaredPreview && desugaredPreview.trim() !== code.trim();
+  const explanationHtml = desugarChanged
+    ? 'Desugared (IR-level): comprehensions / ternaries / chained comparisons in provably-safe positions were rewritten to loops / conditionals / booleans; lazy or unsafe sugar is preserved.'
+    : 'No desugarable sugar in safe positions — the desugared output matches the source.';
 
   return (
     <div className="harness-container">
@@ -940,7 +988,7 @@ for i in range(4):
                       <div className="code-block-box">
                         <div className="box-title">Desugared Normalized Code</div>
                         <pre id="desugared-target-code">
-                          {desugaredResult.success ? desugaredResult.desugaredPython : '# No changes required.'}
+                          {desugaredPreview || '# No changes required.'}
                         </pre>
                       </div>
                     </div>
