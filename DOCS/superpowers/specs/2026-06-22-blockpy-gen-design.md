@@ -15,6 +15,7 @@
 - **입력:** **모듈 이름 → Node에서 실제 Python(`inspect`) introspection** → JSON spec → 순수 블록 생성기. **Pyodide 안 씀.**
 - **(a) 코드 생성 포함:** 드래그한 블록이 실행 가능한 `mod.func(...)` / `recv.method(...)` Python을 낸다.
 - **(b) 클래스·메서드 포함:** 모듈 함수 + 클래스(생성자) + 인스턴스 메서드 전부. **메서드는 리시버 입력 모델**(Phase A 교훈).
+- **1순위 UX(사용성) = 라이브 'Add Library' 엔드포인트:** blockpy-gen이 작은 서버/미들웨어를 제공한다. 플랫폼 UI에서 모듈명 입력 → `GET /blockify?module=X` fetch 한 번 → 블록이 즉시 팔레트에 등장(리빌드 0). 논문/산업/회사에서 **새 SDK가 들어올 때마다** 한 동작으로 추상화. CLI(빌드타임)·Node 원콜은 **보조 진입점**으로 함께 제공(코어는 동일).
 
 ## 3. 비목표 (YAGNI)
 
@@ -24,23 +25,27 @@ Pyodide, IR/desugar, 일반 Python↔블록 변환, 역변환(Python→블록), 
 
 ```
 blockpy-gen/
-  package.json         exports: "./introspect" (Node 전용), "./blocks" (브라우저 안전), "." -> blocks
+  package.json         exports: "." -> blocks(브라우저 안전), "./introspect"·"./server"(Node 전용)
   src/
     spec.js            LibrarySpec 스키마 상수 + 검증(validateSpec) — 순수
     introspect/
       introspect.js    introspectModule(name, opts) -> LibrarySpec  (Node: child_process로 python)
       _inspect.py      임베드되는 introspection 스크립트(파이썬 stdlib inspect)
+    server/
+      blockify.js      blockifyMiddleware(opts) / createBlockifyServer(opts)  (Node: introspect 래핑 + 캐시 + allowlist)
     blocks/
       define.js        defineBlocks(Blockly, spec, opts) -> {types[]}  (순수, Blockly 주입)
       toolbox.js       buildToolbox(spec, opts) -> categoryToolbox JSON  (순수)
       codegen.js       블록당 Python 생성기 등록(define.js가 사용)  (순수)
       naming.js        blockType(spec, entry) 결정적·충돌안전 이름  (순수)
-  bin/blockpy-gen.js   CLI: blockpy-gen <module> [--out f] [--python p] [--max N] [--include-private]
+    blockify.js        blockify(Blockly, name, {workspace}) 원콜(Node/Electron: introspect+define+toolbox)  (Node)
+  bin/blockpy-gen.js   CLI: blockpy-gen <module> [--out f] | blockpy-gen serve [--port] [--allow pkgs]
   test/
 ```
 
-- **introspect 티어(Node, Python 필요):** `child_process.spawn(python, ['-c', _INSPECT])`로 모듈을 import + `inspect`로 API 추출 → JSON. 이 티어만 Python에 의존하며 **빌드/CLI 타임**에만 돈다.
-- **blocks 티어(순수, 브라우저 안전):** spec JSON을 받아 Blockly 블록 정의·툴박스·코드생성기 생성. **소비자가 Blockly 인스턴스 주입**(전역 `window.Blockly` 가정 안 함). Python 의존 0.
+- **introspect 티어(Node, Python 필요):** `child_process.spawn(python, ['-c', _INSPECT])`로 모듈을 import + `inspect`로 API 추출 → JSON. Python 의존은 **이 티어에 격리**.
+- **server 티어(Node, 1순위 UX):** introspect를 HTTP로 래핑 — `GET /blockify?module=X` → LibrarySpec JSON. Express `blockifyMiddleware()` 또는 독립 `createBlockifyServer()`/`blockpy-gen serve`. introspect 결과 **캐시**(모듈→spec, 첫 호출 후 즉시) + **allowlist**(import할 모듈 제한).
+- **blocks 티어(순수, 브라우저 안전):** spec JSON을 받아 Blockly 블록 정의·툴박스·코드생성기 생성. **소비자가 Blockly 인스턴스 주입**(전역 `window.Blockly` 가정 안 함). Python·child_process 의존 0.
 
 ## 5. LibrarySpec — 두 티어 사이의 JSON 계약
 
@@ -93,18 +98,34 @@ blockpy-gen/
 
 `buildToolbox(spec, opts) -> categoryToolbox JSON` — 모듈 함수 카테고리 + 클래스별 카테고리(생성자 + 메서드). `ws.updateToolbox(...)`에 바로 사용.
 
-## 8. 데이터 흐름
+## 7.5 server 티어 — 라이브 'Add Library' 엔드포인트 (1순위 UX)
+
+`blockifyMiddleware({ python='python', allow=null, cache=true, maxEntries })` → Express 핸들러;
+`createBlockifyServer(opts)` → 독립 http 서버; `blockpy-gen serve [--port 7799] [--allow numpy,pandas]` CLI.
+- `GET /blockify?module=<name>` → `introspectModule(name)` 결과(LibrarySpec JSON). `POST`도 허용(`{module, includePrivate}`).
+- **캐시:** module→spec 인메모리(옵션 디스크). 첫 호출만 python을 돌리고 이후 즉시. `?refresh=1`로 무효화.
+- **보안(산업/회사 필수):** 모듈 introspection = 그 모듈 **import = 코드 실행**. 그래서 (1) **allowlist**(`allow`로 허용 모듈만), (2) 기본 **localhost 바인드 + 신뢰 네트워크 전용** 경고를 README에 명시. allowlist 미설정 시 경고 로그.
+- 순수성 유지: 서버는 introspect를 HTTP로 노출만 함(블록 생성 로직 없음). 응답은 blocks 티어가 소비.
+
+## 8. 데이터 흐름 (세 진입점, 코어 동일)
 
 ```
-빌드:   blockpy-gen PIL.Image --out pil.blocks.json        (python subprocess, 1회)
-런타임: import { defineBlocks, buildToolbox } from 'blockpy-gen/blocks'
-        defineBlocks(Blockly, spec); ws.updateToolbox(buildToolbox(spec))
-        -> 사용자가 블록 드래그 -> Blockly.Python.workspaceToCode(ws) -> 라이브러리 쓰는 Python
+[1순위] 라이브 엔드포인트 (반복 SDK 추상화):
+  서버(1회): blockpy-gen serve --allow numpy,pandas,PIL      (Python 있는 곳)
+  플랫폼(브라우저): const spec = await fetch('/blockify?module=numpy').then(r=>r.json())
+                    defineBlocks(Blockly, spec); ws.updateToolbox(buildToolbox(spec))
+                    -> 사용자가 'numpy' 입력 한 번 -> 블록 즉시 등장 -> 드래그 ->
+                       Blockly.Python.workspaceToCode(ws) -> numpy 쓰는 Python
+
+[보조] Node/Electron 원콜:  await blockify(Blockly, 'numpy', { workspace: ws })   // in-process
+
+[보조] CLI + JSON 프리셋:   blockpy-gen numpy --out specs/numpy.blocks.json  (CI/오프라인/버전관리)
+                            런타임: defineBlocks(Blockly, require('./specs/numpy.blocks.json'))
 ```
 
 ## 9. 패키징·타입
 
-`package.json`: `"type":"module"`, `exports` 맵으로 `./introspect`(Node), `./blocks`(브라우저 안전, child_process 미import), `.`→blocks. JSDoc → `tsc --allowJs --declaration --emitDeclarationOnly`로 `dist/**.d.ts`. 추후 `npm publish`.
+`package.json`: `"type":"module"`, `exports` 맵으로 `.`→blocks(브라우저 안전, child_process 미import), `./introspect`·`./server`(Node), `./blockify`(Node 원콜). JSDoc → `tsc --allowJs --declaration --emitDeclarationOnly`로 `dist/**.d.ts`. `bin`에 `blockpy-gen`(introspect + serve). 추후 `npm publish`.
 
 ## 10. 테스트
 
@@ -115,6 +136,8 @@ blockpy-gen/
   - **method → `recv.method(a)`**(리시버 입력 분리, self 미혼입) — Phase A 회귀 가드.
   - 선택 인자 생략, keyword-only `name=expr`.
 - **toolbox:** 모든 등록 블록이 정확히 한 카테고리에 들어가는지.
+- **server(Node):** `blockifyMiddleware`를 supertest 등으로 — `GET /blockify?module=textwrap` → 유효 LibrarySpec; allowlist 밖 모듈 → 403; 2회째 호출은 캐시 히트(python 미실행).
+- **통합:** introspect → blocks → 생성 코드가 실제 python으로 실행되는지 스모크(예: `Image.open`류 모듈함수 1건).
 
 ## 11. 에러 처리
 
@@ -123,7 +146,9 @@ blockpy-gen/
 
 ## 12. 불변식
 
-1. **순수/Pyodide분리:** `./blocks`는 child_process·python·pyodide 0 import(브라우저 번들 가능). `./introspect`만 Node.
+1. **순수/Python분리:** `./blocks`는 child_process·python·pyodide 0 import(브라우저 번들 가능). Python 의존은 `./introspect`·`./server`(Node)에만.
 2. **메서드 정확성:** 메서드 코드는 `recv.method(args)` — self 미혼입, 리시버는 별도 입력(Phase A 버그 영구 차단).
 3. **결정적 이름·충돌안전:** 같은 spec → 같은 블록 타입; 충돌은 silent 오매핑 대신 거부.
 4. **앱 비침습:** BlockPy 앱 코드 변경 0(독립 패키지).
+5. **서버는 introspect 래퍼:** 블록 생성 로직 없음(응답=LibrarySpec). allowlist 적용 시 밖 모듈 거부; 캐시는 동일 모듈에 동일 spec.
+6. **세 진입점 단일 코어:** 엔드포인트·Node원콜·CLI 모두 같은 introspect/blocks 함수를 호출(중복 로직 없음).
