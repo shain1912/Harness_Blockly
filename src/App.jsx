@@ -722,12 +722,15 @@ for i in range(4):
     }
   };
 
-  // Phase B: introspection-based blocking. Hits /api/blockify (real Python, no AI cost), maps the
-  // returned LibrarySpec to libRegistry specs (window.BlockPyLibImport), and registers them — they
-  // flow into the Library palette + lossless IR round-trip exactly like the AI-abstracted blocks.
-  const handleBlockifyLibrary = async (moduleName) => {
+  // Phase B/C: introspection-based blocking. Hits /api/blockify (real Python, no AI cost) for the
+  // ground-truth LibrarySpec, then registers libRegistry blocks (window.BlockPyLibImport) into the
+  // Library palette + lossless IR round-trip. With a `purpose`, an extra LLM pass (/api/abstract-
+  // library) curates a small, grouped, friendly-labelled subset grounded in that spec (Phase C);
+  // without one, every entry is mapped (Phase B).
+  const handleBlockifyLibrary = async (moduleName, purpose) => {
     const mod = (moduleName || '').trim();
     if (!mod) return;
+    const wantCurate = !!(purpose && purpose.trim());
     setIsAbstracting(true);
     setAiThoughts([]);
     setLogs(prev => [...prev, `[Blockify] Introspecting "${mod}" (real Python)...`]);
@@ -737,9 +740,7 @@ for i in range(4):
       let response = null;
       try {
         response = await fetch('/api/blockify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ module: mod }),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: mod }),
         });
       } catch (_) { response = null; }
       let data = null;
@@ -750,15 +751,43 @@ for i in range(4):
         setLogs(prev => [...prev, `[Blockify] ${why} for "${mod}".`]);
         return;
       }
-      const { alias, importStmt, specs } = imp.librarySpecToRegistrySpecs(data.spec);
-      setAiThoughts([
-        `Introspected ${data.spec.module} → ${data.spec.entries.length} API entries${data.cached ? ' (cached)' : ''}.`,
-        `Alias "${alias}" — add this import to run the blocks: ${importStmt}`,
-        `Mapping ${specs.length} blocks into the Library palette…`,
-      ]);
+      const librarySpec = data.spec;
+
+      // Phase C — purpose-driven curation (grounded LLM selection of a labelled subset).
+      let mapped;
+      if (wantCurate) {
+        setLogs(prev => [...prev, `[Curate] Asking the AI to pick blocks for: "${purpose.trim()}"…`]);
+        let cres = null;
+        try {
+          cres = await fetch('/api/abstract-library', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ spec: librarySpec, purpose: purpose.trim() }),
+          });
+        } catch (_) { cres = null; }
+        let cdata = null;
+        if (cres && cres.ok) { try { cdata = await cres.json(); } catch (_) { cdata = null; } }
+        if (!cres || !cres.ok || !cdata || !cdata.success) {
+          const why = !cres ? 'backend unreachable' : (!cres.ok ? `backend ${cres.status}` : ((cdata && cdata.error) || 'AI failed'));
+          setLogs(prev => [...prev, `[Curate] ${why} — falling back to full blockify for "${mod}".`]);
+          mapped = imp.librarySpecToRegistrySpecs(librarySpec);
+        } else {
+          mapped = imp.curationToRegistrySpecs(librarySpec, cdata.selected || []);
+          setAiThoughts([...(cdata.thoughts || []),
+            `Curated ${mapped.specs.length} of ${librarySpec.entries.length} entries for: ${purpose.trim()}`,
+            `Add this import to run the blocks: ${mapped.importStmt}`]);
+        }
+      } else {
+        mapped = imp.librarySpecToRegistrySpecs(librarySpec);
+        setAiThoughts([
+          `Introspected ${librarySpec.module} → ${librarySpec.entries.length} API entries${data.cached ? ' (cached)' : ''}.`,
+          `Alias "${mapped.alias}" — add this import to run the blocks: ${mapped.importStmt}`,
+          `Mapping ${mapped.specs.length} blocks into the Library palette…`,
+        ]);
+      }
+
       const registered = [];
       let rejected = 0;
-      for (const spec of specs) {
+      for (const spec of mapped.specs) {
         const res = reg.registerLibBlock(spec);
         if (!res.ok) { rejected++; continue; }
         const stored = reg.getLibSpec(res.type) || spec;
@@ -769,7 +798,8 @@ for i in range(4):
         const filtered = prev.filter(p => !registered.some(r => r.type === p.type));
         return [...filtered, ...registered];
       });
-      setLogs(prev => [...prev, `[Blockify] ✅ ${registered.length} block(s) from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. Import: ${importStmt}`]);
+      const tag = wantCurate ? 'Curate' : 'Blockify';
+      setLogs(prev => [...prev, `[${tag}] ✅ ${registered.length} block(s) from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. Import: ${mapped.importStmt}`]);
     } catch (err) {
       console.error(err);
       setLogs(prev => [...prev, `[Blockify Error] ${err.message}`]);

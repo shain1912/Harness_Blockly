@@ -77,6 +77,38 @@ function librarySpecToRegistrySpecs(librarySpec, opts = {}) {
   return { alias, importStmt: importStatement(moduleDotted, alias), specs };
 }
 
+// The canonical reference for an entry: its qualName when introspection supplied one, else a
+// computed dotted path (module.func / module.Class / module.Owner.method). LLM curation refers
+// to entries by this string; an unknown ref is dropped (never invents a block).
+function entryQualName(moduleDotted, entry) {
+  if (entry.qualName) return entry.qualName;
+  if (entry.kind === 'method') return `${moduleDotted}.${entry.owner}.${entry.name}`;
+  return `${moduleDotted}.${entry.name}`;
+}
+
+// Phase C (curation): given an LLM's purpose-driven selection [{ref, label?, group?}], register
+// ONLY those entries — with the introspected (correct) signature but the LLM's friendly DISPLAY
+// label and semantic group. `label` overrides spec.title (display-only; module/func still drive
+// lowering, so the call stays exact). Refs not found in the spec are returned in `dropped`.
+function curationToRegistrySpecs(librarySpec, selected, opts = {}) {
+  const moduleDotted = (librarySpec && librarySpec.module) || '';
+  const leaf = moduleDotted.includes('.') ? moduleDotted.slice(moduleDotted.lastIndexOf('.') + 1) : moduleDotted;
+  const alias = opts.alias || leaf;
+  const index = new Map();
+  for (const e of (librarySpec && librarySpec.entries) || []) index.set(entryQualName(moduleDotted, e), e);
+  const specs = [];
+  const dropped = [];
+  for (const sel of selected || []) {
+    const e = sel && index.get(sel.ref);
+    const base = e ? entryToSpec(e, alias, opts.colour) : null;
+    if (!base) { if (sel && sel.ref) dropped.push(sel.ref); continue; }
+    if (sel.label) base.title = String(sel.label);    // display-only; lowering uses module/func
+    if (sel.group) base.group = String(sel.group);
+    specs.push(base);
+  }
+  return { alias, importStmt: importStatement(moduleDotted, alias), specs, dropped };
+}
+
 const impApi = (typeof window !== 'undefined' ? window : global);
-impApi.BlockPyLibImport = { librarySpecToRegistrySpecs, requiredParamNames, importStatement };
+impApi.BlockPyLibImport = { librarySpecToRegistrySpecs, curationToRegistrySpecs, entryQualName, requiredParamNames, importStatement };
 if (typeof module !== 'undefined') module.exports = impApi.BlockPyLibImport;

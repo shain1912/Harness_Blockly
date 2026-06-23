@@ -82,6 +82,39 @@ test('method → receiver model (recv = owner lowercased, recv is argNames[0])',
   });
 });
 
+test('curation: selects a grounded subset, applies friendly labels, keeps call semantics', () => {
+  const selected = [
+    { ref: 'PIL.Image.blend', label: '두 이미지 블렌드', group: '합성' },
+    { ref: 'PIL.Image.Image.resize', label: '크기 변경', group: '변형' },
+    { ref: 'PIL.Image.NOT_REAL', label: '환각', group: 'x' },   // hallucinated → dropped
+  ];
+  const out = imp.curationToRegistrySpecs(SPEC, selected);
+  expect(out.dropped).toEqual(['PIL.Image.NOT_REAL']);
+  expect(out.specs.length).toBe(2);
+
+  const blend = out.specs.find((s) => s.func === 'blend');
+  expect(blend).toMatchObject({ module: 'Image', func: 'blend', title: '두 이미지 블렌드', group: '합성' });
+  expect(blend.argNames).toEqual(['im1', 'im2', 'alpha']);   // signature from introspection, not the LLM
+
+  const resize = out.specs.find((s) => s.func === 'resize');
+  expect(resize).toMatchObject({ module: 'image', func: 'resize', title: '크기 변경', group: '변형', argNames: ['image', 'size'] });
+});
+
+test('curation specs register; friendly title is display-only — lowering stays module/func', () => {
+  const out = imp.curationToRegistrySpecs(SPEC, [{ ref: 'PIL.Image.blend', label: 'BLEND!' }]);
+  const res = reg.registerLibBlock(out.specs[0]);
+  expect(res.ok).toBe(true);
+  const stored = reg.getLibSpec(res.type);
+  expect(stored.title).toBe('BLEND!');
+  const call = IR.blocklyToIr({ blocks: { languageVersion: 0, blocks: [{ type: res.type, inputs: {
+    ARG0: { block: { type: 'ir_name', fields: { ID: 'a' } } },
+    ARG1: { block: { type: 'ir_name', fields: { ID: 'b' } } },
+    ARG2: { block: { type: 'ir_name', fields: { ID: 'c' } } },
+  } }] } }).body[0].value;
+  expect(call.func.attr).toBe('blend');
+  expect(call.func.value.id).toBe('Image');   // friendly label did NOT leak into the call
+});
+
 test('mapped specs register and round-trip through blocklyToIr losslessly', () => {
   const out = imp.librarySpecToRegistrySpecs(SPEC);
   const results = out.specs.map((s) => reg.registerLibBlock(s));

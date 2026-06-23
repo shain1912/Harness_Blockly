@@ -294,6 +294,100 @@ app.post('/api/blockify', async (req, res) => {
   }
 });
 
+// ─── 3.6 Abstract library by purpose (LLM curation + macros, grounded) ────────
+// Given an introspected LibrarySpec (ground truth) + a purpose, MiniMax SELECTS a relevant
+// subset, GROUPS + RELABELS it, and proposes composite MACROS — but only references real
+// entries; the server drops any hallucinated ref so signatures always come from introspection.
+function describeSpecEntry(spec, e) {
+  const ps = (e.params || []).map((p) => {
+    const star = p.kind === 'vararg' ? '*' : p.kind === 'kwarg' ? '**' : '';
+    return star + p.name + (p.hasDefault ? '=…' : '');
+  }).join(', ');
+  const qn = e.qualName || (e.kind === 'method' ? `${spec.module}.${e.owner}.${e.name}` : `${spec.module}.${e.name}`);
+  const kind = e.kind === 'method' ? 'method' : e.kind === 'class' ? 'class' : 'func';
+  return `- [${kind}] ${qn}(${ps}) -> ${e.returns === false ? 'stmt' : 'value'}`;
+}
+
+app.post('/api/abstract-library', async (req, res) => {
+  const { spec, purpose, max } = req.body || {};
+  if (!spec || typeof spec.module !== 'string' || !Array.isArray(spec.entries)) {
+    return res.status(400).json({ error: 'a LibrarySpec {module, entries[]} is required (call /api/blockify first)' });
+  }
+  if (!purpose || !String(purpose).trim()) return res.status(400).json({ error: 'purpose is required' });
+  if (MINIMAX_KEYS.length === 0) return res.status(503).json({ error: 'No MiniMax API keys configured.' });
+
+  const limit = Math.min(Number(max) || 18, 40);
+  const validRefs = new Set(spec.entries.map((e) => e.qualName || (e.kind === 'method' ? `${spec.module}.${e.owner}.${e.name}` : `${spec.module}.${e.name}`)));
+  // The model often copies the WHOLE descriptor line ("PIL.Image.open(fp, …) -> value") as the
+  // ref; qualNames never contain '(', so strip from the first paren to recover the bare ref.
+  const stripSig = (s) => String(s || '').split('(')[0].trim();
+  const apiText = spec.entries.map((e) => describeSpecEntry(spec, e)).join('\n');
+
+  try {
+    const systemPrompt = `You curate a Python library's API into a small, purpose-focused set of visual blocks.
+You are given the library's REAL API (ground truth) and the user's PURPOSE.
+
+Respond in strict JSON only — no markdown. Schema:
+{
+  "thoughts": ["short reasoning", "..."],
+  "groups": [ { "name": "Category name", "entries": [ { "ref": "<exact qualName from the list>", "label": "friendly short label" } ] } ],
+  "macros": [ { "name": "snake_case_id", "label": "friendly label", "group": "Category name",
+               "params": ["p1"], "steps": [ { "ref": "<exact qualName>", "assign": "var", "args": ["p1 or 'literal' or a prior var"] } ], "result": "var" } ]
+}
+
+Rules:
+- "ref" MUST be copied EXACTLY from the API list — never invent names or signatures.
+- Select ONLY operations relevant to the PURPOSE; at most ${limit} entries total across groups.
+- Group into 2-5 intuitive categories. Write labels in the SAME LANGUAGE as the purpose.
+- Macros chain 2-4 real calls into one task (optional). Each step.ref MUST be in the list; steps run top-to-bottom; later steps may use earlier "assign" vars.
+- Prefer the most common, beginner-friendly operations.`;
+    const userContent = `Library module: ${spec.module}\nPurpose: ${String(purpose).trim()}\n\nREAL API (use ONLY these refs):\n${apiText}`;
+
+    const { thinkingText, responseText } = await callMiniMax(systemPrompt, userContent, { maxTokens: 2600 });
+    let parsed;
+    try {
+      const jsonStr = responseText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+      parsed = JSON.parse(jsonStr);
+    } catch {
+      throw new Error('MiniMax returned invalid JSON: ' + responseText.slice(0, 200));
+    }
+
+    // Flatten groups -> selected[]; drop hallucinated refs.
+    const selected = [];
+    let droppedSel = 0;
+    for (const g of parsed.groups || []) {
+      for (const en of (g && g.entries) || []) {
+        const ref = en && stripSig(en.ref);
+        if (ref && validRefs.has(ref)) selected.push({ ref, label: en.label || '', group: (g.name || '') });
+        else droppedSel++;
+      }
+    }
+    // Validate macros: every step.ref must be real; otherwise drop the whole macro.
+    const macros = [];
+    let droppedMac = 0;
+    for (const m of parsed.macros || []) {
+      const steps = Array.isArray(m && m.steps) ? m.steps : [];
+      const normSteps = steps.map((s) => (s ? { assign: s.assign, args: s.args, ref: stripSig(s.ref) } : null));
+      if (!m || !m.name || !normSteps.length || !normSteps.every((s) => s && validRefs.has(s.ref))) { droppedMac++; continue; }
+      macros.push({
+        name: String(m.name), label: m.label || m.name, group: m.group || '',
+        params: Array.isArray(m.params) ? m.params.map(String) : [],
+        steps: normSteps.map((s) => ({ ref: s.ref, assign: s.assign ? String(s.assign) : '', args: Array.isArray(s.args) ? s.args.map(String) : [] })),
+        result: m.result ? String(m.result) : '',
+      });
+    }
+    const thoughts = [
+      ...(thinkingText ? thinkingText.split('\n').filter((l) => l.trim()).slice(0, 3) : []),
+      ...(parsed.thoughts || []),
+    ].slice(0, 8);
+
+    res.json({ success: true, module: spec.module, selected, macros, thoughts, dropped: { selected: droppedSel, macros: droppedMac } });
+  } catch (err) {
+    console.error('[/api/abstract-library]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ─── 4. AI Chat: general-purpose MiniMax chat for the AI Agent panel ──────────
 app.post('/api/ai-chat', async (req, res) => {
   const { messages, systemPrompt } = req.body;

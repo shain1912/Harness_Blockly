@@ -13,13 +13,14 @@ export default function LibraryManager({
   const [selectedLib, setSelectedLib] = useState('cv2');
   const [customPrompt, setCustomPrompt] = useState('import tensorflow as tf\nmodel = tf.keras.Sequential()\nmodel.compile(optimizer="adam")\nmodel.fit(x, y)');
   const [blockifyMod, setBlockifyMod] = useState('PIL.Image');
+  const [blockifyPurpose, setBlockifyPurpose] = useState('');
 
   const handleAbstractClick = () => {
     onAbstract(selectedLib, selectedLib === 'custom' ? customPrompt : '');
   };
 
   const handleBlockifyClick = () => {
-    if (onBlockify && blockifyMod.trim()) onBlockify(blockifyMod.trim());
+    if (onBlockify && blockifyMod.trim()) onBlockify(blockifyMod.trim(), blockifyPurpose.trim());
   };
 
   return (
@@ -72,10 +73,19 @@ export default function LibraryManager({
               placeholder="e.g. PIL.Image, numpy, requests ..."
             />
             <button type="submit" className="btn btn-primary btn-sm" disabled={isAbstracting || !blockifyMod.trim()}>
-              {isAbstracting ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-cubes"></i>} Blockify
+              {isAbstracting ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-cubes"></i>} {blockifyPurpose.trim() ? 'Curate' : 'Blockify'}
             </button>
           </form>
-          <small className="form-hint">Imports the module in real Python and generates exact-signature blocks. Add the suggested import to run them.</small>
+          <input
+            id="blockify-purpose-input"
+            className="pip-input"
+            type="text"
+            value={blockifyPurpose}
+            onChange={(e) => setBlockifyPurpose(e.target.value)}
+            placeholder="Purpose (optional) — e.g. 초보자용 이미지 편집: 열기·크기변경·흑백·저장"
+            style={{ width: '100%', marginTop: 6 }}
+          />
+          <small className="form-hint">Imports the module in real Python for exact-signature blocks. Add a <b>purpose</b> and the AI curates a small, labelled subset for that goal.</small>
         </div>
 
         {/* ── AI Block Abstraction ────────────────────────── */}
