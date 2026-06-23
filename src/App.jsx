@@ -756,6 +756,7 @@ for i in range(4):
       // Phase C — purpose-driven curation (grounded LLM selection of a labelled subset).
       let mapped;
       let macroCount = 0;
+      let macroDefs = [];
       if (wantCurate) {
         setLogs(prev => [...prev, `[Curate] Asking the AI to pick blocks for: "${purpose.trim()}"…`]);
         let cres = null;
@@ -773,9 +774,9 @@ for i in range(4):
           mapped = imp.librarySpecToRegistrySpecs(librarySpec);
         } else {
           mapped = imp.curationToRegistrySpecs(librarySpec, cdata.selected || []);
-          // Phase C2: register composite macro blocks (grounded multi-step workflows).
-          const macroDefs = imp.macrosToRegistry(librarySpec, cdata.macros || []);
-          for (const md of macroDefs) reg.addMacro(md);
+          // Phase C2: composite macro blocks (grounded multi-step workflows) — added after the
+          // fresh-removal below so they aren't wiped by removeMacrosBySource.
+          macroDefs = imp.macrosToRegistry(librarySpec, cdata.macros || []);
           macroCount = macroDefs.length;
           setAiThoughts([...(cdata.thoughts || []),
             `Curated ${mapped.specs.length} of ${librarySpec.entries.length} entries${macroCount ? ` (+${macroCount} macro workflow${macroCount > 1 ? 's' : ''})` : ''} for: ${purpose.trim()}`,
@@ -790,6 +791,12 @@ for i in range(4):
         ]);
       }
 
+      // Fresh registration: replace this library's prior blocks + macros so a re-run's labels/
+      // groups/macros win (not shadowed by first-spec). Done here — after the curation network
+      // round-trip — so the old palette stays visible during the wait, then swaps atomically.
+      const removedTypes = reg.removeModules(imp.libraryModules(librarySpec));
+      reg.removeMacrosBySource(librarySpec.module);
+
       const registered = [];
       let rejected = 0;
       for (const spec of mapped.specs) {
@@ -798,10 +805,11 @@ for i in range(4):
         const stored = reg.getLibSpec(res.type) || spec;
         registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames, colour: stored.colour });
       }
+      for (const md of macroDefs) reg.addMacro(md);
       reg.persist();
       setInstalledBlocks(prev => {
-        const filtered = prev.filter(p => !registered.some(r => r.type === p.type));
-        return [...filtered, ...registered];
+        const drop = new Set([...removedTypes, ...registered.map(r => r.type)]);
+        return [...prev.filter(p => !drop.has(p.type)), ...registered];
       });
       const tag = wantCurate ? 'Curate' : 'Blockify';
       setLogs(prev => [...prev, `[${tag}] ✅ ${registered.length} block(s)${macroCount ? ` + ${macroCount} macro(s)` : ''} from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. Import: ${mapped.importStmt}`]);

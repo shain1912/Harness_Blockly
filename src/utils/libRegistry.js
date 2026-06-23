@@ -147,6 +147,30 @@ function removeLibrary(module) {
   persist();
 }
 
+// Phase C fix: a Blockify/Curate of a library re-registers it from scratch, so its labels/groups
+// reflect the latest run (not the first-spec, which registerLibBlock keeps idempotently). Remove
+// every block in the given registry modules — AND delete its Blockly.Blocks def so defineBlock will
+// redefine with the new title (a baked-in init() closure otherwise shows the stale label). Built-ins
+// (cv2 presets) are preserved. Returns the removed block types.
+function removeModules(modules) {
+  const set = new Set(modules || []);
+  const B = (typeof window !== 'undefined' ? window : global).Blockly;
+  const removed = [];
+  for (const [type, spec] of [...SPECS]) {
+    if (!set.has(spec.module || '') || spec.builtin) continue;
+    SPECS.delete(type);
+    removed.push(type);
+    if (B && B.Blocks && B.Blocks[type]) { try { delete B.Blocks[type]; } catch (_) { /* keep going */ } }
+  }
+  persist();
+  return removed;
+}
+
+function removeMacrosBySource(src) {
+  for (const [name, m] of [...MACROS]) if ((m.srcModule || '') === src) MACROS.delete(name);
+  persistMacros();
+}
+
 // Phase C2: a macro is an authoring-only COMPOSITE — a precomputed Blockly block tree (chained
 // statements) that drops a multi-step workflow as ordinary, editable ir_* blocks. It carries no
 // new block type and no lowering: the dropped primitives round-trip like any hand-built blocks.
@@ -154,6 +178,7 @@ function addMacro(macro) {
   if (!macro || typeof macro.name !== 'string' || !macro.block) return { ok: false, reason: 'macro needs {name, block}' };
   MACROS.set(macro.name, {
     name: macro.name, label: macro.label || macro.name, group: macro.group || '', block: macro.block,
+    srcModule: macro.srcModule || '',
   });
   return { ok: true, name: macro.name };
 }
@@ -244,6 +269,6 @@ const api = (typeof window !== 'undefined' ? window : global);
 api.BlockPyLibRegistry = {
   registerLibBlock, getLibSpec, listLibBlocks, removeLibrary, clearAll,
   persist, hydrate, validateSpecParse, blockType, staticCheck, specFromDescriptor,
-  addMacro, listMacros, removeMacro, persistMacros, hydrateMacros,
+  removeModules, addMacro, listMacros, removeMacro, removeMacrosBySource, persistMacros, hydrateMacros,
 };
 if (typeof module !== 'undefined') module.exports = api.BlockPyLibRegistry;

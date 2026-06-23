@@ -154,6 +154,41 @@ test('macros: compose real calls into a block tree that round-trips to the right
   expect(s3.value.args.length).toBe(0);
 });
 
+test('libraryModules: every registry module a library maps to (alias + method receivers)', () => {
+  expect(new Set(imp.libraryModules(SPEC))).toEqual(new Set(['Image', 'image']));
+});
+
+test('fresh registration: removeModules clears a library so re-curation overrides titles', () => {
+  // 1) full blockify -> plain titles
+  imp.librarySpecToRegistrySpecs(SPEC).specs.forEach((s) => reg.registerLibBlock(s));
+  const t = reg.blockType({ module: 'Image', func: 'blend', hasOutput: true });
+  expect(reg.getLibSpec(t).title).toBe('Image.blend');
+
+  // 2) re-curate: remove the library first, then register the friendly-labelled subset
+  const removed = reg.removeModules(imp.libraryModules(SPEC));
+  expect(removed).toContain(t);
+  expect(reg.getLibSpec(t)).toBeFalsy();
+  imp.curationToRegistrySpecs(SPEC, [{ ref: 'PIL.Image.blend', label: '두 이미지 블렌드' }]).specs
+    .forEach((s) => reg.registerLibBlock(s));
+  expect(reg.getLibSpec(t).title).toBe('두 이미지 블렌드');   // friendly label now wins
+});
+
+test('removeModules leaves other libraries (and built-ins) intact', () => {
+  reg.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true, title: 'cv2.imread', builtin: true });
+  imp.librarySpecToRegistrySpecs(SPEC).specs.forEach((s) => reg.registerLibBlock(s));
+  reg.removeModules(imp.libraryModules(SPEC));
+  // PIL gone, cv2 built-in survives
+  expect(reg.getLibSpec(reg.blockType({ module: 'Image', func: 'blend', hasOutput: true }))).toBeFalsy();
+  expect(reg.getLibSpec(reg.blockType({ module: 'cv2', func: 'imread', hasOutput: true }))).toBeTruthy();
+});
+
+test('removeMacrosBySource clears just one library\'s macros', () => {
+  reg.addMacro({ name: 'm1', label: 'L1', block: { type: 'ir_pass' }, srcModule: 'PIL.Image' });
+  reg.addMacro({ name: 'm2', label: 'L2', block: { type: 'ir_pass' }, srcModule: 'numpy' });
+  reg.removeMacrosBySource('PIL.Image');
+  expect(reg.listMacros().map((m) => m.name)).toEqual(['m2']);
+});
+
 test('mapped specs register and round-trip through blocklyToIr losslessly', () => {
   const out = imp.librarySpecToRegistrySpecs(SPEC);
   const results = out.specs.map((s) => reg.registerLibBlock(s));

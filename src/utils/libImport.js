@@ -61,6 +61,21 @@ function importStatement(moduleDotted, alias) {
   return `from ${moduleDotted.slice(0, dot)} import ${alias}`;
 }
 
+// Every registry `module` value a library maps to: the alias (functions/classes) plus each method
+// receiver (owner lowercased). A Blockify/Curate of the library removes exactly these before
+// re-registering, so a re-run's labels/groups win instead of being shadowed by the first specs.
+function libraryModules(librarySpec, opts = {}) {
+  const moduleDotted = (librarySpec && librarySpec.module) || '';
+  const leaf = moduleDotted.includes('.') ? moduleDotted.slice(moduleDotted.lastIndexOf('.') + 1) : moduleDotted;
+  const alias = opts.alias || leaf;
+  const mods = new Set();
+  for (const e of (librarySpec && librarySpec.entries) || []) {
+    if (e && e.kind === 'method') { if (e.owner) mods.add(String(e.owner).toLowerCase()); }
+    else mods.add(alias);
+  }
+  return [...mods];
+}
+
 // LibrarySpec -> { alias, importStmt, specs:[libRegistry spec...] }. opts.alias overrides the leaf;
 // opts.colour themes the blocks. Entries that can't be represented are silently skipped.
 function librarySpecToRegistrySpecs(librarySpec, opts = {}) {
@@ -182,14 +197,14 @@ function macrosToRegistry(librarySpec, macros, opts = {}) {
     // composed head block (with its next-chain) is blocks.blocks[0].
     try { const ws = IR && IR.irToBlockly({ type: 'Module', body }); block = ws && ws.blocks && ws.blocks.blocks && ws.blocks.blocks[0]; } catch (_) { block = null; }
     if (!block) continue;
-    out.push({ name: m.name, label: m.label || m.name, group: m.group || '', block });
+    out.push({ name: m.name, label: m.label || m.name, group: m.group || '', block, srcModule: moduleDotted });
   }
   return out;
 }
 
 const impApi = (typeof window !== 'undefined' ? window : global);
 impApi.BlockPyLibImport = {
-  librarySpecToRegistrySpecs, curationToRegistrySpecs, macrosToRegistry,
+  librarySpecToRegistrySpecs, curationToRegistrySpecs, macrosToRegistry, libraryModules,
   entryQualName, requiredParamNames, importStatement, argToIr, splitTopArgs,
 };
 if (typeof module !== 'undefined') module.exports = impApi.BlockPyLibImport;
