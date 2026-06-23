@@ -33,6 +33,11 @@ test('Blockify UI: introspect html.parser → Library blocks, method round-trips
 
   await page.waitForTimeout(600); // toolbox-refresh effect
 
+  // the library's import block is auto-added (real block, so it round-trips) -> dragged blocks run
+  const hasImport = await page.evaluate(() => window.__blocklyWorkspace.getAllBlocks(false)
+    .some((b) => b.type === 'ir_importfrom' && b.getFieldValue('MODULE') === 'html'));
+  expect(hasImport, 'an import block (from html import parser) should be auto-added').toBe(true);
+
   const proof = await page.evaluate(() => {
     const reg = window.BlockPyLibRegistry;
     // toolbox carries a populated Library category

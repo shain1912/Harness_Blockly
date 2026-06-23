@@ -722,6 +722,29 @@ for i in range(4):
     }
   };
 
+  // Auto-add a library's import as a REAL ir_* block (round-trips losslessly) so dragged library
+  // blocks run without the user hand-adding `from PIL import Image`. Added once per library, before
+  // the user drags usage, so it serializes first → the import precedes use in generated Python.
+  // BlocklyEditor stays mounted (display:none toggling), so window.__blocklyWorkspace is always live.
+  const ensureLibraryImportBlock = (moduleDotted, alias) => {
+    const ws = window.__blocklyWorkspace;
+    const B = window.Blockly;
+    if (!ws || !B || !B.serialization || !window.BlockPyLibImport) return false;
+    const want = window.BlockPyLibImport.importBlockJson(moduleDotted, alias);
+    const all = ws.getAllBlocks(false);
+    const present = all.some((blk) => {
+      if (blk.type !== want.type) return false;
+      if (want.type === 'ir_import') return (blk.getFieldValue('NAMES') || '') === want.fields.NAMES;
+      if ((blk.getFieldValue('MODULE') || '') !== want.fields.MODULE) return false;
+      const names = (blk.getFieldValue('NAMES') || '').split(',').map((s) => s.trim().split(/\s+/)[0]);
+      return names.includes(want.fields.NAMES);
+    });
+    if (present) return false;
+    const importCount = all.filter((b) => b.type === 'ir_import' || b.type === 'ir_importfrom').length;
+    try { B.serialization.blocks.append({ ...want, x: 24, y: 24 + importCount * 38 }, ws); return true; }
+    catch (_) { return false; }
+  };
+
   // Phase B/C: introspection-based blocking. Hits /api/blockify (real Python, no AI cost) for the
   // ground-truth LibrarySpec, then registers libRegistry blocks (window.BlockPyLibImport) into the
   // Library palette + lossless IR round-trip. With a `purpose`, an extra LLM pass (/api/abstract-
@@ -811,8 +834,9 @@ for i in range(4):
         const drop = new Set([...removedTypes, ...registered.map(r => r.type)]);
         return [...prev.filter(p => !drop.has(p.type)), ...registered];
       });
+      const addedImport = registered.length ? ensureLibraryImportBlock(librarySpec.module, mapped.alias) : false;
       const tag = wantCurate ? 'Curate' : 'Blockify';
-      setLogs(prev => [...prev, `[${tag}] ✅ ${registered.length} block(s)${macroCount ? ` + ${macroCount} macro(s)` : ''} from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. Import: ${mapped.importStmt}`]);
+      setLogs(prev => [...prev, `[${tag}] ✅ ${registered.length} block(s)${macroCount ? ` + ${macroCount} macro(s)` : ''} from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. ${addedImport ? 'Added import block' : 'Import'}: ${mapped.importStmt}`]);
     } catch (err) {
       console.error(err);
       setLogs(prev => [...prev, `[Blockify Error] ${err.message}`]);

@@ -85,7 +85,7 @@ export default function LibraryManager({
             placeholder="Purpose (optional) — e.g. 초보자용 이미지 편집: 열기·크기변경·흑백·저장"
             style={{ width: '100%', marginTop: 6 }}
           />
-          <small className="form-hint">Imports the module in real Python for exact-signature blocks. Add a <b>purpose</b> and the AI curates a small, labelled subset for that goal.</small>
+          <small className="form-hint">Imports the module in real Python for exact-signature blocks; the matching <code>import</code> block is added automatically. Add a <b>purpose</b> and the AI curates a small, labelled subset for that goal.</small>
         </div>
 
         {/* ── AI Block Abstraction ────────────────────────── */}

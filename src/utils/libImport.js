@@ -61,6 +61,15 @@ function importStatement(moduleDotted, alias) {
   return `from ${moduleDotted.slice(0, dot)} import ${alias}`;
 }
 
+// The REAL ir_* import block JSON for that statement, so the app can drop it into the workspace
+// (lossless — it round-trips like any hand-built import) instead of the user adding it by hand.
+// Dotted -> ir_importfrom { MODULE:<parent>, NAMES:<alias> }; single -> ir_import { NAMES:<module> }.
+function importBlockJson(moduleDotted, alias) {
+  const dot = moduleDotted.lastIndexOf('.');
+  if (dot <= 0) return { type: 'ir_import', fields: { NAMES: moduleDotted } };
+  return { type: 'ir_importfrom', fields: { MODULE: moduleDotted.slice(0, dot), NAMES: alias } };
+}
+
 // Every registry `module` value a library maps to: the alias (functions/classes) plus each method
 // receiver (owner lowercased). A Blockify/Curate of the library removes exactly these before
 // re-registering, so a re-run's labels/groups win instead of being shadowed by the first specs.
@@ -205,6 +214,6 @@ function macrosToRegistry(librarySpec, macros, opts = {}) {
 const impApi = (typeof window !== 'undefined' ? window : global);
 impApi.BlockPyLibImport = {
   librarySpecToRegistrySpecs, curationToRegistrySpecs, macrosToRegistry, libraryModules,
-  entryQualName, requiredParamNames, importStatement, argToIr, splitTopArgs,
+  entryQualName, requiredParamNames, importStatement, importBlockJson, argToIr, splitTopArgs,
 };
 if (typeof module !== 'undefined') module.exports = impApi.BlockPyLibImport;

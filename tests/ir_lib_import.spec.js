@@ -154,6 +154,18 @@ test('macros: compose real calls into a block tree that round-trips to the right
   expect(s3.value.args.length).toBe(0);
 });
 
+test('importBlockJson: the real import block a library needs (round-trips to the import stmt)', () => {
+  // dotted module -> from-import; single -> plain import
+  expect(imp.importBlockJson('PIL.Image', 'Image')).toEqual({ type: 'ir_importfrom', fields: { MODULE: 'PIL', NAMES: 'Image' } });
+  expect(imp.importBlockJson('matplotlib.pyplot', 'pyplot')).toEqual({ type: 'ir_importfrom', fields: { MODULE: 'matplotlib', NAMES: 'pyplot' } });
+  expect(imp.importBlockJson('requests', 'requests')).toEqual({ type: 'ir_import', fields: { NAMES: 'requests' } });
+
+  // the block lowers to the right import IR (so it generates `from PIL import Image`)
+  const ir = IR.blocklyToIr({ blocks: { languageVersion: 0, blocks: [imp.importBlockJson('PIL.Image', 'Image')] } });
+  expect(ir.body[0]).toMatchObject({ type: 'ImportFrom', module: 'PIL', level: 0 });
+  expect(ir.body[0].names[0].name).toBe('Image');
+});
+
 test('libraryModules: every registry module a library maps to (alias + method receivers)', () => {
   expect(new Set(imp.libraryModules(SPEC))).toEqual(new Set(['Image', 'image']));
 });
