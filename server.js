@@ -21,6 +21,27 @@ try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (_) {}
 
 const PYTHON_CMD = process.env.PYTHON_CMD || (process.platform === 'win32' ? 'python' : 'python3');
 
+// ─── blockpy-gen introspection (ESM, lazy-imported into this CJS server) ───────
+// /api/blockify turns an importable module into a LibrarySpec by importing it in a python
+// subprocess (executes its top-level code) — the SAME trust level the app already grants
+// /api/run-python and /api/pip-install. BLOCKIFY_ALLOW (comma-separated) optionally restricts
+// which modules may be introspected; unset = allow any (local single-user posture).
+const { pathToFileURL } = require('url');
+let _introspectPromise = null;
+function getIntrospect() {
+  if (!_introspectPromise) {
+    const url = pathToFileURL(path.join(__dirname, 'blockpy-gen', 'src', 'introspect', 'introspect.js')).href;
+    _introspectPromise = import(url).then((m) => m.introspectModule);
+  }
+  return _introspectPromise;
+}
+const BLOCKIFY_ALLOW = (process.env.BLOCKIFY_ALLOW || '').split(',').map((s) => s.trim()).filter(Boolean);
+const _blockifyCache = new Map();
+const MODULE_PATH_RE = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+if (BLOCKIFY_ALLOW.length === 0) {
+  console.warn('[blockify] No BLOCKIFY_ALLOW set — /api/blockify will import ANY requested module (executes top-level code). Local single-user use only; set BLOCKIFY_ALLOW=mod1,mod2 to restrict.');
+}
+
 // Seed a synthetic sample image into the demo filenames using the real local cv2, so
 // OpenCV examples produce output in shell mode even before any upload (best-effort).
 function seedSampleImages() {
@@ -243,6 +264,33 @@ Rules:
   } catch (err) {
     console.error('[/api/ai-abstract] MiniMax error:', err.message);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── 3.5 Blockify: introspection-based library blocks (no AI cost) ────────────
+// Real-API ground truth: imports the module in a python subprocess and returns a LibrarySpec
+// the frontend maps to libRegistry blocks (src/utils/libImport.js). No MiniMax involved.
+app.post('/api/blockify', async (req, res) => {
+  const moduleName = ((req.body && req.body.module) || '').trim();
+  const includePrivate = !!(req.body && req.body.includePrivate);
+  const maxEntries = Math.min(Number((req.body && req.body.maxEntries) || 200) || 200, 500);
+  if (!moduleName) return res.status(400).json({ error: 'module is required' });
+  if (!MODULE_PATH_RE.test(moduleName)) return res.status(400).json({ error: 'invalid module name' });
+  if (BLOCKIFY_ALLOW.length && !BLOCKIFY_ALLOW.includes(moduleName)) {
+    return res.status(403).json({ error: `module '${moduleName}' not in BLOCKIFY_ALLOW` });
+  }
+  const key = `${moduleName}|${includePrivate ? 'p' : ''}|${maxEntries}`;
+  if (!(req.body && req.body.refresh) && _blockifyCache.has(key)) {
+    return res.json({ success: true, cached: true, spec: _blockifyCache.get(key) });
+  }
+  try {
+    const introspect = await getIntrospect();
+    const spec = await introspect(moduleName, { python: PYTHON_CMD, includePrivate, maxEntries });
+    _blockifyCache.set(key, spec);
+    res.json({ success: true, cached: false, spec });
+  } catch (e) {
+    console.error('[/api/blockify]', e.message);
+    res.status(500).json({ success: false, error: String(e.message || e) });
   }
 });
 
