@@ -1,0 +1,74 @@
+// Block-UX pass (user feedback): (1) a real rounded STRING block — strings render as ir_str you
+// type into (no JSON quotes), not ir_const; (2) a module-rooted call folds into ONE ir_call
+// command block (funcName = dotted label) instead of an ir_attribute plugged into the call
+// ("3 overlapping blocks"). Variable-method calls (editable receiver) stay nested. Pure-node.
+const { test, expect } = require('@playwright/test');
+require('../src/utils/irToBlockly.js');
+require('../src/utils/blocklyToIr.js');
+const IR = global.BlockPyIR;
+
+const mod = (body) => ({ type: 'Module', body, type_ignores: [] });
+const imp = { type: 'Import', names: [{ name: 'cv2', asname: null }] };
+const call = (func, args) => ({ type: 'Call', func, args, keywords: [] });
+const attr = (v, a) => ({ type: 'Attribute', value: v, attr: a });
+const name = (id) => ({ type: 'Name', id });
+const con = (v) => ({ type: 'Constant', value: v });
+const expr = (v) => ({ type: 'Expr', value: v });
+const toBlocks = (ir) => IR.irToBlockly(ir).blocks.blocks;
+function findType(blocks, type) {
+  const out = [];
+  const walk = (b) => {
+    if (!b) return;
+    if (b.type === type) out.push(b);
+    for (const k of Object.keys(b.inputs || {})) { walk(b.inputs[k].block); walk(b.inputs[k].shadow); }
+    if (b.next) walk(b.next.block);
+  };
+  blocks.forEach(walk);
+  return out;
+}
+
+test('string Constant -> ir_str (rounded string block); number -> ir_const', () => {
+  const blocks = toBlocks(mod([expr(con('hello')), expr(con(5))]));
+  const strs = findType(blocks, 'ir_str');
+  const consts = findType(blocks, 'ir_const');
+  expect(strs.length).toBe(1);
+  expect(strs[0].fields.TEXT).toBe('hello');     // raw text, no quotes
+  expect(consts.length).toBe(1);
+  expect(consts[0].fields.VALUE).toBe('5');
+});
+
+test('ir_str round-trips to a string Constant (type the content, no quotes)', () => {
+  const ir = IR.blocklyToIr({ blocks: { languageVersion: 0, blocks: [
+    { type: 'ir_exprstmt', inputs: { VALUE: { block: { type: 'ir_str', fields: { TEXT: 'gray' } } } } },
+  ] } });
+  expect(ir.body[0].value).toEqual({ type: 'Constant', value: 'gray' });
+});
+
+test('module-rooted call folds into ONE ir_call (funcName dotted, no nested attribute block)', () => {
+  const blocks = toBlocks(mod([imp, expr(call(attr(name('cv2'), 'imread'), [con('x.png')]))]));
+  const calls = findType(blocks, 'ir_call');
+  expect(calls.length).toBe(1);
+  expect(calls[0].extraState.funcName).toBe('cv2.imread');
+  expect(calls[0].inputs.FUNC).toBeUndefined();
+  expect(findType(blocks, 'ir_attribute').length).toBe(0);   // no separate attribute block
+});
+
+test('folded module call round-trips losslessly', () => {
+  const ws = IR.irToBlockly(mod([imp, expr(call(attr(name('cv2'), 'waitKey'), [con(1000)]))]));
+  const ir1 = IR.blocklyToIr(ws);
+  const c = ir1.body[1].value;
+  expect(c.type).toBe('Call');
+  expect(c.func).toEqual({ type: 'Attribute', value: { type: 'Name', id: 'cv2' }, attr: 'waitKey' });
+  expect(c.args[0].value).toBe(1000);
+});
+
+test('variable-method call stays nested (receiver is an editable variable)', () => {
+  const blocks = toBlocks(mod([expr(call(attr(name('img'), 'resize'), [con(2)]))]));
+  expect(findType(blocks, 'ir_call')[0].extraState.funcName).toBeNull();
+  expect(findType(blocks, 'ir_attribute').length).toBe(1);
+});
+
+test('plain-name call is still a single command block (unchanged)', () => {
+  const blocks = toBlocks(mod([expr(call(name('print'), [con('hi')]))]));
+  expect(findType(blocks, 'ir_call')[0].extraState.funcName).toBe('print');
+});

@@ -32,6 +32,7 @@ const COMP_GENS = { gens: [{ ifs: 0, async: false }] };
 const IR_TOOLBOX_TABLE = [
   { name: 'Values', colour: '#5b80a5', blocks: [
     { type: 'ir_name' },
+    { type: 'ir_str' },                                   // rounded text string (type content directly)
     { type: 'ir_const' },
   ] },
   { name: 'Collections', colour: '#4a90a4', blocks: [

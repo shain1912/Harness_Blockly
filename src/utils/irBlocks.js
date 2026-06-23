@@ -23,6 +23,20 @@ if (Blockly) {
       this.setTooltip('Constant literal (JSON-encoded value)');
     },
   };
+  // A rounded TEXT string literal: type the content directly between the quotes (no JSON quoting).
+  // Round-trips to a string Constant. This is the block users plug into string args (filenames,
+  // labels, modes) instead of typing "gray" into the generic const.
+  Blockly.Blocks['ir_str'] = {
+    init() {
+      this.appendDummyInput()
+        .appendField('“')
+        .appendField(new Blockly.FieldTextInput(''), 'TEXT')
+        .appendField('”');
+      this.setOutput(true);
+      this.setColour('#5ba55b');
+      this.setTooltip('Text string');
+    },
+  };
   // Assignment with variable target arity (a = b = 1). itemCount_ targets are rebuilt
   // from extraState on load (BEFORE Blockly restores input connections), so every target
   // has a matching input and none are dropped through a real workspace save/load.

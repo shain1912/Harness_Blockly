@@ -42,6 +42,8 @@ const BLOCK_TO_EXPR = {
     return { type: 'Name', id };
   },
   ir_const: (b) => ({ type: 'Constant', value: JSON.parse(b.fields.VALUE) }),
+  // The rounded string block: its TEXT field is the raw content (no JSON quoting).
+  ir_str: (b) => ({ type: 'Constant', value: b.fields.TEXT == null ? '' : String(b.fields.TEXT) }),
   ir_list:  eltsToExpr('List'),
   ir_tuple: eltsToExpr('Tuple'),
   ir_set:   eltsToExpr('Set'),
@@ -102,9 +104,12 @@ const BLOCK_TO_EXPR = {
     const keywords = kw.map((name, i) => ({
       type: 'keyword', arg: name, value: blockToExpr(b.inputs['KW' + i].block),
     }));
-    // Fixed-name callee (extraState.funcName) -> a bare Name; otherwise the FUNC input expression.
+    // Fixed-name callee (extraState.funcName): a bare Name for a plain id, or the rebuilt
+    // Attribute chain for a dotted module callee (cv2.imread). Otherwise the FUNC input expression.
     const fn = b.extraState && b.extraState.funcName;
-    const func = (fn !== null && fn !== undefined) ? { type: 'Name', id: fn } : blockToExpr(b.inputs.FUNC.block);
+    const func = (fn !== null && fn !== undefined)
+      ? (String(fn).includes('.') ? dottedToExpr(fn) : { type: 'Name', id: fn })
+      : blockToExpr(b.inputs.FUNC.block);
     return { type: 'Call', func, args, keywords };
   },
   ir_ifexp: (b) => ({ type: 'IfExp',

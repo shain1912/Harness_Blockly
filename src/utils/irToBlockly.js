@@ -241,7 +241,11 @@ function exprToDotted(e) {
 // expr IR -> block
 const EXPR_HANDLERS = {
   Name:     (n) => { if (_varNames) _varNames.add(n.id); return blk('ir_name', { ID: { id: n.id } }); },
-  Constant: (n) => blk('ir_const', { VALUE: JSON.stringify(n.value) }),
+  // A string -> the rounded ir_str text block (content typed directly); everything else (numbers,
+  // bool, None, …) stays the JSON-encoded ir_const.
+  Constant: (n) => (typeof n.value === 'string'
+    ? blk('ir_str', { TEXT: n.value })
+    : blk('ir_const', { VALUE: JSON.stringify(n.value) })),
   List:  eltsBlock('ir_list'),
   Tuple: eltsBlock('ir_tuple'),
   // Python has no empty set literal (Set([]) unparses to the unroundtrippable "{*()}").
@@ -316,10 +320,16 @@ const EXPR_HANDLERS = {
   // keyword VALUES are KW* inputs. This is the Tier-B representation for any library call.
   Call: (n) => {
     const inputs = {};
-    // A plain-name callee (print, range, foo) is a FIXED command -> render its name as a
-    // non-editable label (extraState.funcName), not an editable ir_name in a FUNC input. A
-    // complex callee (obj.method, returned callable) keeps the FUNC value input.
-    const funcName = n.func && n.func.type === 'Name' ? n.func.id : null;
+    // A FIXED, known callee renders as ONE command block — its name is a non-editable label
+    // (extraState.funcName), not a nested block. That covers both a plain name (print, range) and
+    // a module-rooted dotted chain (cv2.imread, np.array): the latter folds the attribute INTO the
+    // call so it's a single block, not an ir_attribute plugged into the call. A call on a variable
+    // (img.resize) or a returned callable keeps the FUNC value input (receiver stays editable).
+    let funcName = n.func && n.func.type === 'Name' ? n.func.id : null;
+    if (funcName === null) {
+      const dotted = exprToDotted(n.func);
+      if (dotted && _modules && _modules.has(dotted.split('.')[0])) funcName = dotted;
+    }
     if (funcName === null) inputs.FUNC = { block: exprToBlock(n.func) };
     n.args.forEach((a, i) => { inputs['ARG' + i] = { block: exprToBlock(a) }; });
     const kw = [];
