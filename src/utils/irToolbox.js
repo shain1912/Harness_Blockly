@@ -63,8 +63,10 @@ const IR_TOOLBOX_TABLE = [
   ] },
   { name: 'Control flow', colour: '#a0734a', blocks: [
     { type: 'ir_if', inputs: { TEST: konst(true) } },
+    { type: 'ir_if', extraState: { hasElse: true }, inputs: { TEST: konst(true) } },   // if / else
     { type: 'ir_while', inputs: { TEST: konst(true) } },
     { type: 'ir_for', inputs: { TARGET: name('i'), ITER: name('items') } },
+    { type: 'ir_for', extraState: { hasElse: true }, inputs: { TARGET: name('i'), ITER: name('items') } },  // for / else
     { type: 'ir_break' },
     { type: 'ir_continue' },
     { type: 'ir_pass' },

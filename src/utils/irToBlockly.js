@@ -159,7 +159,7 @@ function forBlock(type, n) {
   };
   const orelse = stmtStack(n.orelse);
   if (orelse) inputs.ORELSE = orelse;
-  return blk(type, {}, inputs);
+  return { type, extraState: { hasElse: !!orelse }, inputs };
 }
 
 // FunctionDef/AsyncFunctionDef share one shape; async-ness is the block type (ir_funcdef vs
@@ -433,13 +433,13 @@ const STMT_HANDLERS = {
     const inputs = { TEST: { block: exprToBlock(n.test) }, BODY: stmtStack(n.body) };
     const orelse = stmtStack(n.orelse);
     if (orelse) inputs.ORELSE = orelse;
-    return blk('ir_if', {}, inputs);
+    return { type: 'ir_if', extraState: { hasElse: !!orelse }, inputs };
   },
   While: (n) => {
     const inputs = { TEST: { block: exprToBlock(n.test) }, BODY: stmtStack(n.body) };
     const orelse = stmtStack(n.orelse);
     if (orelse) inputs.ORELSE = orelse;
-    return blk('ir_while', {}, inputs);
+    return { type: 'ir_while', extraState: { hasElse: !!orelse }, inputs };
   },
   For: (n) => forBlock('ir_for', n),
   AsyncFor: (n) => forBlock('ir_asyncfor', n),

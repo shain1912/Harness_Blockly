@@ -378,34 +378,41 @@ if (Blockly) {
     b.setNextStatement(true, null);
     b.setColour(colour);
   };
-  Blockly.Blocks['ir_if'] = {
+  // if/while/for/asyncfor: the `else` branch is OPTIONAL. extraState.hasElse drives whether the
+  // ORELSE statement input renders, so an unused else never shows (a plain if and Python's rare
+  // for/while-else both round-trip; the toolbox offers explicit with-else variants for authoring).
+  const withOptionalElse = (buildHeader) => ({
+    hasElse_: false,
     init() {
-      this.appendValueInput('TEST').appendField('if');
-      this.appendStatementInput('BODY');
-      this.appendStatementInput('ORELSE').appendField('else');
+      buildHeader.call(this);
+      this.hasElse_ = false;
+      this.updateShape_();
       stmt(this, '#a0734a');
     },
-  };
-  Blockly.Blocks['ir_while'] = {
-    init() {
-      this.appendValueInput('TEST').appendField('while');
-      this.appendStatementInput('BODY');
-      this.appendStatementInput('ORELSE').appendField('else');
-      stmt(this, '#a0734a');
-    },
-  };
-  // For / AsyncFor share one shape; async-ness is the block type (the factory's isAsync const).
-  const forDef = (isAsync) => ({
-    init() {
-      this.appendValueInput('TARGET').appendField(isAsync ? 'async for' : 'for');
-      this.appendValueInput('ITER').appendField('in');
-      this.appendStatementInput('BODY');
-      this.appendStatementInput('ORELSE').appendField('else');
-      stmt(this, '#a0734a');
+    saveExtraState() { return { hasElse: this.hasElse_ }; },
+    loadExtraState(state) { this.hasElse_ = !!(state && state.hasElse); this.updateShape_(); },
+    updateShape_() {
+      const has = !!this.getInput('ORELSE');
+      if (this.hasElse_ && !has) this.appendStatementInput('ORELSE').appendField('else');
+      else if (!this.hasElse_ && has) this.removeInput('ORELSE');
     },
   });
-  Blockly.Blocks['ir_for'] = forDef(false);
-  Blockly.Blocks['ir_asyncfor'] = forDef(true);
+  Blockly.Blocks['ir_if'] = withOptionalElse(function () {
+    this.appendValueInput('TEST').appendField('if');
+    this.appendStatementInput('BODY');
+  });
+  Blockly.Blocks['ir_while'] = withOptionalElse(function () {
+    this.appendValueInput('TEST').appendField('while');
+    this.appendStatementInput('BODY');
+  });
+  // For / AsyncFor share one header; async-ness is the block type.
+  const forHeader = (isAsync) => function () {
+    this.appendValueInput('TARGET').appendField(isAsync ? 'async for' : 'for');
+    this.appendValueInput('ITER').appendField('in');
+    this.appendStatementInput('BODY');
+  };
+  Blockly.Blocks['ir_for'] = withOptionalElse(forHeader(false));
+  Blockly.Blocks['ir_asyncfor'] = withOptionalElse(forHeader(true));
   Blockly.Blocks['ir_pass'] = { init() { this.appendDummyInput().appendField('pass'); stmt(this, '#888888'); } };
   Blockly.Blocks['ir_break'] = { init() { this.appendDummyInput().appendField('break'); stmt(this, '#a0734a'); } };
   Blockly.Blocks['ir_continue'] = { init() { this.appendDummyInput().appendField('continue'); stmt(this, '#a0734a'); } };

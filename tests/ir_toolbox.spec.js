@@ -43,13 +43,19 @@ test.describe('ir_toolbox structure (node)', () => {
     }
   });
 
-  test('no ir_* type appears in more than one category', () => {
+  test('no ir_* type is split across DIFFERENT categories', () => {
+    // Same-category variants are allowed (e.g. an `if` and an `if / else` ir_if both in Control
+    // flow); a type living in two different categories would be confusing, so that is flagged.
     const tb = toolboxMod.buildIrToolbox();
     const seen = {};
     for (const cat of tb.contents) {
       for (const blk of cat.contents) {
-        expect(seen[blk.type], `${blk.type} duplicated in ${cat.name} and ${seen[blk.type]}`).toBeUndefined();
-        seen[blk.type] = cat.name;
+        if (blk.kind !== 'block') continue;   // skip flyout buttons
+        if (seen[blk.type] !== undefined) {
+          expect(seen[blk.type], `${blk.type} split across ${cat.name} and ${seen[blk.type]}`).toBe(cat.name);
+        } else {
+          seen[blk.type] = cat.name;
+        }
       }
     }
   });
