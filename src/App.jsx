@@ -755,6 +755,7 @@ for i in range(4):
 
       // Phase C — purpose-driven curation (grounded LLM selection of a labelled subset).
       let mapped;
+      let macroCount = 0;
       if (wantCurate) {
         setLogs(prev => [...prev, `[Curate] Asking the AI to pick blocks for: "${purpose.trim()}"…`]);
         let cres = null;
@@ -772,8 +773,12 @@ for i in range(4):
           mapped = imp.librarySpecToRegistrySpecs(librarySpec);
         } else {
           mapped = imp.curationToRegistrySpecs(librarySpec, cdata.selected || []);
+          // Phase C2: register composite macro blocks (grounded multi-step workflows).
+          const macroDefs = imp.macrosToRegistry(librarySpec, cdata.macros || []);
+          for (const md of macroDefs) reg.addMacro(md);
+          macroCount = macroDefs.length;
           setAiThoughts([...(cdata.thoughts || []),
-            `Curated ${mapped.specs.length} of ${librarySpec.entries.length} entries for: ${purpose.trim()}`,
+            `Curated ${mapped.specs.length} of ${librarySpec.entries.length} entries${macroCount ? ` (+${macroCount} macro workflow${macroCount > 1 ? 's' : ''})` : ''} for: ${purpose.trim()}`,
             `Add this import to run the blocks: ${mapped.importStmt}`]);
         }
       } else {
@@ -799,7 +804,7 @@ for i in range(4):
         return [...filtered, ...registered];
       });
       const tag = wantCurate ? 'Curate' : 'Blockify';
-      setLogs(prev => [...prev, `[${tag}] ✅ ${registered.length} block(s) from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. Import: ${mapped.importStmt}`]);
+      setLogs(prev => [...prev, `[${tag}] ✅ ${registered.length} block(s)${macroCount ? ` + ${macroCount} macro(s)` : ''} from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. Import: ${mapped.importStmt}`]);
     } catch (err) {
       console.error(err);
       setLogs(prev => [...prev, `[Blockify Error] ${err.message}`]);

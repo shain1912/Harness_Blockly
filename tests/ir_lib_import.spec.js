@@ -115,6 +115,45 @@ test('curation specs register; friendly title is display-only — lowering stays
   expect(call.func.value.id).toBe('Image');   // friendly label did NOT leak into the call
 });
 
+test('macros: compose real calls into a block tree that round-trips to the right statements', () => {
+  const macros = [{
+    name: 'open_resize_show', label: '열고 크기변경 후 미리보기', group: '워크플로',
+    params: ['inp'],
+    steps: [
+      { ref: 'PIL.Image.open', assign: 'img', args: ['inp'] },
+      { ref: 'PIL.Image.Image.resize', assign: 'small', args: ['img', '(64, 64)'] },
+      { ref: 'PIL.Image.Image.show', assign: '', args: ['small'] },
+    ],
+  }];
+  const out = imp.macrosToRegistry(SPEC, macros);
+  expect(out.length).toBe(1);
+  expect(out[0]).toMatchObject({ name: 'open_resize_show', label: '열고 크기변경 후 미리보기', group: '워크플로' });
+
+  // round-trip the composed tree (head block + next-chain) through blocklyToIr
+  const mod = IR.blocklyToIr({ blocks: { languageVersion: 0, blocks: [out[0].block] } });
+  expect(mod.body.length).toBe(3);
+
+  const s1 = mod.body[0];                       // img = Image.open(inp)
+  expect(s1.type).toBe('Assign');
+  expect(s1.targets[0].id).toBe('img');
+  expect(s1.value.func.attr).toBe('open');
+  expect(s1.value.func.value.id).toBe('Image');  // function -> alias-rooted
+  expect(s1.value.args[0].id).toBe('inp');
+
+  const s2 = mod.body[1];                       // small = img.resize((64, 64))
+  expect(s2.targets[0].id).toBe('small');
+  expect(s2.value.func.attr).toBe('resize');
+  expect(s2.value.func.value.id).toBe('img');    // method -> receiver = ARG0
+  expect(s2.value.args[0].type).toBe('Tuple');
+  expect(s2.value.args[0].elts.map((e) => e.value)).toEqual([64, 64]);
+
+  const s3 = mod.body[2];                       // small.show()
+  expect(s3.type).toBe('Expr');
+  expect(s3.value.func.attr).toBe('show');
+  expect(s3.value.func.value.id).toBe('small');
+  expect(s3.value.args.length).toBe(0);
+});
+
 test('mapped specs register and round-trip through blocklyToIr losslessly', () => {
   const out = imp.librarySpecToRegistrySpecs(SPEC);
   const results = out.specs.map((s) => reg.registerLibBlock(s));

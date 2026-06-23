@@ -9,7 +9,9 @@
  */
 
 const SPECS = new Map();                 // block type -> normalized spec
+const MACROS = new Map();                 // macro name -> { name, label, group, block } (Phase C2)
 const STORAGE_KEY = 'blockpy.libRegistry.v1';
+const MACRO_STORAGE_KEY = 'blockpy.libRegistry.macros.v1';
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function blockType(spec) {
@@ -107,6 +109,7 @@ function registerLibBlock(spec) {
     hasOutput: !!spec.hasOutput,
     colour: spec.colour || '#009688',
     title: spec.title || `${spec.module ? spec.module + '.' : ''}${spec.func}`,
+    group: spec.group || '',          // Phase C: semantic group (LLM curation) -> toolbox sub-category
     builtin: !!spec.builtin,
   };
   stored.method = isMethodSpec(stored);   // instance method -> lowering uses ARG0 as the receiver
@@ -134,7 +137,7 @@ function listLibBlocks() {
   for (const [type, spec] of SPECS) {
     const mod = spec.module || '';
     if (!byModule.has(mod)) byModule.set(mod, []);
-    byModule.get(mod).push({ type, title: spec.title, argNames: spec.argNames, hasOutput: spec.hasOutput });
+    byModule.get(mod).push({ type, title: spec.title, argNames: spec.argNames, hasOutput: spec.hasOutput, group: spec.group || '' });
   }
   return [...byModule.entries()].map(([module, blocks]) => ({ module, blocks }));
 }
@@ -144,13 +147,35 @@ function removeLibrary(module) {
   persist();
 }
 
-function clearAll() { SPECS.clear(); }
+// Phase C2: a macro is an authoring-only COMPOSITE — a precomputed Blockly block tree (chained
+// statements) that drops a multi-step workflow as ordinary, editable ir_* blocks. It carries no
+// new block type and no lowering: the dropped primitives round-trip like any hand-built blocks.
+function addMacro(macro) {
+  if (!macro || typeof macro.name !== 'string' || !macro.block) return { ok: false, reason: 'macro needs {name, block}' };
+  MACROS.set(macro.name, {
+    name: macro.name, label: macro.label || macro.name, group: macro.group || '', block: macro.block,
+  });
+  return { ok: true, name: macro.name };
+}
+function listMacros() { return [...MACROS.values()]; }
+function removeMacro(name) { MACROS.delete(name); persistMacros(); }
+
+function clearAll() { SPECS.clear(); MACROS.clear(); }
 
 function persist() {
   try {
     const ls = (typeof window !== 'undefined') ? window.localStorage : null;
     if (!ls) return;
     ls.setItem(STORAGE_KEY, JSON.stringify([...SPECS.values()].filter((s) => !s.builtin)));   // built-ins are re-registered in-memory each mount, never persisted
+  } catch (_) { /* non-fatal */ }
+  persistMacros();
+}
+
+function persistMacros() {
+  try {
+    const ls = (typeof window !== 'undefined') ? window.localStorage : null;
+    if (!ls) return;
+    ls.setItem(MACRO_STORAGE_KEY, JSON.stringify([...MACROS.values()]));
   } catch (_) { /* non-fatal */ }
 }
 
@@ -169,8 +194,21 @@ function hydrate() {
       const res = registerLibBlock(spec);
       if (res.ok) out.push({ type: res.type, title: spec.title, hasOutput: !!spec.hasOutput, func: spec.func, args: spec.argNames || [], colour: spec.colour });
     }
+    hydrateMacros();
     return out;
   } catch (_) { clearAll(); return []; }
+}
+
+function hydrateMacros() {
+  try {
+    const ls = (typeof window !== 'undefined') ? window.localStorage : null;
+    if (!ls) return [];
+    const raw = ls.getItem(MACRO_STORAGE_KEY);
+    const macros = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(macros)) return [];
+    for (const m of macros) addMacro(m);
+    return listMacros();
+  } catch (_) { return []; }
 }
 
 // Async half of the oracle: confirm the spec lowers to a call that re-parses to a single
@@ -206,5 +244,6 @@ const api = (typeof window !== 'undefined' ? window : global);
 api.BlockPyLibRegistry = {
   registerLibBlock, getLibSpec, listLibBlocks, removeLibrary, clearAll,
   persist, hydrate, validateSpecParse, blockType, staticCheck, specFromDescriptor,
+  addMacro, listMacros, removeMacro, persistMacros, hydrateMacros,
 };
 if (typeof module !== 'undefined') module.exports = api.BlockPyLibRegistry;

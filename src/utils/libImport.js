@@ -109,6 +109,87 @@ function curationToRegistrySpecs(librarySpec, selected, opts = {}) {
   return { alias, importStmt: importStatement(moduleDotted, alias), specs, dropped };
 }
 
+// Phase C2 (macros): a macro is a multi-step workflow the AI composed from REAL calls. We render
+// it as a COMPOSITE block tree of ordinary ir_* blocks (assign/call/attribute/name/const) — no new
+// block type, no special lowering, so the dropped primitives round-trip like any hand-built blocks.
+
+// Split top-level comma args, respecting (), [] nesting and quotes (for "(64, 64)" etc.).
+function splitTopArgs(s) {
+  const out = [];
+  let depth = 0; let cur = ''; let q = null;
+  for (const ch of String(s)) {
+    if (q) { cur += ch; if (ch === q) q = null; continue; }
+    if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+    if (ch === '(' || ch === '[') { depth++; cur += ch; continue; }
+    if (ch === ')' || ch === ']') { depth--; cur += ch; continue; }
+    if (ch === ',' && depth === 0) { if (cur.trim()) out.push(cur.trim()); cur = ''; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+// A single argument string -> an IR expression. Handles identifiers, string/number/bool/None
+// literals, and (..)/[..] of the same; anything unrecognized falls back to a Name (best-effort,
+// still editable once dropped).
+function argToIr(s) {
+  const t = String(s).trim();
+  if (/^-?\d+$/.test(t)) return { type: 'Constant', value: parseInt(t, 10) };
+  if (/^-?\d*\.\d+$/.test(t)) return { type: 'Constant', value: parseFloat(t) };
+  if (/^(['"]).*\1$/.test(t)) return { type: 'Constant', value: t.slice(1, -1) };
+  if (t === 'True') return { type: 'Constant', value: true };
+  if (t === 'False') return { type: 'Constant', value: false };
+  if (t === 'None') return { type: 'Constant', value: null };
+  if (/^\(.*\)$/.test(t)) return { type: 'Tuple', elts: splitTopArgs(t.slice(1, -1)).map(argToIr) };
+  if (/^\[.*\]$/.test(t)) return { type: 'List', elts: splitTopArgs(t.slice(1, -1)).map(argToIr) };
+  return { type: 'Name', id: t };
+}
+
+// One macro step -> an IR statement. A method step lowers to `<recv>.<m>(rest)` (receiver = first
+// arg); a function/class step to `<alias>.<name>(args)`. With `assign`, wrap in Assign; else Expr.
+function macroStepToStmt(index, alias, step) {
+  const entry = index.get(step.ref);
+  const fname = entry ? entry.name : String(step.ref).split('.').pop();
+  const isMethod = !!(entry && entry.kind === 'method');
+  const args = (step.args || []).map(argToIr);
+  let call;
+  if (isMethod) {
+    const recv = args[0] || { type: 'Name', id: 'obj' };
+    call = { type: 'Call', func: { type: 'Attribute', value: recv, attr: fname }, args: args.slice(1), keywords: [] };
+  } else {
+    call = { type: 'Call', func: { type: 'Attribute', value: { type: 'Name', id: alias }, attr: fname }, args, keywords: [] };
+  }
+  return step.assign
+    ? { type: 'Assign', targets: [{ type: 'Name', id: String(step.assign) }], value: call }
+    : { type: 'Expr', value: call };
+}
+
+// Macros -> [{name, label, group, block}] where block is the composed ir_* tree (head block with a
+// next-chain). Uses the pure window.BlockPyIR.irToBlockly, so it needs no Pyodide and round-trips.
+function macrosToRegistry(librarySpec, macros, opts = {}) {
+  const moduleDotted = (librarySpec && librarySpec.module) || '';
+  const leaf = moduleDotted.includes('.') ? moduleDotted.slice(moduleDotted.lastIndexOf('.') + 1) : moduleDotted;
+  const alias = opts.alias || leaf;
+  const index = new Map();
+  for (const e of (librarySpec && librarySpec.entries) || []) index.set(entryQualName(moduleDotted, e), e);
+  const IR = (typeof window !== 'undefined' ? window : global).BlockPyIR;
+  const out = [];
+  for (const m of macros || []) {
+    if (!m || typeof m.name !== 'string' || !Array.isArray(m.steps) || !m.steps.length) continue;
+    const body = m.steps.map((s) => macroStepToStmt(index, alias, s));
+    let block;
+    // irToBlockly returns { blocks: <workspace {languageVersion, blocks:[…]}>, variables }; the
+    // composed head block (with its next-chain) is blocks.blocks[0].
+    try { const ws = IR && IR.irToBlockly({ type: 'Module', body }); block = ws && ws.blocks && ws.blocks.blocks && ws.blocks.blocks[0]; } catch (_) { block = null; }
+    if (!block) continue;
+    out.push({ name: m.name, label: m.label || m.name, group: m.group || '', block });
+  }
+  return out;
+}
+
 const impApi = (typeof window !== 'undefined' ? window : global);
-impApi.BlockPyLibImport = { librarySpecToRegistrySpecs, curationToRegistrySpecs, entryQualName, requiredParamNames, importStatement };
+impApi.BlockPyLibImport = {
+  librarySpecToRegistrySpecs, curationToRegistrySpecs, macrosToRegistry,
+  entryQualName, requiredParamNames, importStatement, argToIr, splitTopArgs,
+};
 if (typeof module !== 'undefined') module.exports = impApi.BlockPyLibImport;

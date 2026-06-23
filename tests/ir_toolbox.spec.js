@@ -17,9 +17,16 @@ const APP_URL = 'http://localhost:' + (process.env.PORT || '3000') + '/';
 const toolboxMod = require('../src/utils/irToolbox.js');
 require('../src/utils/irToBlockly.js');
 require('../src/utils/blocklyToIr.js');
+require('../src/utils/libRegistry.js');
 const IR = global.BlockPyIR;
+const toolboxReg = global.BlockPyLibRegistry;
 
 test.describe('ir_toolbox structure (node)', () => {
+  // The static structure is about the ir_* families; the dynamic Library category (lib_* blocks /
+  // curated sub-categories) has its own tests. Clear the shared registry so leftover library state
+  // from a sibling spec (workers:1 -> one process) can't pollute these assertions.
+  test.beforeEach(() => { if (toolboxReg && toolboxReg.clearAll) toolboxReg.clearAll(); });
+
   test('buildIrToolbox returns a well-formed categoryToolbox', () => {
     const tb = toolboxMod.buildIrToolbox();
     expect(tb.kind).toBe('categoryToolbox');

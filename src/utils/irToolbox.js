@@ -124,22 +124,53 @@ const IR_TOOLBOX_TABLE = [
 // Phase 5: a dynamic "Library" category compiled from the live registry (BlockPyLibRegistry).
 // Each Tier-A block gets an ir_name shadow per arg so a freshly-dragged block is valid Python
 // immediately (e.g. cv2.imread(filename)). Returns null when no library blocks are registered.
+function libBlockEntry(b) {
+  const inputs = {};
+  (b.argNames || []).forEach((argName, i) => { inputs['ARG' + i] = name(argName); });
+  const entry = { kind: 'block', type: b.type };
+  if (Object.keys(inputs).length) entry.inputs = inputs;
+  return entry;
+}
+
 function libraryCategory() {
   const reg = (typeof window !== 'undefined' ? window : global).BlockPyLibRegistry;
   if (!reg || typeof reg.listLibBlocks !== 'function') return null;
   const groups = reg.listLibBlocks();
-  if (!groups || !groups.length) return null;
-  const blocks = [];
-  groups.forEach((g) => {
-    g.blocks.forEach((b) => {
-      const inputs = {};
-      (b.argNames || []).forEach((argName, i) => { inputs['ARG' + i] = name(argName); });
-      const entry = { kind: 'block', type: b.type };
-      if (Object.keys(inputs).length) entry.inputs = inputs;
-      blocks.push(entry);
+  const macros = (typeof reg.listMacros === 'function' ? reg.listMacros() : []) || [];
+  if ((!groups || !groups.length) && !macros.length) return null;
+
+  // Bucket every lib block by its semantic group (Phase C curation), preserving first-seen order.
+  const byGroup = new Map();          // group label -> [block entries]; '' = ungrouped
+  let anyGroup = false;
+  (groups || []).forEach((mod) => {
+    mod.blocks.forEach((b) => {
+      const g = b.group || '';
+      if (g) anyGroup = true;
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g).push(libBlockEntry(b));
     });
   });
-  return { kind: 'category', name: 'Library', colour: '#009688', contents: blocks };
+
+  // Un-curated Blockify flow (no groups, no macros) -> the original FLAT Library category.
+  if (!anyGroup && !macros.length) {
+    return { kind: 'category', name: 'Library', colour: '#009688', contents: [...byGroup.values()].flat() };
+  }
+
+  // Curated: Library holds one sub-category per group (+ ungrouped catch-all + Macros composites).
+  const contents = [];
+  for (const [g, entries] of byGroup) {
+    if (g) contents.push({ kind: 'category', name: g, colour: '#00897b', contents: entries });
+  }
+  if (byGroup.has('') && byGroup.get('').length) {
+    contents.push({ kind: 'category', name: 'Other', colour: '#009688', contents: byGroup.get('') });
+  }
+  if (macros.length) {
+    contents.push({
+      kind: 'category', name: 'Macros', colour: '#7e57c2',
+      contents: macros.map((m) => ({ kind: 'block', ...m.block })),
+    });
+  }
+  return { kind: 'category', name: 'Library', colour: '#009688', contents };
 }
 
 // Compile the table to a Blockly categoryToolbox JSON object (+ a dynamic Library category).
