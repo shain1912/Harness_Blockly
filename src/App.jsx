@@ -722,6 +722,62 @@ for i in range(4):
     }
   };
 
+  // Phase B: introspection-based blocking. Hits /api/blockify (real Python, no AI cost), maps the
+  // returned LibrarySpec to libRegistry specs (window.BlockPyLibImport), and registers them — they
+  // flow into the Library palette + lossless IR round-trip exactly like the AI-abstracted blocks.
+  const handleBlockifyLibrary = async (moduleName) => {
+    const mod = (moduleName || '').trim();
+    if (!mod) return;
+    setIsAbstracting(true);
+    setAiThoughts([]);
+    setLogs(prev => [...prev, `[Blockify] Introspecting "${mod}" (real Python)...`]);
+    const reg = window.BlockPyLibRegistry;
+    const imp = window.BlockPyLibImport;
+    try {
+      let response = null;
+      try {
+        response = await fetch('/api/blockify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ module: mod }),
+        });
+      } catch (_) { response = null; }
+      let data = null;
+      if (response && response.ok) { try { data = await response.json(); } catch (_) { data = null; } }
+      if (!response || !response.ok || !data || !data.success || !data.spec) {
+        const why = !response ? 'backend unreachable (is the Express server running?)'
+          : (!response.ok ? `backend ${response.status}` : ((data && data.error) || 'introspection failed'));
+        setLogs(prev => [...prev, `[Blockify] ${why} for "${mod}".`]);
+        return;
+      }
+      const { alias, importStmt, specs } = imp.librarySpecToRegistrySpecs(data.spec);
+      setAiThoughts([
+        `Introspected ${data.spec.module} → ${data.spec.entries.length} API entries${data.cached ? ' (cached)' : ''}.`,
+        `Alias "${alias}" — add this import to run the blocks: ${importStmt}`,
+        `Mapping ${specs.length} blocks into the Library palette…`,
+      ]);
+      const registered = [];
+      let rejected = 0;
+      for (const spec of specs) {
+        const res = reg.registerLibBlock(spec);
+        if (!res.ok) { rejected++; continue; }
+        const stored = reg.getLibSpec(res.type) || spec;
+        registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames, colour: stored.colour });
+      }
+      reg.persist();
+      setInstalledBlocks(prev => {
+        const filtered = prev.filter(p => !registered.some(r => r.type === p.type));
+        return [...filtered, ...registered];
+      });
+      setLogs(prev => [...prev, `[Blockify] ✅ ${registered.length} block(s) from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. Import: ${importStmt}`]);
+    } catch (err) {
+      console.error(err);
+      setLogs(prev => [...prev, `[Blockify Error] ${err.message}`]);
+    } finally {
+      setIsAbstracting(false);
+    }
+  };
+
   const handleBlocklyCodeChange = (newCode) => {
     setCode(newCode);
     associatedPythonRef.current = newCode;
@@ -862,6 +918,7 @@ for i in range(4):
                 <div className="ai-tab-scroll">
                   <LibraryManager
                     onAbstract={handleAbstractLibrary}
+                    onBlockify={handleBlockifyLibrary}
                     onPipInstall={handlePipInstall}
                     installedBlocks={installedBlocks}
                     aiThoughts={aiThoughts}

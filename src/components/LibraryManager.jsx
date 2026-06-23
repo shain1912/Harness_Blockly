@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 
 export default function LibraryManager({
   onAbstract,
+  onBlockify,
   installedBlocks,
   aiThoughts,
   isAbstracting,
@@ -11,9 +12,14 @@ export default function LibraryManager({
 }) {
   const [selectedLib, setSelectedLib] = useState('cv2');
   const [customPrompt, setCustomPrompt] = useState('import tensorflow as tf\nmodel = tf.keras.Sequential()\nmodel.compile(optimizer="adam")\nmodel.fit(x, y)');
+  const [blockifyMod, setBlockifyMod] = useState('PIL.Image');
 
   const handleAbstractClick = () => {
     onAbstract(selectedLib, selectedLib === 'custom' ? customPrompt : '');
+  };
+
+  const handleBlockifyClick = () => {
+    if (onBlockify && blockifyMod.trim()) onBlockify(blockifyMod.trim());
   };
 
   return (
@@ -48,6 +54,28 @@ export default function LibraryManager({
             />
             <button type="submit" className="btn btn-primary btn-sm" disabled={!pipPkg.trim()}>Install</button>
           </form>
+        </div>
+
+        {/* ── Blockify (introspection — no AI cost) ───────── */}
+        <div className="form-group">
+          <label htmlFor="blockify-mod-input">Blockify a library — module name → real-API blocks</label>
+          <form
+            className="pip-form"
+            onSubmit={(e) => { e.preventDefault(); handleBlockifyClick(); }}
+          >
+            <input
+              id="blockify-mod-input"
+              className="pip-input"
+              type="text"
+              value={blockifyMod}
+              onChange={(e) => setBlockifyMod(e.target.value)}
+              placeholder="e.g. PIL.Image, numpy, requests ..."
+            />
+            <button type="submit" className="btn btn-primary btn-sm" disabled={isAbstracting || !blockifyMod.trim()}>
+              {isAbstracting ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-cubes"></i>} Blockify
+            </button>
+          </form>
+          <small className="form-hint">Imports the module in real Python and generates exact-signature blocks. Add the suggested import to run them.</small>
         </div>
 
         {/* ── AI Block Abstraction ────────────────────────── */}

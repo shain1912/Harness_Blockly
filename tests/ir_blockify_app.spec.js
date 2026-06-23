@@ -1,0 +1,67 @@
+// Phase B slice 3 (UI wiring): the LibraryManager "Blockify" flow. Typing a module name and
+// clicking Blockify hits POST /api/blockify (real-python introspection), maps the LibrarySpec
+// via window.BlockPyLibImport, and registers the blocks into the libRegistry — so they appear in
+// the Library palette and round-trip losslessly, exactly like AI-abstracted blocks.
+//
+// Needs BOTH servers: the Vite dev server (Playwright auto-starts it on :3000) AND the Express
+// backend for /api/blockify (`npm run server`, :3001) — same as the AI tests. Set APP_URL to
+// target a non-default port. Uses stdlib `html.parser` so no pip/micropip/Pillow is required.
+const { test, expect } = require('@playwright/test');
+const APP = process.env.APP_URL || 'http://localhost:3000';
+
+test('Blockify UI: introspect html.parser → Library blocks, method round-trips to receiver.method', async ({ page }) => {
+  test.setTimeout(120000);
+  await page.goto(APP, { waitUntil: 'networkidle', timeout: 60000 });
+  await page.waitForFunction(
+    () => !!(window.__blocklyWorkspace && window.BlockPyLibRegistry && window.BlockPyLibImport && window.BlockPyBuildIrToolbox),
+    null, { timeout: 60000 },
+  );
+
+  const count = () => page.evaluate(() => window.BlockPyLibRegistry.listLibBlocks().reduce((n, g) => n + g.blocks.length, 0));
+  const before = await count();
+
+  await page.locator('#tab-btn-library').click();
+  await page.locator('#blockify-mod-input').fill('html.parser');
+  await page.getByRole('button', { name: /Blockify/ }).click();
+
+  // The registry grows only if /api/blockify answered — a clear message when the backend is down.
+  const grew = await page
+    .waitForFunction((b) => window.BlockPyLibRegistry.listLibBlocks().reduce((n, g) => n + g.blocks.length, 0) > b,
+      before, { timeout: 60000 })
+    .then(() => true).catch(() => false);
+  expect(grew, 'registry did not grow — is the Express backend (npm run server) running for /api/blockify?').toBe(true);
+
+  await page.waitForTimeout(600); // toolbox-refresh effect
+
+  const proof = await page.evaluate(() => {
+    const reg = window.BlockPyLibRegistry;
+    // toolbox carries a populated Library category
+    const tb = window.BlockPyBuildIrToolbox();
+    const lib = tb.contents.find((c) => c.name === 'Library');
+    const libCount = lib ? lib.contents.filter((x) => x.kind === 'block').length : 0;
+
+    // pick any registered instance-method block and lower it: receiver = ARG0's value
+    let lowered = null;
+    for (const g of reg.listLibBlocks()) {
+      for (const b of g.blocks) {
+        const spec = reg.getLibSpec(b.type);
+        if (!spec || !spec.method) continue;
+        const inputs = {};
+        spec.argNames.forEach((_, i) => { inputs['ARG' + i] = { block: { type: 'ir_name', fields: { ID: i === 0 ? 'recv' : 'x' + i } } }; });
+        const ir = window.BlockPyIR.blocklyToIr({ blocks: { languageVersion: 0, blocks: [{ type: b.type, inputs }] } });
+        const call = ir.body[0].value;
+        lowered = { attr: call.func.attr, recvId: call.func.value && call.func.value.id, recvType: call.func.value && call.func.value.type, func: spec.func };
+        break;
+      }
+      if (lowered) break;
+    }
+    return { libCount, lowered };
+  });
+
+  expect(proof.libCount).toBeGreaterThan(before);
+  // a method lowers to `recv.<method>(...)` — receiver is ARG0's value (a Name), not a duplicated literal
+  expect(proof.lowered).not.toBeNull();
+  expect(proof.lowered.recvType).toBe('Name');
+  expect(proof.lowered.recvId).toBe('recv');
+  expect(proof.lowered.attr).toBe(proof.lowered.func);
+});
