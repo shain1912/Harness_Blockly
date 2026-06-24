@@ -340,23 +340,40 @@ if (Blockly) {
     kw_: [],
     funcName_: null,
     method_: null,
+    stmt_: false,
     init() {
       this.nargs_ = 0;
       this.kw_ = [];
       this.funcName_ = null;
       this.method_ = null;
+      this.stmt_ = false;
       this.updateShape_();
-      this.setOutput(true);
+      this.updateConnections_();
       this.setColour('#6a8a5b');
       this.setInputsInline(true);
     },
-    saveExtraState() { return { nargs: this.nargs_, kw: this.kw_, funcName: this.funcName_, method: this.method_ }; },
+    // A call is EITHER a reporter (rounded output — used as a value: x = len(s)) or a command (stack
+    // block — used as a statement: print(...)). One block, shape chosen by the stmt flag.
+    updateConnections_() {
+      this.setOutput(false);
+      this.setPreviousStatement(false);
+      this.setNextStatement(false);
+      if (this.stmt_) {
+        this.setPreviousStatement(true, null);
+        this.setNextStatement(true, null);
+      } else {
+        this.setOutput(true);
+      }
+    },
+    saveExtraState() { return { nargs: this.nargs_, kw: this.kw_, funcName: this.funcName_, method: this.method_, stmt: this.stmt_ }; },
     loadExtraState(state) {
       this.nargs_ = (state && typeof state.nargs === 'number') ? state.nargs : 0;
       this.kw_ = (state && Array.isArray(state.kw)) ? state.kw : [];
       this.funcName_ = (state && state.funcName !== undefined) ? state.funcName : null;
       this.method_ = (state && state.method !== undefined) ? state.method : null;
+      this.stmt_ = !!(state && state.stmt);
       this.updateShape_();
+      this.updateConnections_();
     },
     updateShape_() {
       // Preserve the receiver variable selection across reshapes (removeInput destroys the field).

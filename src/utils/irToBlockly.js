@@ -444,9 +444,17 @@ const STMT_HANDLERS = {
     if (n.value !== null && n.value !== undefined) inputs.VALUE = { block: exprToBlock(n.value) };
     return { type: 'ir_annassign', extraState: { simple: n.simple }, inputs };
   },
-  // Expression statement (e.g. a bare call print(x)): wraps a value-output expression block
-  // as a statement block.
-  Expr: (n) => blk('ir_exprstmt', {}, { VALUE: { block: exprToBlock(n.value) } }),
+  // Expression statement. A bare CALL (print(x), cap.release()) is a command -> render the call
+  // itself as ONE stack block (ir_call in stmt mode), not a rounded reporter wrapped in
+  // ir_exprstmt. Any other bare expression keeps the ir_exprstmt statement wrapper.
+  Expr: (n) => {
+    if (n.value && n.value.type === 'Call') {
+      const b = exprToBlock(n.value);
+      b.extraState = { ...(b.extraState || {}), stmt: true };
+      return b;
+    }
+    return blk('ir_exprstmt', {}, { VALUE: { block: exprToBlock(n.value) } });
+  },
   // Control flow. body/orelse are statement-input stacks; orelse omitted when empty (no
   // else). elif is represented as a single nested If in orelse (ast.unparse re-collapses it).
   If: (n) => {

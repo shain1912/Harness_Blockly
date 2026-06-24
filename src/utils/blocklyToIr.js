@@ -193,6 +193,9 @@ const BLOCK_TO_STMT = {
     value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null,   // optional
     simple: (b.extraState && typeof b.extraState.simple === 'number') ? b.extraState.simple : 1 }),
   ir_exprstmt: (b) => ({ type: 'Expr', value: blockToExpr(b.inputs.VALUE.block) }),
+  // A call in statement position (stmt-mode ir_call) lowers to an Expr(Call) — same as wrapping it
+  // in ir_exprstmt, but it's a single stack block. (BLOCK_TO_EXPR.ir_call builds the call itself.)
+  ir_call: (b) => ({ type: 'Expr', value: BLOCK_TO_EXPR.ir_call(b) }),
   ir_if: (b) => ({ type: 'If', test: blockToExpr(b.inputs.TEST.block),
     body: stmtListOrPass(b.inputs.BODY), orelse: stmtList(b.inputs.ORELSE) }),
   ir_while: (b) => ({ type: 'While', test: blockToExpr(b.inputs.TEST.block),

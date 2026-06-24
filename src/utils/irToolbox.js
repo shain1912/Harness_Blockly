@@ -76,7 +76,8 @@ const IR_TOOLBOX_TABLE = [
     { type: 'ir_funcdef' },                                // def f(): pass
     { type: 'ir_lambda', inputs: { BODY: konst(0) } },
     { type: 'ir_return' },                                 // bare `return`
-    { type: 'ir_call', extraState: { nargs: 0, kw: [] }, inputs: { FUNC: name('func') } },
+    { type: 'ir_call', extraState: { nargs: 0, kw: [] }, inputs: { FUNC: name('func') } },                       // call as a value (reporter)
+    { type: 'ir_call', extraState: { nargs: 1, kw: [], stmt: true }, inputs: { FUNC: name('func'), ARG0: name('x') } },  // call as a command (stack)
     { type: 'ir_exprstmt', inputs: { VALUE: name('value') } },
   ] },
   { name: 'Classes', colour: '#9a6a8a', blocks: [

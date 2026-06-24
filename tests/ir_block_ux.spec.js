@@ -92,3 +92,26 @@ test('plain-name call is still a single command block (unchanged)', () => {
   const blocks = toBlocks(mod([expr(call(name('print'), [con('hi')]))]));
   expect(findType(blocks, 'ir_call')[0].extraState.funcName).toBe('print');
 });
+
+test('a call statement is ONE rectangular stack block (no exprstmt wrapper + rounded call)', () => {
+  const blocks = toBlocks(mod([expr(call(name('print'), [con('hi')]))]));
+  expect(blocks.length).toBe(1);
+  expect(blocks[0].type).toBe('ir_call');           // the statement IS the call
+  expect(blocks[0].extraState.stmt).toBe(true);      // stack (statement) shape, not a reporter
+  expect(findType(blocks, 'ir_exprstmt').length).toBe(0);
+});
+
+test('a call used as a VALUE stays a reporter (no stmt flag)', () => {
+  // x = len(s)  ->  the call is in a value position, rounded
+  const blocks = toBlocks(mod([{ type: 'Assign', targets: [name('x')], value: call(name('len'), [name('s')]) }]));
+  const c = findType(blocks, 'ir_call')[0];
+  expect(c.extraState.stmt).toBeFalsy();
+});
+
+test('statement-call round-trips to Expr(Call)', () => {
+  const ws = IR.irToBlockly(mod([expr(call(name('print'), [con('hi')]))]));
+  const ir = IR.blocklyToIr(ws);
+  expect(ir.body[0].type).toBe('Expr');
+  expect(ir.body[0].value.type).toBe('Call');
+  expect(ir.body[0].value.func).toEqual({ type: 'Name', id: 'print' });
+});
