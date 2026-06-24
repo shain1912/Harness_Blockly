@@ -326,18 +326,28 @@ const EXPR_HANDLERS = {
     // call so it's a single block, not an ir_attribute plugged into the call. A call on a variable
     // (img.resize) or a returned callable keeps the FUNC value input (receiver stays editable).
     let funcName = n.func && n.func.type === 'Name' ? n.func.id : null;
-    if (funcName === null) {
+    let method = null;
+    let recvVar = null;
+    if (funcName === null && n.func && n.func.type === 'Attribute') {
       const dotted = exprToDotted(n.func);
-      if (dotted && _modules && _modules.has(dotted.split('.')[0])) funcName = dotted;
+      if (dotted && _modules && _modules.has(dotted.split('.')[0])) {
+        funcName = dotted;                          // module-rooted -> fixed dotted label
+      } else if (n.func.value && n.func.value.type === 'Name') {
+        method = n.func.attr;                       // var.method -> fold: receiver dropdown + label
+        recvVar = n.func.value.id;
+        if (_varNames) _varNames.add(recvVar);
+      }
     }
-    if (funcName === null) inputs.FUNC = { block: exprToBlock(n.func) };
+    if (funcName === null && method === null) inputs.FUNC = { block: exprToBlock(n.func) };
     n.args.forEach((a, i) => { inputs['ARG' + i] = { block: exprToBlock(a) }; });
     const kw = [];
     n.keywords.forEach((k, i) => {
       kw.push(k.arg === null || k.arg === undefined ? null : k.arg);
       inputs['KW' + i] = { block: exprToBlock(k.value) };
     });
-    return { type: 'ir_call', extraState: { nargs: n.args.length, kw, funcName }, inputs };
+    const block = { type: 'ir_call', extraState: { nargs: n.args.length, kw, funcName, method }, inputs };
+    if (method !== null) block.fields = { RECV: { id: recvVar } };
+    return block;
   },
   // SUGAR family (dedicated blocks; the desugar-as-feature pass is Phase 4). ast.unparse
   // re-adds any needed parentheses, so precedence is preserved without tracking it here.

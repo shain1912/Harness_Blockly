@@ -104,12 +104,23 @@ const BLOCK_TO_EXPR = {
     const keywords = kw.map((name, i) => ({
       type: 'keyword', arg: name, value: blockToExpr(b.inputs['KW' + i].block),
     }));
-    // Fixed-name callee (extraState.funcName): a bare Name for a plain id, or the rebuilt
-    // Attribute chain for a dotted module callee (cv2.imread). Otherwise the FUNC input expression.
+    // Callee shapes: extraState.funcName -> a bare Name (plain id) or rebuilt Attribute chain
+    // (dotted module, cv2.imread); extraState.method -> <RECV variable>.method (folded var-method);
+    // otherwise the FUNC input expression.
     const fn = b.extraState && b.extraState.funcName;
-    const func = (fn !== null && fn !== undefined)
-      ? (String(fn).includes('.') ? dottedToExpr(fn) : { type: 'Name', id: fn })
-      : blockToExpr(b.inputs.FUNC.block);
+    const method = b.extraState && b.extraState.method;
+    let func;
+    if (fn !== null && fn !== undefined) {
+      func = String(fn).includes('.') ? dottedToExpr(fn) : { type: 'Name', id: fn };
+    } else if (method !== null && method !== undefined) {
+      const rf = b.fields && b.fields.RECV;
+      const recvId = (rf && typeof rf === 'object')
+        ? ((_varMap && _varMap[rf.id] != null) ? _varMap[rf.id] : rf.id)
+        : rf;
+      func = { type: 'Attribute', value: { type: 'Name', id: recvId }, attr: method };
+    } else {
+      func = blockToExpr(b.inputs.FUNC.block);
+    }
     return { type: 'Call', func, args, keywords };
   },
   ir_ifexp: (b) => ({ type: 'IfExp',

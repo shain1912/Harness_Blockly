@@ -339,32 +339,44 @@ if (Blockly) {
     nargs_: 0,
     kw_: [],
     funcName_: null,
+    method_: null,
     init() {
       this.nargs_ = 0;
       this.kw_ = [];
       this.funcName_ = null;
+      this.method_ = null;
       this.updateShape_();
       this.setOutput(true);
       this.setColour('#6a8a5b');
       this.setInputsInline(true);
     },
-    saveExtraState() { return { nargs: this.nargs_, kw: this.kw_, funcName: this.funcName_ }; },
+    saveExtraState() { return { nargs: this.nargs_, kw: this.kw_, funcName: this.funcName_, method: this.method_ }; },
     loadExtraState(state) {
       this.nargs_ = (state && typeof state.nargs === 'number') ? state.nargs : 0;
       this.kw_ = (state && Array.isArray(state.kw)) ? state.kw : [];
       this.funcName_ = (state && state.funcName !== undefined) ? state.funcName : null;
+      this.method_ = (state && state.method !== undefined) ? state.method : null;
       this.updateShape_();
     },
     updateShape_() {
+      // Preserve the receiver variable selection across reshapes (removeInput destroys the field).
+      const recvVal = (this.getField && this.getField('RECV')) ? this.getField('RECV').getValue() : null;
       if (this.getInput('FUNC')) this.removeInput('FUNC');
+      if (this.getInput('RECV')) this.removeInput('RECV');
       let i = 0;
       while (this.getInput('ARG' + i)) { this.removeInput('ARG' + i); i++; }
       i = 0;
       while (this.getInput('KW' + i)) { this.removeInput('KW' + i); i++; }
       if (this.getInput('CLOSE')) this.removeInput('CLOSE');
-      // A fixed-name callee renders as a non-editable label; a complex callee keeps a value input.
+      // Three callee shapes, all ONE block: a fixed name/module label (print, cv2.imread); a method
+      // on a variable receiver (`<var>.method` — var is a native dropdown, method a fixed label); or
+      // a complex callee that keeps a value input (returned callable, nested attribute chain).
       if (this.funcName_ !== null && this.funcName_ !== undefined) {
         this.appendDummyInput('FUNC').appendField(String(this.funcName_));
+      } else if (this.method_ !== null && this.method_ !== undefined) {
+        const f = new Blockly.FieldVariable('obj');
+        this.appendDummyInput('RECV').appendField(f, 'RECV').appendField('.' + String(this.method_));
+        if (recvVal) f.setValue(recvVal);
       } else {
         this.appendValueInput('FUNC');
       }

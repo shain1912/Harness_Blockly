@@ -62,10 +62,30 @@ test('folded module call round-trips losslessly', () => {
   expect(c.args[0].value).toBe(1000);
 });
 
-test('variable-method call stays nested (receiver is an editable variable)', () => {
+test('variable-method call folds into ONE ir_call (receiver = native variable dropdown)', () => {
   const blocks = toBlocks(mod([expr(call(attr(name('img'), 'resize'), [con(2)]))]));
-  expect(findType(blocks, 'ir_call')[0].extraState.funcName).toBeNull();
-  expect(findType(blocks, 'ir_attribute').length).toBe(1);
+  const c = findType(blocks, 'ir_call')[0];
+  expect(c.extraState.method).toBe('resize');
+  expect(c.fields.RECV).toEqual({ id: 'img' });
+  expect(c.extraState.funcName).toBeNull();
+  expect(findType(blocks, 'ir_attribute').length).toBe(0);   // no separate attribute block
+});
+
+test('folded variable-method call round-trips to receiver.method(...)', () => {
+  const ws = IR.irToBlockly(mod([expr(call(attr(name('img'), 'resize'), [con(2)]))]));
+  const c = IR.blocklyToIr(ws).body[0].value;
+  expect(c.type).toBe('Call');
+  expect(c.func).toEqual({ type: 'Attribute', value: { type: 'Name', id: 'img' }, attr: 'resize' });
+  expect(c.args[0].value).toBe(2);
+});
+
+test('complex receiver (a.b.method) stays a FUNC input (not folded)', () => {
+  // receiver a.b is an Attribute, not a plain variable -> keep the value input
+  const blocks = toBlocks(mod([expr(call(attr(attr(name('a'), 'b'), 'method'), []))]));
+  const c = findType(blocks, 'ir_call')[0];
+  expect(c.extraState.method).toBeNull();
+  expect(c.extraState.funcName).toBeNull();
+  expect(c.inputs.FUNC).toBeDefined();
 });
 
 test('plain-name call is still a single command block (unchanged)', () => {
