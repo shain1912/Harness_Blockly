@@ -196,9 +196,9 @@ test.describe('lib toolbox + drag (browser)', () => {
       reg.clearAll();
       reg.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true, colour: '#06b6d4', title: 'cv2.imread' });
 
-      // (1) rebuilt toolbox carries a Library category with the registered block + ARG0 shadow
+      // (1) rebuilt toolbox carries a per-library 'cv2' category with the block + ARG0 shadow
       const tb = window.BlockPyBuildIrToolbox();
-      const lib = tb.contents.find((c) => c.name === 'Library');
+      const lib = tb.contents.find((c) => c.name === 'cv2');
       const entry = lib && lib.contents.find((b) => b.type === 'lib_cv2_imread');
 
       // (2) the LIVE workspace accepts the rebuilt toolbox (exercises the revived App effect path)
@@ -248,7 +248,7 @@ test.describe('lib persistence (browser)', () => {
       reg.persist();
     });
 
-    // reload — hydrate() must re-register and the Library category must reappear
+    // reload — hydrate() must re-register and the per-library 'mylib' category must reappear
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(
       () => window.__blocklyWorkspace && window.BlockPyLibRegistry && window.BlockPyBuildIrToolbox,
@@ -258,7 +258,7 @@ test.describe('lib persistence (browser)', () => {
 
     const out = await page.evaluate(() => {
       const tb = window.BlockPyBuildIrToolbox();
-      const lib = tb.contents.find((c) => c.name === 'Library');
+      const lib = tb.contents.find((c) => c.name === 'mylib');
       return { restored: !!window.BlockPyLibRegistry.getLibSpec('lib_mylib_thing'),
                inToolbox: !!(lib && lib.contents.find((b) => b.type === 'lib_mylib_thing')) };
     });
@@ -269,7 +269,7 @@ test.describe('lib persistence (browser)', () => {
     await page.evaluate(() => { window.BlockPyLibRegistry.clearAll(); try { window.localStorage.removeItem('blockpy.libRegistry.v1'); } catch (_) {} });
   });
 
-  test('built-in cv2 palette is registered through the registry on load (Library category populated)', async ({ page }) => {
+  test('built-in cv2 palette is registered through the registry on load (cv2 category populated)', async ({ page }) => {
     test.setTimeout(300000);
     await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(
@@ -278,7 +278,7 @@ test.describe('lib persistence (browser)', () => {
     const out = await page.evaluate(() => {
       const reg = window.BlockPyLibRegistry;
       const tb = window.BlockPyBuildIrToolbox();
-      const lib = tb.contents.find((c) => c.name === 'Library');
+      const lib = tb.contents.find((c) => c.name === 'cv2');
       return {
         imreadRegistered: !!reg.getLibSpec('lib_cv2_imread'),
         inToolbox: !!(lib && lib.contents.find((b) => b.type === 'lib_cv2_imread')),

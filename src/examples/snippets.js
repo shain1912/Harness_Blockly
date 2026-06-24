@@ -205,6 +205,14 @@ const DEMO_SNIPPETS = [
     code: 'import humanize\nprint(humanize.intcomma(1234567))\nprint(humanize.ordinal(21))\nprint(humanize.naturalsize(1048576))',
     expectedStdout: ['1,234,567', '21st', '1.0 MB'],
   },
+  {
+    // NumPy demo (convert/blockify-only — needs micropip to run). Shows the block-UX on a real
+    // SDK: module calls (np.array, np.zeros, np.reshape) are single blocks, variable methods
+    // (a.sum, a.mean) fold into single blocks, print is a command, strings/numbers are literals.
+    // To get dedicated numpy blocks: AI tab -> Blockify `numpy` (or add a purpose -> Curate).
+    id: 'lib-numpy', title: 'NumPy: arrays & math', category: 'Libraries', desugar: false, execute: false,
+    code: 'import numpy as np\na = np.array([1, 2, 3, 4])\nb = np.zeros(4)\ntotal = a.sum()\navg = a.mean()\nprint(total)\nm = np.reshape(a, (2, 2))',
+  },
 ];
 
 if (typeof window !== 'undefined') window.BlockPyExamples = DEMO_SNIPPETS;

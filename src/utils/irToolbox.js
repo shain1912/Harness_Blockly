@@ -23,6 +23,19 @@
 const name = (id) => ({ shadow: { type: 'ir_name', fields: { ID: id } } });
 // value is JSON-encoded to match ir_const's field contract (blockToExpr does JSON.parse).
 const konst = (jsonValue) => ({ shadow: { type: 'ir_const', fields: { VALUE: JSON.stringify(jsonValue) } } });
+// A rounded string shadow (ir_str holds raw text, no JSON quoting).
+const text = (s) => ({ shadow: { type: 'ir_str', fields: { TEXT: s } } });
+// A fixed built-in function block: ir_call with a non-editable funcName label + arg shadows.
+// stmt=true makes it a command (stack) block (print); otherwise a reporter (len, range, …).
+const builtin = (funcName, args, stmt) => {
+  const inputs = {};
+  (args || []).forEach((a, i) => { inputs['ARG' + i] = a; });
+  const extraState = { nargs: (args || []).length, kw: [], funcName };
+  if (stmt) extraState.stmt = true;
+  const entry = { type: 'ir_call', extraState };
+  if (args && args.length) entry.inputs = inputs;
+  return entry;
+};
 
 // A comprehension generator/element default: [elt] for x in items
 const COMP_GENS = { gens: [{ ifs: 0, async: false }] };
@@ -80,6 +93,29 @@ const IR_TOOLBOX_TABLE = [
     { type: 'ir_call', extraState: { nargs: 1, kw: [], stmt: true }, inputs: { FUNC: name('func'), ARG0: name('x') } },  // call as a command (stack)
     { type: 'ir_exprstmt', inputs: { VALUE: name('value') } },
   ] },
+  { name: 'Built-ins', colour: '#6a8a5b', blocks: [
+    builtin('print', [text('Hello')], true),               // print(...) — a command (stack) block
+    builtin('input', [text('? ')]),
+    builtin('len', [name('items')]),
+    builtin('range', [konst(10)]),
+    builtin('int', [name('x')]),
+    builtin('str', [name('x')]),
+    builtin('float', [name('x')]),
+    builtin('bool', [name('x')]),
+    builtin('abs', [name('x')]),
+    builtin('round', [name('x')]),
+    builtin('min', [name('items')]),
+    builtin('max', [name('items')]),
+    builtin('sum', [name('items')]),
+    builtin('sorted', [name('items')]),
+    builtin('list', [name('x')]),
+    builtin('dict', []),
+    builtin('set', [name('x')]),
+    builtin('tuple', [name('x')]),
+    builtin('type', [name('x')]),
+    builtin('enumerate', [name('items')]),
+    builtin('zip', [name('a'), name('b')]),
+  ] },
   { name: 'Classes', colour: '#9a6a8a', blocks: [
     { type: 'ir_classdef' },                               // class C: pass
   ] },
@@ -134,45 +170,55 @@ function libBlockEntry(b) {
   return entry;
 }
 
-function libraryCategory() {
+// One toolbox category PER LIBRARY (named by the library, e.g. cv2 / pathlib / PIL.Image), instead
+// of one lumped "Library". A library's blocks are bucketed by its source-library tag (lib, else the
+// block's module for built-ins); a curated library nests one sub-category per semantic group
+// (+ Other + Macros), an un-curated one is flat.
+function libraryCategories() {
   const reg = (typeof window !== 'undefined' ? window : global).BlockPyLibRegistry;
-  if (!reg || typeof reg.listLibBlocks !== 'function') return null;
+  if (!reg || typeof reg.listLibBlocks !== 'function') return [];
   const groups = reg.listLibBlocks();
   const macros = (typeof reg.listMacros === 'function' ? reg.listMacros() : []) || [];
-  if ((!groups || !groups.length) && !macros.length) return null;
 
-  // Bucket every lib block by its semantic group (Phase C curation), preserving first-seen order.
-  const byGroup = new Map();          // group label -> [block entries]; '' = ungrouped
-  let anyGroup = false;
+  const byLib = new Map();            // libKey -> { groups: Map<groupName,[entries]>, anyGroup }
   (groups || []).forEach((mod) => {
     mod.blocks.forEach((b) => {
+      const libKey = b.lib || mod.module || 'Library';
+      if (!byLib.has(libKey)) byLib.set(libKey, { groups: new Map(), anyGroup: false });
+      const L = byLib.get(libKey);
       const g = b.group || '';
-      if (g) anyGroup = true;
-      if (!byGroup.has(g)) byGroup.set(g, []);
-      byGroup.get(g).push(libBlockEntry(b));
+      if (g) L.anyGroup = true;
+      if (!L.groups.has(g)) L.groups.set(g, []);
+      L.groups.get(g).push(libBlockEntry(b));
     });
   });
 
-  // Un-curated Blockify flow (no groups, no macros) -> the original FLAT Library category.
-  if (!anyGroup && !macros.length) {
-    return { kind: 'category', name: 'Library', colour: '#009688', contents: [...byGroup.values()].flat() };
-  }
+  const macrosByLib = new Map();      // srcModule -> [macro block entries]
+  macros.forEach((m) => {
+    const k = m.srcModule || 'Library';
+    if (!macrosByLib.has(k)) macrosByLib.set(k, []);
+    macrosByLib.get(k).push({ kind: 'block', ...m.block });
+  });
 
-  // Curated: Library holds one sub-category per group (+ ungrouped catch-all + Macros composites).
-  const contents = [];
-  for (const [g, entries] of byGroup) {
-    if (g) contents.push({ kind: 'category', name: g, colour: '#00897b', contents: entries });
+  const cats = [];
+  for (const [libKey, L] of byLib) {
+    const macroEntries = macrosByLib.get(libKey) || [];
+    let contents;
+    if (!L.anyGroup && !macroEntries.length) {
+      contents = [...L.groups.values()].flat();                         // flat library
+    } else {
+      contents = [];
+      for (const [g, entries] of L.groups) if (g) contents.push({ kind: 'category', name: g, colour: '#00897b', contents: entries });
+      if (L.groups.has('') && L.groups.get('').length) contents.push({ kind: 'category', name: 'Other', colour: '#009688', contents: L.groups.get('') });
+      if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: macroEntries });
+    }
+    cats.push({ kind: 'category', name: libKey, colour: '#009688', contents });
   }
-  if (byGroup.has('') && byGroup.get('').length) {
-    contents.push({ kind: 'category', name: 'Other', colour: '#009688', contents: byGroup.get('') });
+  // libraries whose curation produced only macros (no plain blocks)
+  for (const [libKey, entries] of macrosByLib) {
+    if (!byLib.has(libKey)) cats.push({ kind: 'category', name: libKey, colour: '#009688', contents: [{ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: entries }] });
   }
-  if (macros.length) {
-    contents.push({
-      kind: 'category', name: 'Macros', colour: '#7e57c2',
-      contents: macros.map((m) => ({ kind: 'block', ...m.block })),
-    });
-  }
-  return { kind: 'category', name: 'Library', colour: '#009688', contents };
+  return cats;
 }
 
 // Compile the table to a Blockly categoryToolbox JSON object (+ a dynamic Library category).
@@ -192,8 +238,7 @@ function buildIrToolbox() {
       : blocks;
     return { kind: 'category', name: cat.name, colour: cat.colour, contents: items };
   });
-  const lib = libraryCategory();
-  if (lib) contents.push(lib);
+  for (const cat of libraryCategories()) contents.push(cat);   // one category per registered library
   return { kind: 'categoryToolbox', contents };
 }
 

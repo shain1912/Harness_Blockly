@@ -96,7 +96,7 @@ function librarySpecToRegistrySpecs(librarySpec, opts = {}) {
   const specs = [];
   for (const e of entries) {
     const s = entryToSpec(e, alias, colour);
-    if (s) specs.push(s);
+    if (s) { s.lib = moduleDotted; specs.push(s); }   // tag the source library -> its own toolbox category
   }
   return { alias, importStmt: importStatement(moduleDotted, alias), specs };
 }
@@ -128,6 +128,7 @@ function curationToRegistrySpecs(librarySpec, selected, opts = {}) {
     if (!base) { if (sel && sel.ref) dropped.push(sel.ref); continue; }
     if (sel.label) base.title = String(sel.label);    // display-only; lowering uses module/func
     if (sel.group) base.group = String(sel.group);
+    base.lib = moduleDotted;                            // source library -> its own toolbox category
     specs.push(base);
   }
   return { alias, importStmt: importStatement(moduleDotted, alias), specs, dropped };

@@ -110,6 +110,7 @@ function registerLibBlock(spec) {
     colour: spec.colour || '#009688',
     title: spec.title || `${spec.module ? spec.module + '.' : ''}${spec.func}`,
     group: spec.group || '',          // Phase C: semantic group (LLM curation) -> toolbox sub-category
+    lib: spec.lib || '',              // source library -> its own toolbox category (one tab per library)
     builtin: !!spec.builtin,
   };
   stored.method = isMethodSpec(stored);   // instance method -> lowering uses ARG0 as the receiver
@@ -137,7 +138,7 @@ function listLibBlocks() {
   for (const [type, spec] of SPECS) {
     const mod = spec.module || '';
     if (!byModule.has(mod)) byModule.set(mod, []);
-    byModule.get(mod).push({ type, title: spec.title, argNames: spec.argNames, hasOutput: spec.hasOutput, group: spec.group || '' });
+    byModule.get(mod).push({ type, title: spec.title, argNames: spec.argNames, hasOutput: spec.hasOutput, group: spec.group || '', lib: spec.lib || '' });
   }
   return [...byModule.entries()].map(([module, blocks]) => ({ module, blocks }));
 }

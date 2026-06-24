@@ -58,6 +58,9 @@ test.describe('ir_toolbox structure (node)', () => {
     for (const cat of tb.contents) {
       for (const blk of cat.contents) {
         if (blk.kind !== 'block') continue;   // skip flyout buttons
+        // ir_call is the ONE universal block: a generic call (Functions) AND every fixed built-in
+        // (print, len, …) in Built-ins. Different funcName, same type — legitimately multi-category.
+        if (blk.type === 'ir_call') continue;
         if (seen[blk.type] !== undefined) {
           expect(seen[blk.type], `${blk.type} split across ${cat.name} and ${seen[blk.type]}`).toBe(cat.name);
         } else {
