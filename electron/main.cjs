@@ -6,14 +6,30 @@
 //   2. Express sends COOP/COEP so SharedArrayBuffer / Pyodide work (cross-origin isolation).
 const { app, BrowserWindow, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 const DIST_DIR = path.join(__dirname, '..', 'dist');
+const ICON_PNG = path.join(__dirname, '..', 'build', 'icon.png');
 
 // Tell the embedded server to host the built frontend. MUST be set before requiring
 // server.js — it reads BLOCKPY_STATIC_DIR at module-load to register static middleware.
 process.env.BLOCKPY_STATIC_DIR = DIST_DIR;
 // Quiet the "no AI keys" path by default; .env (if present next to server.js) still wins.
 process.env.PYTHONIOENCODING = process.env.PYTHONIOENCODING || 'utf-8';
+
+// Prefer the bundled portable Python (real cv2/numpy/pillow) so the app runs real Python with
+// NO system install. Packaged: resources/python/python.exe (electron-builder extraResources).
+// Dev: ./python-embed/python.exe if built. Falls back to system python when neither exists.
+// Set before requiring server.js, which reads PYTHON_CMD at module-load.
+const BUNDLED_PY = app.isPackaged
+  ? path.join(process.resourcesPath, 'python', 'python.exe')
+  : path.join(__dirname, '..', 'python-embed', 'python.exe');
+if (fs.existsSync(BUNDLED_PY)) {
+  process.env.PYTHON_CMD = BUNDLED_PY;
+  console.log('[python] using bundled runtime:', BUNDLED_PY);
+} else if (!process.env.PYTHON_CMD) {
+  console.log('[python] bundled runtime not found — falling back to system python');
+}
 
 const { start } = require('../server.js');
 
@@ -32,6 +48,9 @@ async function createWindow() {
     minHeight: 700,
     backgroundColor: '#1f1d1a',
     title: 'BlockPy',
+    // Dev: window/taskbar icon. Packaged: the exe icon (build/icon.ico, baked by
+    // electron-builder) is used automatically, so this guard just no-ops there.
+    ...(fs.existsSync(ICON_PNG) ? { icon: ICON_PNG } : {}),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

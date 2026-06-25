@@ -57,7 +57,14 @@
     "asarUnpack": [
       "blockpy-gen/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "python-embed",
+        "to": "python"
+      }
+    ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ],
@@ -81,6 +88,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.97.1",
+    "@fontsource/cormorant-garamond": "^5.2.11",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@fortawesome/fontawesome-free": "^7.2.0",
     "blockly": "^13.0.0",
     "cors": "^2.8.6",

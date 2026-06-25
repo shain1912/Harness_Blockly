@@ -1,6 +1,18 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
+
+// Self-hosted fonts (offline). @fontsource ships the woff2 + @font-face CSS; Vite bundles them
+// into dist/assets, so the app needs no Google Fonts CDN. Weights match index.css usage.
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/cormorant-garamond/500.css';
+import '@fontsource/cormorant-garamond/600.css';
+import '@fontsource/cormorant-garamond/700.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
+
 import './index.css';
 
 // Import compiler utilities so they are bundled by Vite and register globally
