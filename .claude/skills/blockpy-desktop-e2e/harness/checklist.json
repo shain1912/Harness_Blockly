@@ -1,0 +1,102 @@
+{
+  "title": "BlockPy Desktop E2E — workspace UI inspection",
+  "settle": 500,
+  "steps": [
+    {
+      "id": "01", "title": "App shell rendered",
+      "caption": "Electron window loads the React app shell.",
+      "check": { "selector": "#root", "exists": true, "visible": true }
+    },
+    {
+      "id": "02", "title": "Visual Blocks workspace",
+      "caption": "The Blockly workspace is injected and visible.",
+      "check": { "selector": ".injectionDiv", "exists": true, "visible": true }
+    },
+    {
+      "id": "03", "title": "Files tab opens the workspace tree",
+      "caption": "Clicking Files shows the VS Code-style file tree.",
+      "do": [ { "click": "#tab-btn-files" }, { "waitFor": ".fx-row" } ],
+      "check": { "selector": ".fx-row", "minCount": 1, "visible": true }
+    },
+    {
+      "id": "04", "title": "Starter main.py is present",
+      "caption": "The seeded main.py appears in the tree.",
+      "do": [ { "click": "#tab-btn-files" } ],
+      "check": { "selector": ".fx-tree", "textIncludes": "main.py" }
+    },
+    {
+      "id": "05", "title": "Sample image is present",
+      "caption": "sample.jpg (for cv2.imread) is in the workspace root.",
+      "check": { "selector": ".fx-tree", "textIncludes": "sample.jpg" }
+    },
+    {
+      "id": "06", "title": "Open main.py into the editor",
+      "caption": "Clicking the file opens it; the active-file chip updates.",
+      "do": [ { "clickText": [".fx-name", "main.py"] }, { "sleep": 500 } ],
+      "check": { "selector": ".active-file-chip", "textIncludes": "main.py" }
+    },
+    {
+      "id": "07", "title": "Editor loaded the file content",
+      "caption": "The Python editor holds the opened file's text.",
+      "check": { "selector": "#python-code", "textIncludes": "BlockPy" }
+    },
+    {
+      "id": "08", "title": "New Folder input appears",
+      "caption": "The New Folder button reveals an inline name input.",
+      "do": [ { "click": "#tab-btn-files" }, { "click": "button[title=\"New Folder\"]" } ],
+      "check": { "selector": ".fx-input", "exists": true, "visible": true }
+    },
+    {
+      "id": "09", "title": "Create a folder",
+      "caption": "Typing a name and Add creates the folder in the tree.",
+      "do": [
+        { "type": [".fx-input", "imgs"] },
+        { "click": ".fx-create .btn-primary" },
+        { "sleep": 600 }
+      ],
+      "check": { "selector": ".fx-tree", "textIncludes": "imgs" }
+    },
+    {
+      "id": "10", "title": "Run button (real Python)",
+      "caption": "The Run button drives the real local-Python backend.",
+      "check": { "selector": "#btn-run-shell", "textIncludes": "Run" }
+    },
+    {
+      "id": "11", "title": "Save button",
+      "caption": "Save writes the open file back to the workspace.",
+      "check": { "selector": "#btn-save-file", "exists": true }
+    },
+    {
+      "id": "12", "title": "Stop button",
+      "caption": "Stop kills the running program.",
+      "check": { "selector": "#btn-stop-shell", "exists": true }
+    },
+    {
+      "id": "13", "title": "Python Source editor tab",
+      "caption": "The right pane exposes the Python source editor.",
+      "check": { "selector": "#tab-btn-python", "exists": true, "visible": true }
+    },
+    {
+      "id": "14", "title": "AST Parser Tree tab",
+      "caption": "The AST tree tab is available.",
+      "check": { "selector": "#tab-btn-ast", "exists": true, "visible": true }
+    },
+    {
+      "id": "15", "title": "Terminal tab shows the console",
+      "caption": "The Terminal tab renders the console/logs panel.",
+      "do": [ { "click": "#tab-btn-logs" }, { "sleep": 300 } ],
+      "check": { "selector": ".console-card", "exists": true, "visible": true }
+    },
+    {
+      "id": "16", "title": "AI / Library tab",
+      "caption": "The AI tab exposes the library blockify/pip controls.",
+      "do": [ { "click": "#tab-btn-library" }, { "sleep": 300 } ],
+      "check": { "selector": "#blockify-mod-input", "exists": true, "visible": true }
+    },
+    {
+      "id": "17", "title": "Sprite stage is gone",
+      "caption": "The old turtle/sprite stage was removed (no canvas, no Stage tab).",
+      "check": { "selector": "#stage-canvas", "exists": false }
+    }
+  ]
+}
