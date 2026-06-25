@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 
 export default function LibraryManager({
   onAbstract,
   onBlockify,
+  onRemoveLibrary,
+  onClearLibraries,
   installedBlocks,
   aiThoughts,
   isAbstracting,
@@ -10,6 +12,13 @@ export default function LibraryManager({
   onPipPkgChange,
   onPipInstallShell,
 }) {
+  // One row per toolbox tab (source library), recomputed whenever the registry changes
+  // (installedBlocks is the reactive trigger). Built-in preset tabs are not deletable.
+  const libraries = useMemo(() => {
+    const reg = typeof window !== 'undefined' ? window.BlockPyLibRegistry : null;
+    return reg && reg.listLibraries ? reg.listLibraries() : [];
+  }, [installedBlocks]);
+  const userLibCount = libraries.filter((l) => !l.builtin).length;
   const [selectedLib, setSelectedLib] = useState('cv2');
   const [customPrompt, setCustomPrompt] = useState('import tensorflow as tf\nmodel = tf.keras.Sequential()\nmodel.compile(optimizer="adam")\nmodel.fit(x, y)');
   const [blockifyMod, setBlockifyMod] = useState('PIL.Image');
@@ -36,6 +45,37 @@ export default function LibraryManager({
       </div>
 
       <div className="library-body">
+
+        {/* ── Installed libraries (toolbox tabs) + delete ──── */}
+        <div className="form-group">
+          <div className="lib-manage-head">
+            <label style={{ margin: 0 }}>Libraries — toolbox tabs</label>
+            {userLibCount > 0 && (
+              <button className="btn btn-secondary btn-xs" onClick={onClearLibraries} title="Remove all added libraries and their toolbox tabs">
+                <i className="fa-solid fa-trash-can"></i> Clear all
+              </button>
+            )}
+          </div>
+          <div className="lib-list">
+            {libraries.length === 0 ? (
+              <div className="empty-list-placeholder">No libraries added yet. Blockify one below.</div>
+            ) : libraries.map((l) => (
+              <div key={l.lib} className="lib-row" title={l.lib}>
+                <span className="lib-row-name"><i className="fa-solid fa-layer-group"></i> {l.lib}</span>
+                <span className="lib-row-count">
+                  {l.blockCount} block{l.blockCount !== 1 ? 's' : ''}{l.macroCount ? ` · ${l.macroCount} macro${l.macroCount !== 1 ? 's' : ''}` : ''}
+                </span>
+                {l.builtin ? (
+                  <span className="lib-row-builtin" title="Built-in preset — comes back on reload">built-in</span>
+                ) : (
+                  <button className="lib-row-del" title={`Remove "${l.lib}" and its toolbox tab`} onClick={() => onRemoveLibrary(l.lib)}>
+                    <i className="fa-solid fa-xmark"></i>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* ── pip install (real local shell pip) ───────────── */}
         <div className="form-group">

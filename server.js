@@ -14,10 +14,41 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '30mb' })); // allow base64 image uploads
 
-// Media directory on real disk — uploaded images live here and it is the working
-// directory for shell-run Python, so cv2.imread('name.jpg') resolves to an upload.
-const MEDIA_DIR = path.join(os.tmpdir(), 'blockpy_media');
-try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (_) {}
+// ─── Static frontend serving (Electron / packaged desktop build) ────────────────
+// In dev the Vite server hosts the frontend and proxies /api here. In the packaged
+// Electron app there is no Vite: this server hosts the built `dist/` itself so the
+// renderer loads from http://127.0.0.1:<port> on the SAME origin as /api. The COOP/COEP
+// headers mirror vite.config.js — they are REQUIRED for the SharedArrayBuffer that powers
+// Pyodide's interrupt buffer (Stop button) and must be present on every document/asset.
+const STATIC_DIR = process.env.BLOCKPY_STATIC_DIR;
+if (STATIC_DIR && fs.existsSync(STATIC_DIR)) {
+  app.use((req, res, next) => {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+    next();
+  });
+  app.use(express.static(STATIC_DIR));
+  console.log(`🖥️  Serving built frontend from: ${STATIC_DIR}`);
+}
+
+// Workspace directory on real disk — the project root the user sees in the file explorer.
+// It is the working directory for shell-run Python, so cv2.imread('name.jpg'), open('data.txt'),
+// cv2.imwrite('out.png') etc. all resolve against (and appear in) this folder. Uploaded images
+// land here too. Override with BLOCKPY_WORKSPACE; defaults to ~/BlockPyWorkspace.
+const WORKSPACE_DIR = process.env.BLOCKPY_WORKSPACE || path.join(os.homedir(), 'BlockPyWorkspace');
+try { fs.mkdirSync(WORKSPACE_DIR, { recursive: true }); } catch (_) {}
+// MEDIA_DIR kept as an alias for existing call sites (uploads, seed images, run cwd).
+const MEDIA_DIR = WORKSPACE_DIR;
+
+// Resolve a client-supplied relative path INSIDE the workspace, rejecting traversal/absolute
+// escapes. Returns the absolute path, or null if it would leave the workspace.
+function safeResolve(relPath) {
+  const rel = String(relPath == null ? '' : relPath).replace(/\\/g, '/').replace(/^\/+/, '');
+  const abs = path.resolve(WORKSPACE_DIR, rel);
+  const root = path.resolve(WORKSPACE_DIR);
+  if (abs !== root && !abs.startsWith(root + path.sep)) return null;
+  return abs;
+}
 
 const PYTHON_CMD = process.env.PYTHON_CMD || (process.platform === 'win32' ? 'python' : 'python3');
 
@@ -30,7 +61,14 @@ const { pathToFileURL } = require('url');
 let _introspectPromise = null;
 function getIntrospect() {
   if (!_introspectPromise) {
-    const url = pathToFileURL(path.join(__dirname, 'blockpy-gen', 'src', 'introspect', 'introspect.js')).href;
+    // In the packaged Electron app __dirname lives inside app.asar, but blockpy-gen is
+    // asarUnpack'd (dynamic ESM import() can't read from inside an asar). Redirect to the
+    // on-disk unpacked copy. In dev __dirname is the repo root, so this is a no-op.
+    let base = __dirname;
+    if (base.includes('app.asar') && !base.includes('app.asar.unpacked')) {
+      base = base.replace('app.asar', 'app.asar.unpacked');
+    }
+    const url = pathToFileURL(path.join(base, 'blockpy-gen', 'src', 'introspect', 'introspect.js')).href;
     _introspectPromise = import(url).then((m) => m.introspectModule);
   }
   return _introspectPromise;
@@ -52,7 +90,7 @@ function seedSampleImages() {
     'cv2.rectangle(img,(40,50),(150,170),(0,0,255),-1)',
     'cv2.circle(img,(230,110),55,(0,200,0),-1)',
     'cv2.putText(img,"BlockPy",(30,215),cv2.FONT_HERSHEY_SIMPLEX,1.0,(255,255,255),2)',
-    'for f in ["input.jpg","photo.png","test.jpg","image.jpg","sample.jpg","namecard.jpg"]:',
+    'for f in ["sample.jpg"]:',
     '    p=os.path.join(d,f)',
     '    if not os.path.exists(p): cv2.imwrite(p,img)',
   ].join('\n');
@@ -62,6 +100,27 @@ function seedSampleImages() {
     const c = spawn(PYTHON_CMD, [f], { env: process.env });
     c.on('close', () => { try { fs.unlinkSync(f); } catch (_) {} });
     c.on('error', () => { try { fs.unlinkSync(f); } catch (_) {} });
+  } catch (_) {}
+}
+
+// Seed a friendly starter file the first time the workspace is empty, so the explorer
+// isn't blank on first run. Never overwrites existing user files.
+function seedStarterFile() {
+  try {
+    const f = path.join(WORKSPACE_DIR, 'main.py');
+    if (fs.existsSync(f)) return;
+    const hasAny = fs.readdirSync(WORKSPACE_DIR).some((n) => n.endsWith('.py'));
+    if (hasAny) return;
+    fs.writeFileSync(f, [
+      '# Welcome to BlockPy! This file lives in your workspace folder.',
+      '# Files you read/write run from here, e.g. cv2.imread("sample.jpg").',
+      '',
+      'print("Hello from BlockPy")',
+      '',
+      'for i in range(3):',
+      '    print("count", i)',
+      '',
+    ].join('\n'), 'utf8');
   } catch (_) {}
 }
 
@@ -527,6 +586,98 @@ app.post('/api/upload-image', (req, res) => {
   }
 });
 
+// ─── Workspace file system API (the VS Code-style file explorer) ────────────────
+// All paths are RELATIVE to WORKSPACE_DIR and validated by safeResolve (no traversal).
+// Read-only static mount so the frontend can preview images: GET /workspace/<relpath>.
+app.use('/workspace', express.static(WORKSPACE_DIR));
+
+const TEXT_EXT = new Set(['.py','.txt','.md','.json','.csv','.html','.css','.js','.xml','.yml','.yaml','.ini','.cfg','.log','.tsv']);
+const IMAGE_EXT = new Set(['.png','.jpg','.jpeg','.gif','.bmp','.webp','.svg']);
+
+function buildTree(absDir, relDir, depth) {
+  const out = [];
+  let entries;
+  try { entries = fs.readdirSync(absDir, { withFileTypes: true }); } catch (_) { return out; }
+  // Folders first, then files; both alphabetical (case-insensitive).
+  entries.sort((a, b) => {
+    if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
+  for (const e of entries) {
+    if (e.name === '.git' || e.name === '__pycache__') continue;
+    const rel = relDir ? `${relDir}/${e.name}` : e.name;
+    const abs = path.join(absDir, e.name);
+    if (e.isDirectory()) {
+      out.push({ name: e.name, path: rel, type: 'dir', children: depth > 0 ? buildTree(abs, rel, depth - 1) : [] });
+    } else {
+      const ext = path.extname(e.name).toLowerCase();
+      let size = 0; try { size = fs.statSync(abs).size; } catch (_) {}
+      out.push({ name: e.name, path: rel, type: 'file', ext, size, kind: IMAGE_EXT.has(ext) ? 'image' : TEXT_EXT.has(ext) ? 'text' : 'binary' });
+    }
+  }
+  return out;
+}
+
+app.get('/api/fs/root', (req, res) => {
+  res.json({ root: WORKSPACE_DIR });
+});
+
+app.get('/api/fs/tree', (req, res) => {
+  res.json({ root: WORKSPACE_DIR, tree: buildTree(WORKSPACE_DIR, '', 12) });
+});
+
+app.get('/api/fs/file', (req, res) => {
+  const abs = safeResolve(req.query.path);
+  if (!abs) return res.status(400).json({ error: 'invalid path' });
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return res.status(404).json({ error: 'not found' });
+  const ext = path.extname(abs).toLowerCase();
+  if (IMAGE_EXT.has(ext)) {
+    // Images are previewed via the /workspace static mount, not inlined here.
+    return res.json({ path: req.query.path, kind: 'image', url: '/workspace/' + String(req.query.path).replace(/\\/g, '/') });
+  }
+  try {
+    const content = fs.readFileSync(abs, 'utf8');
+    res.json({ path: req.query.path, kind: 'text', content });
+  } catch (e) {
+    res.status(500).json({ error: 'read failed: ' + e.message });
+  }
+});
+
+app.post('/api/fs/file', (req, res) => {
+  const abs = safeResolve(req.body && req.body.path);
+  if (!abs) return res.status(400).json({ error: 'invalid path' });
+  try {
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, String((req.body && req.body.content) || ''), 'utf8');
+    res.json({ ok: true, path: req.body.path });
+  } catch (e) {
+    res.status(500).json({ error: 'write failed: ' + e.message });
+  }
+});
+
+app.post('/api/fs/mkdir', (req, res) => {
+  const abs = safeResolve(req.body && req.body.path);
+  if (!abs) return res.status(400).json({ error: 'invalid path' });
+  try { fs.mkdirSync(abs, { recursive: true }); res.json({ ok: true, path: req.body.path }); }
+  catch (e) { res.status(500).json({ error: 'mkdir failed: ' + e.message }); }
+});
+
+app.post('/api/fs/delete', (req, res) => {
+  const abs = safeResolve(req.body && req.body.path);
+  if (!abs) return res.status(400).json({ error: 'invalid path' });
+  if (abs === path.resolve(WORKSPACE_DIR)) return res.status(400).json({ error: 'cannot delete the workspace root' });
+  try { fs.rmSync(abs, { recursive: true, force: true }); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: 'delete failed: ' + e.message }); }
+});
+
+app.post('/api/fs/rename', (req, res) => {
+  const from = safeResolve(req.body && req.body.from);
+  const to = safeResolve(req.body && req.body.to);
+  if (!from || !to) return res.status(400).json({ error: 'invalid path' });
+  try { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.renameSync(from, to); res.json({ ok: true, path: req.body.to }); }
+  catch (e) { res.status(500).json({ error: 'rename failed: ' + e.message }); }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -537,11 +688,36 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`\n🚀 BlockPy Express Server  →  http://localhost:${PORT}`);
-  console.log(`🤖 AI Engine: MiniMax-M2.7  (via Anthropic SDK)`);
-  console.log(`🔑 Key pool: ${MINIMAX_KEYS.length} key(s) loaded (round-robin)`);
-  console.log(`🖼️  Media dir (shell imread/upload): ${MEDIA_DIR}\n`);
-  seedSampleImages();
-});
+// ─── SPA fallback (only when serving a static frontend) ─────────────────────────
+// Any non-/api GET that didn't match a static file returns index.html so client-side
+// routing / direct loads work. Registered last so it never shadows the API routes.
+// (Avoids Express 5 path-to-regexp wildcard syntax by using a path-less middleware.)
+if (STATIC_DIR && fs.existsSync(STATIC_DIR)) {
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
+    res.sendFile(path.join(STATIC_DIR, 'index.html'));
+  });
+}
+
+function start(port = process.env.PORT || 3001) {
+  return new Promise((resolve) => {
+    const server = app.listen(port, () => {
+      const actual = server.address().port;
+      console.log(`\n🚀 BlockPy Express Server  →  http://localhost:${actual}`);
+      console.log(`🤖 AI Engine: MiniMax-M2.7  (via Anthropic SDK)`);
+      console.log(`🔑 Key pool: ${MINIMAX_KEYS.length} key(s) loaded (round-robin)`);
+      console.log(`📁 Workspace (file explorer + run cwd): ${WORKSPACE_DIR}\n`);
+      seedSampleImages();
+      seedStarterFile();
+      resolve({ server, port: actual });
+    });
+  });
+}
+
+// Run standalone (`node server.js`) → listen immediately. When required by Electron's
+// main process, export start() so it can pick a port and await readiness instead.
+if (require.main === module) {
+  start();
+}
+
+module.exports = { app, start };

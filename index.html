@@ -6,19 +6,21 @@
   <title>BlockPy - Advanced Bidirectional Harness Playground</title>
   
   <!-- Claude editorial typography: humanist sans (Inter), serif display
-       (Cormorant Garamond — the documented Copernicus substitute), mono (JetBrains Mono) -->
+       (Cormorant Garamond — the documented Copernicus substitute), mono (JetBrains Mono).
+       Loaded from Google Fonts when online; degrades to system fonts offline (non-breaking). -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Cormorant+Garamond:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  
-  <!-- FontAwesome for Premium Icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
-  <!-- Blockly Library from CDN -->
-  <script src="https://unpkg.com/blockly/blockly_compressed.js"></script>
-  <script src="https://unpkg.com/blockly/blocks_compressed.js"></script>
-  <script src="https://unpkg.com/blockly/python_compressed.js"></script>
-  <script src="https://unpkg.com/blockly/msg/en.js"></script>
+
+  <!-- FontAwesome — self-hosted (offline) -->
+  <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css">
+
+  <!-- Blockly — self-hosted (offline). Vendored from the `blockly` npm package into
+       public/vendor/blockly by the desktop build; no CDN required. -->
+  <script src="/vendor/blockly/blockly_compressed.js"></script>
+  <script src="/vendor/blockly/blocks_compressed.js"></script>
+  <script src="/vendor/blockly/python_compressed.js"></script>
+  <script src="/vendor/blockly/msg/en.js"></script>
 </head>
 <body class="claude-theme">
 

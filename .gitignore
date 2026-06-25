@@ -14,3 +14,9 @@ image copy*.png
 
 # Verification-loop scratch output (driver screenshots + JSON)
 tmp/
+
+# Vendored offline runtime assets (reproduced from node_modules by scripts/vendor-assets.cjs)
+public/vendor/
+
+# electron-builder output
+release/

@@ -1,8 +1,23 @@
 // pyodideRunner.js — Real Python execution via Pyodide WebAssembly runtime
 
 const PYODIDE_VERSION = '0.26.4';
-const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/pyodide.js`;
-const PYODIDE_INDEX = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+// Offline-first: prefer the self-hosted copy vendored into public/vendor/pyodide (desktop
+// build), fall back to the CDN when it isn't present (plain web/dev without vendoring).
+// Both the <script> src and loadPyodide({indexURL}) MUST use the SAME base, since Pyodide
+// resolves pyodide.asm.wasm / python_stdlib.zip relative to indexURL.
+const PYODIDE_LOCAL_BASE = '/vendor/pyodide/';
+const PYODIDE_CDN_BASE = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`;
+let _pyodideBase = null;
+
+async function _resolvePyodideBase() {
+  if (_pyodideBase) return _pyodideBase;
+  try {
+    const r = await fetch(PYODIDE_LOCAL_BASE + 'pyodide.js', { method: 'HEAD' });
+    if (r.ok) { _pyodideBase = PYODIDE_LOCAL_BASE; return _pyodideBase; }
+  } catch (_) { /* not vendored — use CDN */ }
+  _pyodideBase = PYODIDE_CDN_BASE;
+  return _pyodideBase;
+}
 
 let _pyodide = null;
 let _initPromise = null;
@@ -37,12 +52,13 @@ const IMPORT_TO_PACKAGE = { cv2: 'opencv-python' };
 // ── Script loader ──────────────────────────────────────────────────────────────
 async function _ensurePyodideScript() {
   if (window.loadPyodide) return;
+  const base = await _resolvePyodideBase();
   await new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = PYODIDE_CDN;
+    s.src = base + 'pyodide.js';
     s.crossOrigin = 'anonymous';
     s.onload = resolve;
-    s.onerror = () => reject(new Error('Failed to load Pyodide from CDN'));
+    s.onerror = () => reject(new Error(`Failed to load Pyodide from ${base}`));
     document.head.appendChild(s);
   });
 }
@@ -151,13 +167,22 @@ export async function initPyodide(onStatus) {
     onStatus && onStatus('[Pyodide] Downloading Python runtime (~10 MB, one-time)...');
     await _ensurePyodideScript();
 
-    const pyodide = await window.loadPyodide({ indexURL: PYODIDE_INDEX });
+    const indexURL = await _resolvePyodideBase();
+    const pyodide = await window.loadPyodide({ indexURL });
     // [1.2] Expose the live runtime so the abstraction engine can introspect imported
     // libraries (introspectModule) after a run, enriching their generated blocks.
     if (typeof window !== 'undefined') window.__pyodide = pyodide;
 
+    // micropip enables installing PyPI wheels into Pyodide. It is NOT bundled in the offline
+    // core (only CPython + stdlib are), so this can fail when running offline from the local
+    // vendor copy — that's fine: the IR bridge (`ast`), sprite/turtle and pure-Python Run all
+    // work without it, and heavy libraries should run on the real local-Python backend.
     onStatus && onStatus('[Pyodide] Loading micropip...');
-    await pyodide.loadPackage('micropip');
+    try {
+      await pyodide.loadPackage('micropip');
+    } catch (e) {
+      console.warn('[Pyodide] micropip unavailable (offline core) — pip-style installs into Pyodide are disabled; use the backend Run for heavy libraries.', e?.message || e);
+    }
 
     // Set up interrupt buffer for Stop button (requires SharedArrayBuffer / COOP headers)
     if (typeof SharedArrayBuffer !== 'undefined') {

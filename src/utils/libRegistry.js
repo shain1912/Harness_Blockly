@@ -188,6 +188,62 @@ function removeMacro(name) { MACROS.delete(name); persistMacros(); }
 
 function clearAll() { SPECS.clear(); MACROS.clear(); }
 
+// ── Library (toolbox-tab) management ────────────────────────────────────────────
+// A toolbox tab is keyed by `lib` (the source library, e.g. 'PIL.Image') falling back to the
+// block's single-id `module`. listLibraries() returns one row per tab for the Library manager
+// UI; a tab is `builtin` (not user-deletable) when ALL its blocks are built-in presets.
+function _libKey(spec) { return spec.lib || spec.module || 'Library'; }
+
+function listLibraries() {
+  const byLib = new Map();
+  for (const [, spec] of SPECS) {
+    const key = _libKey(spec);
+    if (!byLib.has(key)) byLib.set(key, { lib: key, blockCount: 0, userCount: 0, macroCount: 0 });
+    const e = byLib.get(key);
+    e.blockCount++;
+    if (!spec.builtin) e.userCount++;
+  }
+  for (const m of MACROS.values()) {
+    const key = m.srcModule || 'Library';
+    if (!byLib.has(key)) byLib.set(key, { lib: key, blockCount: 0, userCount: 0, macroCount: 0 });
+    byLib.get(key).macroCount++;
+  }
+  return [...byLib.values()]
+    .map((e) => ({ ...e, builtin: e.userCount === 0 && e.macroCount === 0 }))
+    .sort((a, b) => a.lib.toLowerCase().localeCompare(b.lib.toLowerCase()));
+}
+
+// Remove every USER block + macro belonging to one toolbox tab (built-ins are preserved).
+// Deletes the Blockly.Blocks defs too so the tab disappears from the toolbox. Returns removed types.
+function removeLibraryByTab(libKey) {
+  const B = (typeof window !== 'undefined' ? window : global).Blockly;
+  const removed = [];
+  for (const [type, spec] of [...SPECS]) {
+    if (_libKey(spec) !== libKey || spec.builtin) continue;
+    SPECS.delete(type);
+    removed.push(type);
+    if (B && B.Blocks && B.Blocks[type]) { try { delete B.Blocks[type]; } catch (_) { /* keep going */ } }
+  }
+  for (const [name, m] of [...MACROS]) if ((m.srcModule || 'Library') === libKey) MACROS.delete(name);
+  persist();
+  return removed;
+}
+
+// Wipe ALL user-added libraries + macros at once (built-in presets stay). Returns removed types.
+function removeAllUserLibraries() {
+  const B = (typeof window !== 'undefined' ? window : global).Blockly;
+  const removed = [];
+  for (const [type, spec] of [...SPECS]) {
+    if (spec.builtin) continue;
+    SPECS.delete(type);
+    removed.push(type);
+    if (B && B.Blocks && B.Blocks[type]) { try { delete B.Blocks[type]; } catch (_) { /* keep going */ } }
+  }
+  MACROS.clear();
+  persist();
+  return removed;
+}
+
 function persist() {
   try {
     const ls = (typeof window !== 'undefined') ? window.localStorage : null;
@@ -271,5 +327,6 @@ api.BlockPyLibRegistry = {
   registerLibBlock, getLibSpec, listLibBlocks, removeLibrary, clearAll,
   persist, hydrate, validateSpecParse, blockType, staticCheck, specFromDescriptor,
   removeModules, addMacro, listMacros, removeMacro, removeMacrosBySource, persistMacros, hydrateMacros,
+  listLibraries, removeLibraryByTab, removeAllUserLibraries,
 };
 if (typeof module !== 'undefined') module.exports = api.BlockPyLibRegistry;

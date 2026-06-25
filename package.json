@@ -2,11 +2,17 @@
   "name": "blockpy-harness-playground",
   "version": "1.0.0",
   "description": "State-of-the-art Blockly-Python AST Harness Playground showcasing robust roundtrips, compiler desugaring, custom interpreters, and AI library abstractions.",
-  "main": "index.html",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "server": "node server.js",
     "start": "concurrently \"npm run dev\" \"npm run server\"",
+    "vendor": "node scripts/vendor-assets.cjs",
+    "prebuild": "node scripts/vendor-assets.cjs",
+    "build": "vite build",
+    "electron": "electron .",
+    "electron:dev": "vite build && electron .",
+    "dist": "vite build && electron-builder",
     "test": "playwright test",
     "test:e2e": "playwright test tests/e2e.spec.js",
     "test:p0p1": "playwright test tests/test_p0_p1.spec.js",
@@ -28,19 +34,60 @@
   ],
   "author": "Antigravity Agent",
   "license": "MIT",
+  "build": {
+    "appId": "com.blockpy.desktop",
+    "productName": "BlockPy",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "server.js",
+      "src/utils/**/*",
+      "blockpy-gen/**/*",
+      "package.json",
+      "!**/node_modules/pyodide/**",
+      "!**/node_modules/blockly/**",
+      "!**/node_modules/@fortawesome/**",
+      "!**/node_modules/.cache/**",
+      "!**/*.map"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "blockpy-gen/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "BlockPy"
+    }
+  },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@vitejs/plugin-react": "^6.0.2",
     "concurrently": "^9.2.1",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
     "playwright": "^1.60.0",
     "vite": "^8.0.14"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.97.1",
+    "@fortawesome/fontawesome-free": "^7.2.0",
+    "blockly": "^13.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "prismjs": "^1.30.0",
+    "pyodide": "^0.26.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   }

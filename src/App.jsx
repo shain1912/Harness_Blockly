@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import BlocklyEditor from './components/BlocklyEditor';
 import PythonEditor from './components/PythonEditor';
-import Stage from './components/Stage';
+import FileExplorer from './components/FileExplorer';
 import ConsoleLogs from './components/ConsoleLogs';
 import VariableWatch from './components/VariableWatch';
 import ASTTreeView from './components/ASTTreeView';
@@ -12,22 +12,19 @@ export default function App() {
   const [code, setCode] = useState('');
   const [logs, setLogs] = useState([]);
   const [variables, setVariables] = useState({});
-  const [spriteState, setSpriteState] = useState({
-    x: 240,
-    y: 140,
-    angle: 0,
-    penDown: false,
-    color: '#a855f7',
-    sayBubble: null
-  });
-  const [drawnLines, setDrawnLines] = useState([]);
   const [isRunning, setIsRunning] = useState(false);
   const [highlightedLine, setHighlightedLine] = useState(null);
-  
+
+  // Workspace file explorer: which file is open in the editor, an image-preview overlay,
+  // and a token bumped to make the tree re-read after writes/uploads/runs.
+  const [activeFile, setActiveFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null); // { name, url } | null
+  const [fsReload, setFsReload] = useState(0);
+
   // OpenCV image output (from real cv2.imshow) + uploaded image name
   const [cv2Images, setCv2Images] = useState([]);
   const [uploadedImageName, setUploadedImageName] = useState(null);
-  const [uploadedMedia, setUploadedMedia] = useState([]); // thumbnails of uploaded media, shown under the Stage
+  const [uploadedMedia, setUploadedMedia] = useState([]); // thumbnails of uploaded media
 
   // Gray (raw_statement/raw_expression) blocks — parts that didn't map to a dedicated block.
   const [grayBlocks, setGrayBlocks] = useState([]);
@@ -51,7 +48,7 @@ export default function App() {
 
   // Tabs layout variables
   const [activeEditorTab, setActiveEditorTab] = useState('blockly');
-  const [activeAuxTab, setActiveAuxTab] = useState('stage');
+  const [activeAuxTab, setActiveAuxTab] = useState('files');
   const [isDarkTheme, setIsDarkTheme] = useState(false); // default = Claude cream (light)
 
   // Synchronization refs
@@ -252,8 +249,22 @@ export default function App() {
       setInstalledBlocks(installed);
     }
 
-    // Load initial glowing star demo script
-    loadDemoScript('star');
+    // Open the workspace's main.py on startup if present; otherwise fall back to the demo.
+    (async () => {
+      try {
+        const r = await fetch('/api/fs/file?path=main.py');
+        if (r.ok) {
+          const j = await r.json();
+          if (j.kind === 'text') {
+            setActiveFile('main.py');
+            setCode(j.content || '');
+            setTimeout(() => syncCodeToBlocks(j.content || ''), 80);
+            return;
+          }
+        }
+      } catch (_) { /* backend not up — use the demo */ }
+      loadDemoScript('star');
+    })();
   }, []);
 
   // Pre-warm the Python environment (Pyodide + real opencv-python + sample images) in the
@@ -381,7 +392,6 @@ for i in range(4):
 
     setCode(demoCode);
     setHighlightedLine(null);
-    setDrawnLines([]);
     setLogs([`[System] Demo script "${type}" loaded into workspace.`]);
 
     setTimeout(() => {
@@ -447,6 +457,7 @@ for i in range(4):
       } catch (_) { /* backend may be off — browser Run still works */ }
       setCv2Images([{ title: `Uploaded: ${file.name}`, dataUrl }]);
       setUploadedMedia((prev) => [{ name: file.name, dataUrl }, ...prev.filter((m) => m.name !== file.name)].slice(0, 12));
+      setFsReload((n) => n + 1); // the upload landed in the workspace → show it in the Files tree
       setLogs((prev) => [...prev, `[Image] "${file.name}" uploaded — use cv2.imread("${file.name}").${shellNote}`]);
     } catch (e) {
       setLogs((prev) => [...prev, `[Image upload error] ${e.message || e}`]);
@@ -481,7 +492,10 @@ for i in range(4):
   // VideoCapture) open on the user's desktop. Requires the backend (npm run server).
   const handleRunShell = async () => {
     setCv2Images([]);
-    setLogs([`[Shell] Running real Python (local python + real cv2). imshow/webcam windows open on the desktop.`, `[Shell] Code:\n${code}`]);
+    // Persist the open file first so the run reads the latest from the workspace (and what
+    // the explorer shows matches what executes).
+    if (activeFile) { await saveActiveFile({ silent: true }); }
+    setLogs([`[Shell] Running real Python (local python + real cv2)${activeFile ? ' on ' + activeFile : ''}. Files resolve against the workspace folder.`, `[Shell] Code:\n${code}`]);
     setActiveAuxTab('logs');
     setIsRunning(true);
     const controller = new AbortController();
@@ -511,8 +525,65 @@ for i in range(4):
     } finally {
       setIsRunning(false);
       shellAbortRef.current = null;
+      // A run may have written output files (cv2.imwrite, open('w'), …) — refresh the tree.
+      setFsReload((n) => n + 1);
     }
   };
+
+  // ── Workspace file open / save ────────────────────────────────────────────────
+  // Open a file from the explorer: text files load into the editor (and sync to blocks via
+  // the Python editor's normal flow); image files pop a preview overlay.
+  const openFile = async (relPath) => {
+    try {
+      const r = await fetch('/api/fs/file?path=' + encodeURIComponent(relPath));
+      const j = await r.json();
+      if (!r.ok) { setLogs((prev) => [...prev, `[Files] Open failed: ${j.error || r.status}`]); return; }
+      if (j.kind === 'image') {
+        setImagePreview({ name: relPath, url: j.url });
+        return;
+      }
+      const content = j.content || '';
+      setActiveFile(relPath);
+      setCode(content);
+      setActiveEditorTab('python');
+      // For Python files, also rebuild the blocks from the opened file. Without this the
+      // workspace still holds the previously loaded program, and its block->code listener
+      // would clobber the freshly opened text. Non-.py files load as plain text only.
+      if (relPath.endsWith('.py')) {
+        setTimeout(() => { syncCodeToBlocks(content); }, 60);
+      }
+    } catch (e) {
+      setLogs((prev) => [...prev, `[Files] Open error: ${e.message}`]);
+    }
+  };
+
+  // Save the current editor content back to the open file. silent = no toast/log noise.
+  const saveActiveFile = async (opts = {}) => {
+    if (!activeFile) { if (!opts.silent) setLogs((prev) => [...prev, '[Files] No file open to save. Open a file from the Files tab first.']); return; }
+    try {
+      const r = await fetch('/api/fs/file', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: activeFile, content: code }),
+      });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); setLogs((prev) => [...prev, `[Files] Save failed: ${j.error || r.status}`]); return; }
+      if (!opts.silent) setLogs((prev) => [...prev, `[Files] Saved ${activeFile}.`]);
+      setFsReload((n) => n + 1);
+    } catch (e) {
+      setLogs((prev) => [...prev, `[Files] Save error: ${e.message}`]);
+    }
+  };
+
+  // Ctrl/Cmd+S saves the open file. Rebound on activeFile/code change so it always saves latest.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        saveActiveFile();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeFile, code]);
 
   // [1.2 live] After a run, introspect each imported module in the live Pyodide runtime and
   // register enriched blocks (real arg names + constant dropdown). Best-effort, capped so a
@@ -553,8 +624,9 @@ for i in range(4):
   };
 
   // ── Run: Pyodide real Python execution ────────────────────────────────────────
+  // In-browser Pyodide run (no system Python needed). Kept as a fallback engine; the primary
+  // desktop Run is handleRunShell (real local Python). Sprite/turtle drawing was removed.
   const handleRunExecution = async () => {
-    setDrawnLines([]);
     setHighlightedLine(null);
     setVariables({});
     setCv2Images([]);
@@ -566,27 +638,12 @@ for i in range(4):
       `[Python] Code:\n${code}`
     ]);
 
-    const spriteCallback = (cmd, state) => {
-      setSpriteState({
-        x: state.x, y: state.y, angle: state.angle,
-        penDown: state.penDown, color: state.color, sayBubble: state.sayBubble
-      });
-      if (cmd === 'move' && state.penDown) {
-        setDrawnLines(prev => [...prev, {
-          x1: state.oldX, y1: state.oldY,
-          x2: state.newX, y2: state.newY,
-          color: state.color
-        }]);
-      }
-    };
-
     await runCode(code, {
       onLog: (msg) => {
         setPyodideLoading(false);
         setPyodideReady(true);
         setLogs(prev => [...prev, msg]);
       },
-      onSpriteCommand: spriteCallback,
       onCv2Action: handleCv2Action,
       onCv2Image: (title, dataUrl) => {
         setCv2Images((prev) => {
@@ -616,8 +673,38 @@ for i in range(4):
     if (shellAbortRef.current) { try { shellAbortRef.current.abort(); } catch (_) {} }
     setHighlightedLine(null);
     setIsRunning(false);
-    setSpriteState({ x: 240, y: 140, angle: 0, penDown: false, color: '#a855f7', sayBubble: null });
     setLogs(prev => [...prev, '[Python] Stopped.']);
+  };
+
+  // ── Library / toolbox removal ─────────────────────────────────────────────────
+  // Rebuild the Blockly toolbox immediately from the live registry (the [installedBlocks]
+  // effect also does this, but calling it here guarantees the tab disappears at once).
+  const refreshToolboxNow = () => {
+    const ws = workspaceRef.current;
+    if (ws && typeof window.BlockPyBuildIrToolbox === 'function') {
+      try { ws.updateToolbox(window.BlockPyBuildIrToolbox()); } catch (_) { /* non-fatal */ }
+    }
+  };
+
+  // Delete one library tab: drops its user blocks + macros from the registry and the toolbox.
+  const handleRemoveLibrary = (libKey) => {
+    const reg = window.BlockPyLibRegistry;
+    if (!reg || typeof reg.removeLibraryByTab !== 'function') return;
+    const removed = reg.removeLibraryByTab(libKey);
+    setInstalledBlocks((prev) => prev.filter((p) => !removed.includes(p.type)));
+    refreshToolboxNow();
+    setLogs((prev) => [...prev, `[Library] Removed "${libKey}" — ${removed.length} block(s) + its toolbox tab.`]);
+  };
+
+  // Wipe all user-added libraries (built-in presets stay).
+  const handleClearLibraries = () => {
+    const reg = window.BlockPyLibRegistry;
+    if (!reg || typeof reg.removeAllUserLibraries !== 'function') return;
+    if (!window.confirm('Remove ALL added libraries and their toolbox tabs?\n(Built-in preset blocks stay.)')) return;
+    const removed = reg.removeAllUserLibraries();
+    setInstalledBlocks((prev) => prev.filter((p) => !removed.includes(p.type)));
+    refreshToolboxNow();
+    setLogs((prev) => [...prev, `[Library] Cleared all added libraries — ${removed.length} block(s).`]);
   };
 
   // ── pip install handler ───────────────────────────────────────────────────────
@@ -907,11 +994,11 @@ for i in range(4):
           <div className="tab-card">
             <div className="tab-header">
               <button
-                id="tab-btn-stage"
-                className={`tab-btn ${activeAuxTab === 'stage' ? 'active' : ''}`}
-                onClick={() => setActiveAuxTab('stage')}
+                id="tab-btn-files"
+                className={`tab-btn ${activeAuxTab === 'files' ? 'active' : ''}`}
+                onClick={() => setActiveAuxTab('files')}
               >
-                Stage
+                Files
               </button>
               <button
                 id="tab-btn-variables"
@@ -944,33 +1031,13 @@ for i in range(4):
               </button>
             </div>
             <div className="tab-content-wrapper">
-              {activeAuxTab === 'stage' && (
-                <div className="stage-tab-scroll">
-                  <Stage
-                    spriteState={spriteState}
-                    drawnLines={drawnLines}
-                    isRunning={isRunning}
-                    onRun={handleRunExecution}
-                    onStop={handleStopExecution}
-                    onClearCanvas={() => setDrawnLines([])}
-                  />
-                  {uploadedMedia.length > 0 && (
-                    <div className="uploaded-media">
-                      <div className="uploaded-media-head">
-                        <span><i className="fa-solid fa-photo-film"></i> Uploaded Media ({uploadedMedia.length})</span>
-                        <button className="btn btn-secondary btn-xs" onClick={() => setUploadedMedia([])}>Clear</button>
-                      </div>
-                      <div className="uploaded-media-grid">
-                        {uploadedMedia.map((m, i) => (
-                          <figure key={i} className="uploaded-media-item" title={m.name}>
-                            <img src={m.dataUrl} alt={m.name} />
-                            <figcaption>{m.name}</figcaption>
-                          </figure>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
+              {activeAuxTab === 'files' && (
+                <FileExplorer
+                  activeFile={activeFile}
+                  onOpenFile={openFile}
+                  onChanged={() => setFsReload((n) => n + 1)}
+                  reloadToken={fsReload}
+                />
               )}
               {activeAuxTab === 'variables' && (
                 <VariableWatch variables={variables} />
@@ -987,6 +1054,8 @@ for i in range(4):
                     onAbstract={handleAbstractLibrary}
                     onBlockify={handleBlockifyLibrary}
                     onPipInstall={handlePipInstall}
+                    onRemoveLibrary={handleRemoveLibrary}
+                    onClearLibraries={handleClearLibraries}
                     installedBlocks={installedBlocks}
                     aiThoughts={aiThoughts}
                     isAbstracting={isAbstracting}
@@ -1058,15 +1127,38 @@ for i in range(4):
               >
                 <i className="fa-solid fa-diagram-project"></i> AST Parser Tree
               </button>
-              {/* Run (real shell) + image upload — output opens in a separate Python window */}
+              {/* Active file + Save + Run (real shell) + image upload */}
               <div className="editor-tab-actions">
+                <span className="active-file-chip" title={activeFile || 'No file open — open one from the Files tab'}>
+                  <i className="fa-solid fa-file-code"></i>
+                  {activeFile || 'untitled'}
+                </span>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  id="btn-save-file"
+                  onClick={() => saveActiveFile()}
+                  disabled={!activeFile}
+                  title="Save the open file (Ctrl+S)"
+                >
+                  <i className="fa-solid fa-floppy-disk"></i> Save
+                </button>
                 <button
                   className="btn btn-primary btn-sm"
                   id="btn-run-shell"
                   onClick={handleRunShell}
-                  title="Run for real in local Python (shell) — cv2/imshow output opens in a separate Python window"
+                  disabled={isRunning}
+                  title="Run for real in local Python (shell). Files resolve against the workspace folder."
                 >
                   <i className="fa-solid fa-play"></i> Run
+                </button>
+                <button
+                  className="btn btn-action stop btn-sm"
+                  id="btn-stop-shell"
+                  onClick={handleStopExecution}
+                  disabled={!isRunning}
+                  title="Stop the running program"
+                >
+                  <i className="fa-solid fa-stop"></i>
                 </button>
                 <label className="btn btn-secondary btn-sm" htmlFor="cv-image-upload" style={{ cursor: 'pointer' }}>
                   <i className="fa-solid fa-upload"></i> Image
@@ -1154,6 +1246,18 @@ for i in range(4):
           </div>
         </section>
       </main>
+
+      {imagePreview && (
+        <div className="img-preview-overlay" onClick={() => setImagePreview(null)}>
+          <div className="img-preview-box" onClick={(e) => e.stopPropagation()}>
+            <div className="img-preview-head">
+              <span><i className="fa-solid fa-image"></i> {imagePreview.name}</span>
+              <button className="btn btn-secondary btn-xs" onClick={() => setImagePreview(null)}>✕</button>
+            </div>
+            <img src={imagePreview.url} alt={imagePreview.name} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

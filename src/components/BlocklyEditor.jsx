@@ -50,6 +50,9 @@ export default function BlocklyEditor({
     const ws = window.Blockly.inject(containerRef.current, {
       toolbox: toolbox,
       theme: getBlocklyTheme(),
+      // Self-hosted media (icons + sounds) so Blockly never reaches static.blockly.com — works
+      // offline. Vendored from the blockly npm package into public/vendor/blockly/media.
+      media: '/vendor/blockly/media/',
       renderer: 'zelos',
       grid: {
         spacing: 20,
