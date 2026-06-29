@@ -139,6 +139,28 @@ function registerLibBlock(spec) {
 
 function getLibSpec(type) { return SPECS.get(type); }
 
+// Reverse lookup for the Python→blocks "Tier-A upgrade": given an attribute call `<recv>.<attr>(…)`
+// with `nargs` positional args and the desired form (hasOutput), return the registered lib block
+// type that represents EXACTLY that call, or null. Priority: a module-function block whose module ==
+// recv (e.g. cv2.imread), else an instance-method block by attr+arity (receiver-agnostic — the lib
+// block's ARG0 carries the receiver — preferring one whose baked receiver name also matches).
+function matchCallToType(recvName, attr, nargs, hasOutput) {
+  const want = !!hasOutput;
+  for (const [type, spec] of SPECS) {
+    if (!spec.method && spec.func === attr && spec.module === recvName
+      && !!spec.hasOutput === want && (spec.argNames || []).length === nargs) return type;
+  }
+  let any = null;
+  for (const [type, spec] of SPECS) {
+    if (spec.method && spec.func === attr && !!spec.hasOutput === want
+      && (spec.argNames || []).length === nargs + 1) {
+      if (spec.module === recvName) return type;
+      if (!any) any = type;
+    }
+  }
+  return any;
+}
+
 function listLibBlocks() {
   const byModule = new Map();
   for (const [type, spec] of SPECS) {
@@ -381,7 +403,7 @@ async function validateSpecParse(spec, pythonToIR, pyodide) {
 
 const api = (typeof window !== 'undefined' ? window : global);
 api.BlockPyLibRegistry = {
-  registerLibBlock, getLibSpec, listLibBlocks, removeLibrary, clearAll,
+  registerLibBlock, getLibSpec, matchCallToType, listLibBlocks, removeLibrary, clearAll,
   persist, hydrate, validateSpecParse, blockType, staticCheck, specFromDescriptor,
   removeModules, addMacro, listMacros, removeMacro, removeMacrosBySource, persistMacros, hydrateMacros,
   listLibraries, removeLibraryByTab, removeAllUserLibraries,

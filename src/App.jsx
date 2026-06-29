@@ -7,6 +7,7 @@ import VariableWatch from './components/VariableWatch';
 import ASTTreeView from './components/ASTTreeView';
 import LibraryManager from './components/LibraryManager';
 import { runCode, initPyodide, interruptPyodide, writeImageToFS, prewarmEnvironment, isEnvironmentReady } from './utils/pyodideRunner';
+import stdlibSpecs from './data/stdlibSpecs.json';
 
 // A pip PACKAGE name is not always the IMPORT name (opencv-python→cv2, pillow→PIL, …). Map the
 // common mismatches; default = the package lowercased with '-' → '_' (pydobot→pydobot, scikit→…).
@@ -114,6 +115,13 @@ export default function App() {
         ir = window.BlockPyIrDesugar.desugarIr(ir);
       }
       const blocklyJson = window.BlockPyIR.irToBlockly(ir);
+      // Tier-A upgrade: rewrite generic ir_call blocks that match a registered library block into
+      // the SAME emerald labelled block the toolbox shows — so converting `dobot.move_to(...)` from
+      // Python yields the identical block to dragging it out. Lossless (lib blocks lower to the same
+      // Call IR); unmatched calls stay as ir_call.
+      if (window.BlockPyLibImport && window.BlockPyLibImport.upgradeCallsToLibBlocks) {
+        window.BlockPyLibImport.upgradeCallsToLibBlocks(blocklyJson.blocks, blocklyJson.variables);
+      }
       // If a newer sync started while we awaited Pyodide/parse (e.g. a quick second Auto-Desugar
       // toggle), discard this stale result so the workspace always reflects the LATEST request.
       if (myGen !== syncGenRef.current) return;
@@ -257,6 +265,21 @@ export default function App() {
             installed.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames || stored.args, colour: stored.colour });
           }
         });
+      }
+      // Built-in standard-library tabs (math, random, datetime, json, statistics, re, functools,
+      // time). Single-form (no command/value doubling) for a clean palette; registered builtin so
+      // they're always present and not user-deletable, like cv2. Bundled offline as stdlibSpecs.json.
+      const imp = window.BlockPyLibImport;
+      if (imp && Array.isArray(stdlibSpecs)) {
+        for (const spec of stdlibSpecs) {
+          for (const s of imp.librarySpecToRegistrySpecs(spec, { both: false }).specs) {
+            const res = reg.registerLibBlock({ ...s, builtin: true });
+            if (res.ok && !installed.some((e) => e.type === res.type)) {
+              const stored = reg.getLibSpec(res.type) || s;
+              installed.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames, colour: stored.colour });
+            }
+          }
+        }
       }
       setInstalledBlocks(installed);
     }

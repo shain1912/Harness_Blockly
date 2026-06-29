@@ -1,0 +1,1991 @@
+[
+ {
+  "module": "math",
+  "entries": [
+   {
+    "kind": "function",
+    "name": "acos",
+    "qualName": "math.acos",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the arc cosine (measured in radians) of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "acosh",
+    "qualName": "math.acosh",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the inverse hyperbolic cosine of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "asin",
+    "qualName": "math.asin",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the arc sine (measured in radians) of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "asinh",
+    "qualName": "math.asinh",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the inverse hyperbolic sine of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "atan",
+    "qualName": "math.atan",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the arc tangent (measured in radians) of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "atan2",
+    "qualName": "math.atan2",
+    "params": [
+     {
+      "name": "y",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the arc tangent (measured in radians) of y/x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "atanh",
+    "qualName": "math.atanh",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the inverse hyperbolic tangent of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "cbrt",
+    "qualName": "math.cbrt",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the cube root of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "ceil",
+    "qualName": "math.ceil",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the ceiling of x as an Integral.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "comb",
+    "qualName": "math.comb",
+    "params": [
+     {
+      "name": "n",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "k",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Number of ways to choose k items from n items without repetition and without order.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "copysign",
+    "qualName": "math.copysign",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "y",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return a float with the magnitude (absolute value) of x but the sign of y.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "cos",
+    "qualName": "math.cos",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the cosine of x (measured in radians).",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "cosh",
+    "qualName": "math.cosh",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the hyperbolic cosine of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "degrees",
+    "qualName": "math.degrees",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Convert angle x from radians to degrees.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "dist",
+    "qualName": "math.dist",
+    "params": [
+     {
+      "name": "p",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "q",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the Euclidean distance between two points p and q.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "erf",
+    "qualName": "math.erf",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Error function at x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "erfc",
+    "qualName": "math.erfc",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Complementary error function at x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "exp",
+    "qualName": "math.exp",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return e raised to the power of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "exp2",
+    "qualName": "math.exp2",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return 2 raised to the power of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "expm1",
+    "qualName": "math.expm1",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return exp(x)-1.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "fabs",
+    "qualName": "math.fabs",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the absolute value of the float x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "factorial",
+    "qualName": "math.factorial",
+    "params": [
+     {
+      "name": "n",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Find n!.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "floor",
+    "qualName": "math.floor",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the floor of x as an Integral.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "fmod",
+    "qualName": "math.fmod",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "y",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return fmod(x, y), according to platform C.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "frexp",
+    "qualName": "math.frexp",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the mantissa and exponent of x, as pair (m, e).",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "fsum",
+    "qualName": "math.fsum",
+    "params": [
+     {
+      "name": "seq",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return an accurate floating-point sum of values in the iterable seq.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "gamma",
+    "qualName": "math.gamma",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Gamma function at x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "gcd",
+    "qualName": "math.gcd",
+    "params": [
+     {
+      "name": "integers",
+      "kind": "vararg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Greatest Common Divisor.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "isclose",
+    "qualName": "math.isclose",
+    "params": [
+     {
+      "name": "a",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "b",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "rel_tol",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "abs_tol",
+      "kind": "keyword",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Determine whether two floating-point numbers are close in value.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "isfinite",
+    "qualName": "math.isfinite",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return True if x is neither an infinity nor a NaN, and False otherwise.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "isinf",
+    "qualName": "math.isinf",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return True if x is a positive or negative infinity, and False otherwise.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "isnan",
+    "qualName": "math.isnan",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return True if x is a NaN (not a number), and False otherwise.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "isqrt",
+    "qualName": "math.isqrt",
+    "params": [
+     {
+      "name": "n",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the integer part of the square root of the input.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "lcm",
+    "qualName": "math.lcm",
+    "params": [
+     {
+      "name": "integers",
+      "kind": "vararg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Least Common Multiple.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "ldexp",
+    "qualName": "math.ldexp",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "i",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return x * (2**i).",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "lgamma",
+    "qualName": "math.lgamma",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Natural logarithm of absolute value of Gamma function at x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "log10",
+    "qualName": "math.log10",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the base 10 logarithm of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "log1p",
+    "qualName": "math.log1p",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the natural logarithm of 1+x (base e).",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "log2",
+    "qualName": "math.log2",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the base 2 logarithm of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "modf",
+    "qualName": "math.modf",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the fractional and integer parts of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "nextafter",
+    "qualName": "math.nextafter",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "y",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "steps",
+      "kind": "keyword",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return the floating-point value the given number of steps after x towards y.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "perm",
+    "qualName": "math.perm",
+    "params": [
+     {
+      "name": "n",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "k",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Number of ways to choose k items from n items without repetition and with order.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "pow",
+    "qualName": "math.pow",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "y",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return x**y (x to the power of y).",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "prod",
+    "qualName": "math.prod",
+    "params": [
+     {
+      "name": "iterable",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "start",
+      "kind": "keyword",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Calculate the product of all the elements in the input iterable.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "radians",
+    "qualName": "math.radians",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Convert angle x from degrees to radians.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "remainder",
+    "qualName": "math.remainder",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "y",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Difference between x and the closest integer multiple of y.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "sin",
+    "qualName": "math.sin",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the sine of x (measured in radians).",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "sinh",
+    "qualName": "math.sinh",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the hyperbolic sine of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "sqrt",
+    "qualName": "math.sqrt",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the square root of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "sumprod",
+    "qualName": "math.sumprod",
+    "params": [
+     {
+      "name": "p",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "q",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the sum of products of values from two iterables p and q.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "tan",
+    "qualName": "math.tan",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the tangent of x (measured in radians).",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "tanh",
+    "qualName": "math.tanh",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the hyperbolic tangent of x.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "trunc",
+    "qualName": "math.trunc",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Truncates the Real x to the nearest Integral toward 0.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "ulp",
+    "qualName": "math.ulp",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the value of the least significant bit of the float x.",
+    "returns": true
+   }
+  ]
+ },
+ {
+  "module": "statistics",
+  "entries": [
+   {
+    "kind": "method",
+    "owner": "NormalDist",
+    "name": "quantiles",
+    "qualName": "statistics.NormalDist.quantiles",
+    "params": [
+     {
+      "name": "n",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Divide into *n* continuous intervals with equal probability.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "fmean",
+    "qualName": "statistics.fmean",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "weights",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Convert data to floats and compute the arithmetic mean.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "geometric_mean",
+    "qualName": "statistics.geometric_mean",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Convert data to floats and compute the geometric mean.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "harmonic_mean",
+    "qualName": "statistics.harmonic_mean",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "weights",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return the harmonic mean of data.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "mean",
+    "qualName": "statistics.mean",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the sample arithmetic mean of data.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "median",
+    "qualName": "statistics.median",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the median (middle value) of numeric data.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "median_high",
+    "qualName": "statistics.median_high",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the high median of data.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "median_low",
+    "qualName": "statistics.median_low",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the low median of numeric data.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "mode",
+    "qualName": "statistics.mode",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return the most common data point from discrete or nominal data.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "multimode",
+    "qualName": "statistics.multimode",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Return a list of the most frequently occurring values.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "pstdev",
+    "qualName": "statistics.pstdev",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "mu",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return the square root of the population variance.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "pvariance",
+    "qualName": "statistics.pvariance",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "mu",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return the population variance of ``data``.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "quantiles",
+    "qualName": "statistics.quantiles",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "n",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "method",
+      "kind": "keyword",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Divide *data* into *n* continuous intervals with equal probability.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "stdev",
+    "qualName": "statistics.stdev",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "xbar",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return the square root of the sample variance.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "variance",
+    "qualName": "statistics.variance",
+    "params": [
+     {
+      "name": "data",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "xbar",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return the sample variance of data.",
+    "returns": true
+   }
+  ]
+ },
+ {
+  "module": "json",
+  "entries": [
+   {
+    "kind": "function",
+    "name": "dump",
+    "qualName": "json.dump",
+    "params": [
+     {
+      "name": "obj",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "fp",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "skipkeys",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "ensure_ascii",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "check_circular",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "allow_nan",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "indent",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "separators",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "default",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "sort_keys",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "kw",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Serialize ``obj`` as a JSON formatted stream to ``fp`` (a",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "dumps",
+    "qualName": "json.dumps",
+    "params": [
+     {
+      "name": "obj",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "skipkeys",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "ensure_ascii",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "check_circular",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "allow_nan",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "indent",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "separators",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "default",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "sort_keys",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "kw",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Serialize ``obj`` to a JSON formatted ``str``.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "load",
+    "qualName": "json.load",
+    "params": [
+     {
+      "name": "fp",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "object_hook",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "parse_float",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "parse_int",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "parse_constant",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "object_pairs_hook",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "kw",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Deserialize ``fp`` (a ``.read()``-supporting file-like object containing",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "loads",
+    "qualName": "json.loads",
+    "params": [
+     {
+      "name": "s",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "object_hook",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "parse_float",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "parse_int",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "parse_constant",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "object_pairs_hook",
+      "kind": "keyword",
+      "hasDefault": true
+     },
+     {
+      "name": "kw",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Deserialize ``s`` (a ``str``, ``bytes`` or ``bytearray`` instance",
+    "returns": true
+   }
+  ]
+ },
+ {
+  "module": "functools",
+  "entries": [
+   {
+    "kind": "function",
+    "name": "cmp_to_key",
+    "qualName": "functools.cmp_to_key",
+    "params": [
+     {
+      "name": "mycmp",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Convert a cmp= function into a key= function.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "lru_cache",
+    "qualName": "functools.lru_cache",
+    "params": [
+     {
+      "name": "maxsize",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "typed",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Least-recently-used cache decorator.",
+    "returns": true
+   },
+   {
+    "kind": "class",
+    "name": "partial",
+    "qualName": "functools.partial",
+    "params": [
+     {
+      "name": "args",
+      "kind": "vararg",
+      "hasDefault": false
+     },
+     {
+      "name": "kwargs",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "partial(func, *args, **keywords) - new function with partial application",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "wraps",
+    "qualName": "functools.wraps",
+    "params": [
+     {
+      "name": "wrapped",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "assigned",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "updated",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Decorator factory to apply update_wrapper() to a wrapper function",
+    "returns": true
+   }
+  ]
+ },
+ {
+  "module": "re",
+  "entries": [
+   {
+    "kind": "function",
+    "name": "compile",
+    "qualName": "re.compile",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "flags",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Compile a regular expression pattern, returning a Pattern object.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "escape",
+    "qualName": "re.escape",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Escape special characters in a string.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "findall",
+    "qualName": "re.findall",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "flags",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return a list of all non-overlapping matches in the string.",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "finditer",
+    "qualName": "re.finditer",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "flags",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return an iterator over all non-overlapping matches in the",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "fullmatch",
+    "qualName": "re.fullmatch",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "flags",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Try to apply the pattern to all of the string, returning",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "match",
+    "qualName": "re.match",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "flags",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Try to apply the pattern at the start of the string, returning",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "search",
+    "qualName": "re.search",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "flags",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Scan through string looking for a match to the pattern, returning",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "split",
+    "qualName": "re.split",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "maxsplit",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "flags",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Split the source string by the occurrences of the pattern,",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "sub",
+    "qualName": "re.sub",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "repl",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "count",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "flags",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return the string obtained by replacing the leftmost",
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "subn",
+    "qualName": "re.subn",
+    "params": [
+     {
+      "name": "pattern",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "repl",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "count",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "flags",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return a 2-tuple containing (new_string, number).",
+    "returns": true
+   }
+  ]
+ },
+ {
+  "module": "datetime",
+  "entries": [
+   {
+    "kind": "class",
+    "name": "date",
+    "qualName": "datetime.date",
+    "params": [
+     {
+      "name": "args",
+      "kind": "vararg",
+      "hasDefault": false
+     },
+     {
+      "name": "kwargs",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "date(year, month, day) --> date object",
+    "returns": true
+   },
+   {
+    "kind": "class",
+    "name": "datetime",
+    "qualName": "datetime.datetime",
+    "params": [
+     {
+      "name": "args",
+      "kind": "vararg",
+      "hasDefault": false
+     },
+     {
+      "name": "kwargs",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "datetime(year, month, day[, hour[, minute[, second[, microsecond[,tzinfo]]]]])",
+    "returns": true
+   },
+   {
+    "kind": "class",
+    "name": "time",
+    "qualName": "datetime.time",
+    "params": [
+     {
+      "name": "args",
+      "kind": "vararg",
+      "hasDefault": false
+     },
+     {
+      "name": "kwargs",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "time([hour[, minute[, second[, microsecond[, tzinfo]]]]]) --> a time object",
+    "returns": true
+   },
+   {
+    "kind": "class",
+    "name": "timedelta",
+    "qualName": "datetime.timedelta",
+    "params": [
+     {
+      "name": "args",
+      "kind": "vararg",
+      "hasDefault": false
+     },
+     {
+      "name": "kwargs",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Difference between two datetime values.",
+    "returns": true
+   },
+   {
+    "kind": "class",
+    "name": "timezone",
+    "qualName": "datetime.timezone",
+    "params": [
+     {
+      "name": "args",
+      "kind": "vararg",
+      "hasDefault": false
+     },
+     {
+      "name": "kwargs",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Fixed offset from UTC implementation of tzinfo.",
+    "returns": true
+   },
+   {
+    "kind": "class",
+    "name": "tzinfo",
+    "qualName": "datetime.tzinfo",
+    "params": [
+     {
+      "name": "args",
+      "kind": "vararg",
+      "hasDefault": false
+     },
+     {
+      "name": "kwargs",
+      "kind": "kwarg",
+      "hasDefault": false
+     }
+    ],
+    "doc": "Abstract base class for time zone info objects.",
+    "returns": true
+   }
+  ]
+ },
+ {
+  "module": "random",
+  "entries": [
+   {
+    "kind": "function",
+    "name": "random",
+    "qualName": "random.random",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "randint",
+    "qualName": "random.randint",
+    "params": [
+     {
+      "name": "a",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "b",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "randrange",
+    "qualName": "random.randrange",
+    "params": [
+     {
+      "name": "stop",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "uniform",
+    "qualName": "random.uniform",
+    "params": [
+     {
+      "name": "a",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "b",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "choice",
+    "qualName": "random.choice",
+    "params": [
+     {
+      "name": "seq",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "choices",
+    "qualName": "random.choices",
+    "params": [
+     {
+      "name": "population",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "shuffle",
+    "qualName": "random.shuffle",
+    "params": [
+     {
+      "name": "x",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": false
+   },
+   {
+    "kind": "function",
+    "name": "sample",
+    "qualName": "random.sample",
+    "params": [
+     {
+      "name": "population",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "k",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "seed",
+    "qualName": "random.seed",
+    "params": [
+     {
+      "name": "a",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": false
+   },
+   {
+    "kind": "function",
+    "name": "gauss",
+    "qualName": "random.gauss",
+    "params": [
+     {
+      "name": "mu",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "sigma",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "randbytes",
+    "qualName": "random.randbytes",
+    "params": [
+     {
+      "name": "n",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   }
+  ]
+ },
+ {
+  "module": "time",
+  "entries": [
+   {
+    "kind": "function",
+    "name": "time",
+    "qualName": "time.time",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "sleep",
+    "qualName": "time.sleep",
+    "params": [
+     {
+      "name": "seconds",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": false
+   },
+   {
+    "kind": "function",
+    "name": "monotonic",
+    "qualName": "time.monotonic",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "perf_counter",
+    "qualName": "time.perf_counter",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "localtime",
+    "qualName": "time.localtime",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "strftime",
+    "qualName": "time.strftime",
+    "params": [
+     {
+      "name": "format",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   }
+  ]
+ }
+]
