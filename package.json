@@ -12,7 +12,7 @@
     "build": "vite build",
     "electron": "electron .",
     "electron:dev": "vite build && electron .",
-    "dist": "vite build && electron-builder",
+    "dist": "npm run build && node scripts/build-desktop.cjs",
     "test": "playwright test",
     "test:e2e": "playwright test tests/e2e.spec.js",
     "test:p0p1": "playwright test tests/test_p0_p1.spec.js",

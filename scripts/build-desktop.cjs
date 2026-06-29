@@ -1,0 +1,39 @@
+// Build the Windows desktop installer and drop it in the repo's release/ folder.
+//
+// Why the detour: electron-builder extracts the Electron framework into <output>/win-unpacked via a
+// `win-unpacked.tmp` → `win-unpacked` rename that throws EPERM on this repo's drive (E:). So we
+// stage the heavy output under the user's home (on C:, where the rename works) and copy ONLY the
+// final installer (+ blockmap) back into <repo>/release/ — the artifact lands in the project without
+// fighting the EPERM, and the multi-hundred-MB win-unpacked never touches the repo drive.
+//
+// Run via `npm run dist` (which vendors offline assets + vite-builds first, then calls this).
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const repo = path.join(__dirname, '..');
+const staging = process.env.BLOCKPY_RELEASE_DIR || path.join(os.homedir(), 'blockpy-release');
+const releaseDir = path.join(repo, 'release');
+
+console.log('[build-desktop] staging output ->', staging);
+execFileSync(
+  'npx',
+  ['electron-builder', '--win', 'nsis', `--config.directories.output=${staging}`],
+  { stdio: 'inherit', cwd: repo, shell: true },
+);
+
+fs.mkdirSync(releaseDir, { recursive: true });
+let copied = 0;
+for (const f of fs.readdirSync(staging)) {
+  if (/^BlockPy-Setup-.*\.exe(\.blockmap)?$/.test(f)) {
+    fs.copyFileSync(path.join(staging, f), path.join(releaseDir, f));
+    copied++;
+    console.log('[build-desktop] ->', path.join('release', f));
+  }
+}
+if (!copied) {
+  console.error('[build-desktop] no installer found in', staging);
+  process.exit(1);
+}
+console.log(`[build-desktop] done — installer in ${releaseDir}`);
