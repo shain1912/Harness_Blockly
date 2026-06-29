@@ -115,13 +115,10 @@ export default function App() {
         ir = window.BlockPyIrDesugar.desugarIr(ir);
       }
       const blocklyJson = window.BlockPyIR.irToBlockly(ir);
-      // Tier-A upgrade: rewrite generic ir_call blocks that match a registered library block into
-      // the SAME emerald labelled block the toolbox shows — so converting `dobot.move_to(...)` from
-      // Python yields the identical block to dragging it out. Lossless (lib blocks lower to the same
-      // Call IR); unmatched calls stay as ir_call.
-      if (window.BlockPyLibImport && window.BlockPyLibImport.upgradeCallsToLibBlocks) {
-        window.BlockPyLibImport.upgradeCallsToLibBlocks(blocklyJson.blocks, blocklyJson.variables);
-      }
+      // Library calls stay as the unified ir_call block; ir_call.updateShape_ styles a registered
+      // call emerald with parameter-name labels (same look as the toolbox), so converting from Python
+      // and dragging from the toolbox yield the IDENTICAL block — for ANY arg shape (incl. keyword
+      // args, which a fixed-arity Tier-A block could not hold). No separate upgrade pass needed.
       // If a newer sync started while we awaited Pyodide/parse (e.g. a quick second Auto-Desugar
       // toggle), discard this stale result so the workspace always reflects the LATEST request.
       if (myGen !== syncGenRef.current) return;

@@ -196,10 +196,11 @@ test.describe('lib toolbox + drag (browser)', () => {
       reg.clearAll();
       reg.registerLibBlock({ module: 'cv2', func: 'imread', argNames: ['filename'], hasOutput: true, colour: '#06b6d4', title: 'cv2.imread' });
 
-      // (1) rebuilt toolbox carries a per-library 'cv2' category with the block + ARG0 shadow
+      // (1) rebuilt toolbox carries a per-library 'cv2' category with the UNIFIED ir_call preset
+      // (funcName 'cv2.imread', not a lib_* block) + ARG0 shadow
       const tb = window.BlockPyBuildIrToolbox();
       const lib = tb.contents.find((c) => c.name === 'cv2');
-      const entry = lib && lib.contents.find((b) => b.type === 'lib_cv2_imread');
+      const entry = lib && lib.contents.find((b) => b.type === 'ir_call' && b.extraState && b.extraState.funcName === 'cv2.imread');
 
       // (2) the LIVE workspace accepts the rebuilt toolbox (exercises the revived App effect path)
       let updateThrew = false;
@@ -260,7 +261,7 @@ test.describe('lib persistence (browser)', () => {
       const tb = window.BlockPyBuildIrToolbox();
       const lib = tb.contents.find((c) => c.name === 'mylib');
       return { restored: !!window.BlockPyLibRegistry.getLibSpec('lib_mylib_thing'),
-               inToolbox: !!(lib && lib.contents.find((b) => b.type === 'lib_mylib_thing')) };
+               inToolbox: !!(lib && lib.contents.find((b) => b.type === 'ir_call' && b.extraState && b.extraState.funcName === 'mylib.thing')) };
     });
     expect(out.restored).toBe(true);
     expect(out.inToolbox).toBe(true);
@@ -281,7 +282,7 @@ test.describe('lib persistence (browser)', () => {
       const lib = tb.contents.find((c) => c.name === 'cv2');
       return {
         imreadRegistered: !!reg.getLibSpec('lib_cv2_imread'),
-        inToolbox: !!(lib && lib.contents.find((b) => b.type === 'lib_cv2_imread')),
+        inToolbox: !!(lib && lib.contents.find((b) => b.type === 'ir_call' && b.extraState && b.extraState.funcName === 'cv2.imread')),
       };
     });
     expect(out.imreadRegistered).toBe(true);

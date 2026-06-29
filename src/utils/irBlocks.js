@@ -385,9 +385,32 @@ if (Blockly) {
       i = 0;
       while (this.getInput('KW' + i)) { this.removeInput('KW' + i); i++; }
       if (this.getInput('CLOSE')) this.removeInput('CLOSE');
-      // Three callee shapes, all ONE block: a fixed name/module label (print, cv2.imread); a method
-      // on a variable receiver (`<var>.method` — var is a native dropdown, method a fixed label); or
-      // a complex callee that keeps a value input (returned callable, nested attribute chain).
+      // Unified styling: if this attribute call (`<recv>.<method>`) is a REGISTERED library call,
+      // render it emerald with per-slot parameter-name labels — the same look the toolbox library
+      // tab shows — so converting from Python and dragging from the toolbox produce identical blocks.
+      // Name-based lookup (ignores arity/keywords) so optional/keyword-arg calls still style.
+      const reg = (typeof window !== 'undefined' ? window : global).BlockPyLibRegistry;
+      let recvName = recvVal;
+      if (recvVal && this.workspace && this.workspace.getVariableById) {
+        const v = this.workspace.getVariableById(recvVal);
+        if (v) recvName = v.name;
+      }
+      // A library call shows up two ways: an instance method on a variable receiver (method_ set,
+      // e.g. device.move_to) OR an imported module function as one dotted label (funcName_ =
+      // "math.sqrt"/"json.dumps"). Style both. A plain funcName (print, len) has no dot → not a lib.
+      let lib = null;
+      if (reg && reg.findLibCall) {
+        if (this.method_ != null) {
+          lib = reg.findLibCall(recvName, String(this.method_));
+        } else if (this.funcName_ != null && String(this.funcName_).indexOf('.') >= 0) {
+          const fn = String(this.funcName_);
+          const d = fn.lastIndexOf('.');
+          lib = reg.findLibCall(fn.slice(0, d), fn.slice(d + 1));
+        }
+      }
+      // Three callee shapes, all ONE block: a fixed name label (print, len); a method on a variable
+      // receiver (`<var>.method` — var is a native dropdown, method a fixed label); or a complex
+      // callee that keeps a value input (returned callable, nested attribute chain).
       if (this.funcName_ !== null && this.funcName_ !== undefined) {
         this.appendDummyInput('FUNC').appendField(String(this.funcName_));
       } else if (this.method_ !== null && this.method_ !== undefined) {
@@ -400,10 +423,15 @@ if (Blockly) {
       // No args/kwargs -> render `()`; otherwise open on the first arg/kw and always CLOSE with `)`.
       if (this.nargs_ === 0 && this.kw_.length === 0) {
         this.appendDummyInput('CLOSE').appendField('()');
+        this.setColour(lib ? lib.colour : '#6a8a5b');
         return;
       }
+      // For a known library call, positional slots carry the introspected parameter name (x, y, …);
+      // for methods the receiver is params[0]-less, so the t-th positional arg is params[t].
+      const params = lib ? lib.params : null;
       for (let t = 0; t < this.nargs_; t++) {
-        this.appendValueInput('ARG' + t).appendField(t === 0 ? '(' : ',');
+        const inp = this.appendValueInput('ARG' + t).appendField(t === 0 ? '(' : ',');
+        if (params && params[t]) inp.appendField(String(params[t]));
       }
       for (let t = 0; t < this.kw_.length; t++) {
         const name = this.kw_[t];
@@ -411,6 +439,7 @@ if (Blockly) {
         this.appendValueInput('KW' + t).appendField((t === 0 && this.nargs_ === 0) ? '(' + label : ',' + label);
       }
       this.appendDummyInput('CLOSE').appendField(')');
+      this.setColour(lib ? lib.colour : '#6a8a5b');
     },
   };
 }

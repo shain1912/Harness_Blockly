@@ -226,70 +226,9 @@ function macrosToRegistry(librarySpec, macros, opts = {}) {
   return out;
 }
 
-// ── Tier-A upgrade (Python→blocks visual consistency) ───────────────────────────
-// irToBlockly always emits generic Tier-B `ir_call` blocks (green, attribute-shaped). When a call
-// matches a REGISTERED library block, this pass rewrites that ir_call into the matching Tier-A
-// `lib_*` block — the SAME emerald, labelled block you drag from the toolbox — so dragging and
-// converting-from-Python produce identical blocks (the whole point of a 1:1 editor). It only touches
-// attribute-on-name calls with no keyword args whose (receiver/module · attr · arity · form) matches
-// a registered spec; everything else stays as ir_call. blocklyToIr lowers lib blocks to the SAME
-// Call IR, so the round-trip stays lossless. Mutates the workspace JSON in place and returns it.
-// `workspace` is the {languageVersion, blocks:[…]} object; `variables` is irToBlockly's separate
-// top-level variables table (id↔name). irToBlockly sets id===name so name resolution also falls back
-// to recv.id, but passing the table keeps it correct if that ever changes.
-function upgradeCallsToLibBlocks(workspace, variables) {
-  const reg = (typeof window !== 'undefined' ? window : global).BlockPyLibRegistry;
-  if (!reg || typeof reg.matchCallToType !== 'function' || !workspace || !Array.isArray(workspace.blocks)) return workspace;
-  const varName = {};
-  for (const v of variables || workspace.variables || []) varName[v.id] = v.name;
-
-  function tryUpgrade(node) {
-    if (!node || node.type !== 'ir_call') return;
-    const es = node.extraState || {};
-    if (es.funcName) return;                              // plain name / builtin call — already consistent
-    if (!es.method) return;                              // not an attribute-on-name call
-    if (Array.isArray(es.kw) && es.kw.length) return;    // keyword args can't map to a fixed-arity lib block
-    const recv = node.fields && node.fields.RECV;
-    if (!recv || typeof recv.id === 'undefined') return; // receiver isn't a simple Name
-    const nargs = es.nargs || 0;
-    const recvN = varName[recv.id] || recv.id;
-    const type = reg.matchCallToType(recvN, es.method, nargs, !es.stmt);
-    if (!type) return;
-    const spec = reg.getLibSpec(type);
-    if (!spec) return;
-    const oldInputs = node.inputs || {};
-    const newInputs = {};
-    let shift = 0;
-    if (spec.method) {                                   // method block: ARG0 is the receiver, then the args
-      newInputs.ARG0 = { block: { type: 'ir_name', fields: { ID: { id: recv.id } } } };
-      shift = 1;
-    }
-    for (let i = 0; i < nargs; i++) if (oldInputs['ARG' + i]) newInputs['ARG' + (i + shift)] = oldInputs['ARG' + i];
-    node.type = type;                                    // rewrite in place (keep next/data/icons/x/y)
-    delete node.extraState;
-    delete node.fields;
-    node.inputs = newInputs;
-  }
-
-  function walk(node) {
-    if (!node || typeof node !== 'object') return;
-    tryUpgrade(node);
-    const ins = node.inputs || {};
-    for (const k of Object.keys(ins)) {
-      if (ins[k] && ins[k].block) walk(ins[k].block);
-      if (ins[k] && ins[k].shadow) walk(ins[k].shadow);
-    }
-    if (node.next && node.next.block) walk(node.next.block);
-  }
-
-  for (const b of workspace.blocks) walk(b);
-  return workspace;
-}
-
 const impApi = (typeof window !== 'undefined' ? window : global);
 impApi.BlockPyLibImport = {
   librarySpecToRegistrySpecs, curationToRegistrySpecs, macrosToRegistry, libraryModules,
   entryQualName, requiredParamNames, importStatement, importBlockJson, argToIr, splitTopArgs,
-  upgradeCallsToLibBlocks,
 };
 if (typeof module !== 'undefined') module.exports = impApi.BlockPyLibImport;

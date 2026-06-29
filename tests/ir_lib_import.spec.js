@@ -231,29 +231,16 @@ test('mapped specs register and round-trip through blocklyToIr losslessly', () =
   expect(resize.args.map((a) => a.id)).toEqual(['s']);
 });
 
-test('Tier-A upgrade: Python→blocks rewrites a registered call into the lib block, losslessly', () => {
+test('findLibCall: a registered call is recognized so ir_call can render it emerald + labelled', () => {
   imp.librarySpecToRegistrySpecs(SPEC).specs.forEach((s) => reg.registerLibBlock(s));
-  // `image.resize(size)` should convert to the emerald lib block (not a generic ir_call) and the
-  // upgraded workspace must lower back to the IDENTICAL IR.
-  const ir = { type: 'Module', body: [
-    { type: 'Expr', value: { type: 'Call',
-      func: { type: 'Attribute', value: { type: 'Name', id: 'image' }, attr: 'resize' },
-      args: [{ type: 'Name', id: 'size' }], keywords: [] } },
-  ] };
-  const ws = IR.irToBlockly(ir);
-  expect(ws.blocks.blocks[0].type).toBe('ir_call');                 // before: generic
-  imp.upgradeCallsToLibBlocks(ws.blocks, ws.variables);
-  expect(ws.blocks.blocks[0].type).toMatch(/^lib_image_resize/);    // after: emerald lib block
-  const back = IR.blocklyToIr({ blocks: ws.blocks });
-  expect(JSON.stringify(back.body)).toBe(JSON.stringify(ir.body));  // round-trip identical
-
-  // An arity that no registered block has stays a generic ir_call (still valid).
-  const ir2 = { type: 'Module', body: [
-    { type: 'Expr', value: { type: 'Call',
-      func: { type: 'Attribute', value: { type: 'Name', id: 'image' }, attr: 'resize' },
-      args: [{ type: 'Name', id: 'a' }, { type: 'Name', id: 'b' }, { type: 'Name', id: 'c' }], keywords: [] } },
-  ] };
-  const ws2 = IR.irToBlockly(ir2);
-  imp.upgradeCallsToLibBlocks(ws2.blocks, ws2.variables);
-  expect(ws2.blocks.blocks[0].type).toBe('ir_call');
+  // instance method (receiver-agnostic): image.resize → params after the receiver
+  const m = reg.findLibCall('whatever', 'resize');
+  expect(m).toMatchObject({ isModule: false });
+  expect(m.params).toEqual(['size']);
+  // module function: Image.blend → module-rooted, full params
+  const f = reg.findLibCall('Image', 'blend');
+  expect(f).toMatchObject({ isModule: true });
+  expect(f.params).toEqual(['im1', 'im2', 'alpha']);
+  // unknown attr → not a library call (rendered generic green)
+  expect(reg.findLibCall('x', 'totally_unknown')).toBeNull();
 });

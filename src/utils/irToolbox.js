@@ -192,14 +192,28 @@ const IR_TOOLBOX_TABLE = [
   ] },
 ];
 
-// Phase 5: a dynamic "Library" category compiled from the live registry (BlockPyLibRegistry).
-// Each Tier-A block gets an ir_name shadow per arg so a freshly-dragged block is valid Python
-// immediately (e.g. cv2.imread(filename)). Returns null when no library blocks are registered.
-function libBlockEntry(b) {
-  const inputs = {};
-  (b.argNames || []).forEach((argName, i) => { inputs['ARG' + i] = name(argName); });
-  const entry = { kind: 'block', type: b.type };
-  if (Object.keys(inputs).length) entry.inputs = inputs;
+// A library call rendered as the UNIFIED ir_call block (not a separate lib_* block) so the toolbox
+// block is IDENTICAL to what Python→blocks produces. Two shapes, from the registry spec: an imported
+// module function as one dotted funcName label (math.sqrt, cv2.imread); an instance method on a
+// variable receiver (image.resize → [image ▾].resize). ir_call.updateShape_ then renders it emerald
+// with per-param labels. Each positional param carries an ir_name shadow so a freshly-dragged block
+// is valid Python immediately. null when the type isn't registered.
+function libCallEntry(reg, type) {
+  const s = reg.getLibSpec ? reg.getLibSpec(type) : null;
+  if (!s) return null;
+  const isMethod = !!s.method;
+  const params = isMethod ? (s.argNames || []).slice(1) : (s.argNames || []);
+  const extraState = { nargs: params.length, kw: [], funcName: null, method: null };
+  if (isMethod) extraState.method = s.func;
+  else extraState.funcName = `${s.module ? s.module + '.' : ''}${s.func}`;
+  if (!s.hasOutput) extraState.stmt = true;
+  const entry = { kind: 'block', type: 'ir_call', extraState };
+  if (isMethod) entry.fields = { RECV: { name: (s.argNames && s.argNames[0]) || 'obj' } };
+  if (params.length) {
+    const inputs = {};
+    params.forEach((p, i) => { inputs['ARG' + i] = name(p); });
+    entry.inputs = inputs;
+  }
   return entry;
 }
 
@@ -210,9 +224,7 @@ function libBlockEntry(b) {
 // A toolbox block entry from a registered type (curated tabs reference existing types; look up the
 // spec for its argNames so the dragged-out block carries valid default shadows). null if unknown.
 function typeBlockEntry(reg, type) {
-  const spec = reg.getLibSpec ? reg.getLibSpec(type) : null;
-  if (!spec) return null;
-  return libBlockEntry({ type, argNames: spec.argNames || [] });
+  return libCallEntry(reg, type);
 }
 
 function libraryCategories() {
@@ -230,7 +242,8 @@ function libraryCategories() {
       const g = b.group || '';
       if (g) L.anyGroup = true;
       if (!L.groups.has(g)) L.groups.set(g, []);
-      L.groups.get(g).push(libBlockEntry(b));
+      const e = libCallEntry(reg, b.type);
+      if (e) L.groups.get(g).push(e);
     });
   });
 

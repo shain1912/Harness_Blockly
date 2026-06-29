@@ -139,26 +139,29 @@ function registerLibBlock(spec) {
 
 function getLibSpec(type) { return SPECS.get(type); }
 
-// Reverse lookup for the Python→blocks "Tier-A upgrade": given an attribute call `<recv>.<attr>(…)`
-// with `nargs` positional args and the desired form (hasOutput), return the registered lib block
-// type that represents EXACTLY that call, or null. Priority: a module-function block whose module ==
-// recv (e.g. cv2.imread), else an instance-method block by attr+arity (receiver-agnostic — the lib
-// block's ARG0 carries the receiver — preferring one whose baked receiver name also matches).
-function matchCallToType(recvName, attr, nargs, hasOutput) {
-  const want = !!hasOutput;
-  for (const [type, spec] of SPECS) {
-    if (!spec.method && spec.func === attr && spec.module === recvName
-      && !!spec.hasOutput === want && (spec.argNames || []).length === nargs) return type;
-  }
-  let any = null;
-  for (const [type, spec] of SPECS) {
-    if (spec.method && spec.func === attr && !!spec.hasOutput === want
-      && (spec.argNames || []).length === nargs + 1) {
-      if (spec.module === recvName) return type;
-      if (!any) any = type;
+// Display lookup for the unified ir_call: is `<recv>.<attr>` a KNOWN library call, and what are its
+// parameter names? Used by ir_call.updateShape_ to render known calls emerald with per-slot param
+// labels (x, y, z…). Name-based (ignores arity/keywords) so a call with optional/keyword args still
+// styles. module-function (module===recv, e.g. cv2.imread/math.sqrt) → isModule:true + its params;
+// instance method (any receiver, e.g. device.move_to) → isModule:false + params after the receiver.
+function findLibCall(recv, attr) {
+  if (!attr) return null;
+  let moduleHit = null;     // exact module match (cv2.imread when recv known) — most precise
+  let methodHit = null;     // instance method by name (device.move_to) — receiver-agnostic
+  let moduleByFunc = null;  // module-function by func name only — styles even when recv isn't known
+  for (const [, spec] of SPECS) {
+    if (spec.func !== attr) continue;
+    if (!spec.method) {
+      if (recv && spec.module === recv) { if (!moduleHit) moduleHit = spec; }
+      else if (!moduleByFunc) moduleByFunc = spec;
+    } else if (!methodHit) {
+      methodHit = spec;
     }
   }
-  return any;
+  const m = moduleHit || methodHit || moduleByFunc;
+  if (!m) return null;
+  // method spec's argNames[0] is the receiver — its positional params start at index 1.
+  return { isModule: !m.method, params: (m.argNames || []).slice(m.method ? 1 : 0), colour: m.colour || '#009688' };
 }
 
 function listLibBlocks() {
@@ -403,7 +406,7 @@ async function validateSpecParse(spec, pythonToIR, pyodide) {
 
 const api = (typeof window !== 'undefined' ? window : global);
 api.BlockPyLibRegistry = {
-  registerLibBlock, getLibSpec, matchCallToType, listLibBlocks, removeLibrary, clearAll,
+  registerLibBlock, getLibSpec, findLibCall, listLibBlocks, removeLibrary, clearAll,
   persist, hydrate, validateSpecParse, blockType, staticCheck, specFromDescriptor,
   removeModules, addMacro, listMacros, removeMacro, removeMacrosBySource, persistMacros, hydrateMacros,
   listLibraries, removeLibraryByTab, removeAllUserLibraries,
