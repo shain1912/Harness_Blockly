@@ -10,8 +10,14 @@
 
 const SPECS = new Map();                 // block type -> normalized spec
 const MACROS = new Map();                 // macro name -> { name, label, group, block } (Phase C2)
+// A curation is a VIEW (not new blocks): a named, purpose-driven SUBSET of already-registered block
+// types, rendered as its own extra toolbox tab. We can't register duplicate specs for it because a
+// block type (lib_<module>_<func>[_stmt]) is unique in SPECS — so the curated tab references the
+// full library's existing types. key -> { key, label, lib, items:[{type,label,group}], macros:[…] }.
+const CURATIONS = new Map();
 const STORAGE_KEY = 'blockpy.libRegistry.v1';
 const MACRO_STORAGE_KEY = 'blockpy.libRegistry.macros.v1';
+const CURATION_STORAGE_KEY = 'blockpy.libRegistry.curations.v1';
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function blockType(spec) {
@@ -186,7 +192,28 @@ function addMacro(macro) {
 function listMacros() { return [...MACROS.values()]; }
 function removeMacro(name) { MACROS.delete(name); persistMacros(); }
 
-function clearAll() { SPECS.clear(); MACROS.clear(); }
+// ── Curations (Phase C3): a purpose-driven, separate toolbox tab that's a VIEW over the full
+// library's already-registered block types — so `pip install`/Blockify keeps showing every block,
+// and Curate adds a small extra tab without duplicating (or wiping) anything. ────────────────────
+function addCuration(c) {
+  if (!c || typeof c.key !== 'string' || !Array.isArray(c.items)) return { ok: false, reason: 'curation needs {key, items[]}' };
+  const items = c.items.filter((it) => it && typeof it.type === 'string')
+    .map((it) => ({ type: it.type, label: it.label || '', group: it.group || '' }));
+  const macros = (Array.isArray(c.macros) ? c.macros : [])
+    .filter((m) => m && m.block).map((m) => ({ label: m.label || m.name || '', group: m.group || '', block: m.block }));
+  if (!items.length && !macros.length) return { ok: false, reason: 'curation is empty' };
+  CURATIONS.set(c.key, { key: c.key, label: c.label || c.key, lib: c.lib || '', items, macros });
+  persistCurations();
+  return { ok: true, key: c.key };
+}
+function listCurations() { return [...CURATIONS.values()]; }
+function removeCuration(key) { const had = CURATIONS.delete(key); persistCurations(); return had; }
+function removeCurationsByLib(lib) {
+  for (const [k, c] of [...CURATIONS]) if ((c.lib || '') === lib) CURATIONS.delete(k);
+  persistCurations();
+}
+
+function clearAll() { SPECS.clear(); MACROS.clear(); CURATIONS.clear(); }
 
 // ── Library (toolbox-tab) management ────────────────────────────────────────────
 // A toolbox tab is keyed by `lib` (the source library, e.g. 'PIL.Image') falling back to the
@@ -208,14 +235,20 @@ function listLibraries() {
     if (!byLib.has(key)) byLib.set(key, { lib: key, blockCount: 0, userCount: 0, macroCount: 0 });
     byLib.get(key).macroCount++;
   }
-  return [...byLib.values()]
-    .map((e) => ({ ...e, builtin: e.userCount === 0 && e.macroCount === 0 }))
-    .sort((a, b) => a.lib.toLowerCase().localeCompare(b.lib.toLowerCase()));
+  const rows = [...byLib.values()]
+    .map((e) => ({ ...e, builtin: e.userCount === 0 && e.macroCount === 0, curation: false }));
+  // Curated tabs are views — list them as their own deletable rows (never built-in).
+  for (const c of CURATIONS.values()) {
+    rows.push({ lib: c.key, blockCount: c.items.length, userCount: c.items.length, macroCount: c.macros.length, builtin: false, curation: true });
+  }
+  return rows.sort((a, b) => a.lib.toLowerCase().localeCompare(b.lib.toLowerCase()));
 }
 
 // Remove every USER block + macro belonging to one toolbox tab (built-ins are preserved).
 // Deletes the Blockly.Blocks defs too so the tab disappears from the toolbox. Returns removed types.
 function removeLibraryByTab(libKey) {
+  // A curated tab is a view: deleting it just drops the curation, leaving the full library intact.
+  if (CURATIONS.has(libKey)) { removeCuration(libKey); return []; }
   const B = (typeof window !== 'undefined' ? window : global).Blockly;
   const removed = [];
   for (const [type, spec] of [...SPECS]) {
@@ -225,6 +258,7 @@ function removeLibraryByTab(libKey) {
     if (B && B.Blocks && B.Blocks[type]) { try { delete B.Blocks[type]; } catch (_) { /* keep going */ } }
   }
   for (const [name, m] of [...MACROS]) if ((m.srcModule || 'Library') === libKey) MACROS.delete(name);
+  removeCurationsByLib(libKey);   // removing the source library removes its curated tabs too
   persist();
   return removed;
 }
@@ -240,6 +274,7 @@ function removeAllUserLibraries() {
     if (B && B.Blocks && B.Blocks[type]) { try { delete B.Blocks[type]; } catch (_) { /* keep going */ } }
   }
   MACROS.clear();
+  CURATIONS.clear();
   persist();
   return removed;
 }
@@ -251,6 +286,15 @@ function persist() {
     ls.setItem(STORAGE_KEY, JSON.stringify([...SPECS.values()].filter((s) => !s.builtin)));   // built-ins are re-registered in-memory each mount, never persisted
   } catch (_) { /* non-fatal */ }
   persistMacros();
+  persistCurations();
+}
+
+function persistCurations() {
+  try {
+    const ls = (typeof window !== 'undefined') ? window.localStorage : null;
+    if (!ls) return;
+    ls.setItem(CURATION_STORAGE_KEY, JSON.stringify([...CURATIONS.values()]));
+  } catch (_) { /* non-fatal */ }
 }
 
 function persistMacros() {
@@ -277,8 +321,21 @@ function hydrate() {
       if (res.ok) out.push({ type: res.type, title: spec.title, hasOutput: !!spec.hasOutput, func: spec.func, args: spec.argNames || [], colour: spec.colour });
     }
     hydrateMacros();
+    hydrateCurations();
     return out;
   } catch (_) { clearAll(); return []; }
+}
+
+function hydrateCurations() {
+  try {
+    const ls = (typeof window !== 'undefined') ? window.localStorage : null;
+    if (!ls) return [];
+    const raw = ls.getItem(CURATION_STORAGE_KEY);
+    const curations = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(curations)) return [];
+    for (const c of curations) addCuration(c);
+    return listCurations();
+  } catch (_) { return []; }
 }
 
 function hydrateMacros() {
@@ -328,5 +385,6 @@ api.BlockPyLibRegistry = {
   persist, hydrate, validateSpecParse, blockType, staticCheck, specFromDescriptor,
   removeModules, addMacro, listMacros, removeMacro, removeMacrosBySource, persistMacros, hydrateMacros,
   listLibraries, removeLibraryByTab, removeAllUserLibraries,
+  addCuration, listCurations, removeCuration, removeCurationsByLib, persistCurations, hydrateCurations,
 };
 if (typeof module !== 'undefined') module.exports = api.BlockPyLibRegistry;

@@ -31,26 +31,35 @@ function requiredParamNames(entry) {
     .map((p) => p.name);
 }
 
-// Map one LibrarySpec entry to a libRegistry spec (or null if it can't be represented).
+// Map one LibrarySpec entry to libRegistry spec(s). Returns an ARRAY (0..2), because Blockly blocks
+// are EITHER a value (reporter, output plug) OR a command (statement, stack) — never both — yet a
+// real-world call is often used both ways and most libraries carry no `-> None` annotation to tell
+// us which. So:
+//   • class constructor  -> [reporter]            (you assign the instance: `d = Dobot(port)`)
+//   • returns:false (`-> None`) -> [command]      (pure side-effect, never a value)
+//   • value OR unknown (the common un-annotated case) -> [reporter, command]
+// Emitting both for the ambiguous case is why a robot library's `dobot.move_to(...)` finally has a
+// GREEN command block to drag into the program flow, while `cv2.imread(...)` still has a reporter to
+// plug into an assignment. The two get distinct types (`lib_x_f` vs `lib_x_f_stmt`) in libRegistry.
+// Reporter is listed first so find-by-title resolves to the value form. [] if unrepresentable.
 function entryToSpec(entry, alias, colour) {
-  if (!entry || typeof entry.name !== 'string' || !IMP_IDENT.test(entry.name)) return null;
+  if (!entry || typeof entry.name !== 'string' || !IMP_IDENT.test(entry.name)) return [];
   const reqd = requiredParamNames(entry);
-  const hasOutput = entry.returns !== false;       // returns:false (-> None) is the only statement case
 
+  let base;
   if (entry.kind === 'method') {
-    if (typeof entry.owner !== 'string' || !IMP_IDENT.test(entry.owner)) return null;
+    if (typeof entry.owner !== 'string' || !IMP_IDENT.test(entry.owner)) return [];
     const recv = entry.owner.toLowerCase();
-    if (!IMP_IDENT.test(recv)) return null;
-    return {
-      module: recv, func: entry.name, argNames: [recv, ...reqd],
-      hasOutput, colour, title: `${recv}.${entry.name}`,
-    };
+    if (!IMP_IDENT.test(recv)) return [];
+    base = { module: recv, func: entry.name, argNames: [recv, ...reqd], colour, title: `${recv}.${entry.name}` };
+  } else {
+    // function or class: module-rooted call under the leaf alias
+    base = { module: alias, func: entry.name, argNames: reqd, colour, title: `${alias}.${entry.name}` };
   }
-  // function or class: module-rooted call under the leaf alias
-  return {
-    module: alias, func: entry.name, argNames: reqd,
-    hasOutput, colour, title: `${alias}.${entry.name}`,
-  };
+
+  if (entry.kind === 'class') return [{ ...base, hasOutput: true }];
+  if (entry.returns === false) return [{ ...base, hasOutput: false }];
+  return [{ ...base, hasOutput: true }, { ...base, hasOutput: false }];
 }
 
 // The import a user must add for the leaf alias to resolve: dotted -> `from <parent> import <leaf>`,
@@ -95,8 +104,7 @@ function librarySpecToRegistrySpecs(librarySpec, opts = {}) {
   const entries = (librarySpec && librarySpec.entries) || [];
   const specs = [];
   for (const e of entries) {
-    const s = entryToSpec(e, alias, colour);
-    if (s) { s.lib = moduleDotted; specs.push(s); }   // tag the source library -> its own toolbox category
+    for (const s of entryToSpec(e, alias, colour)) { s.lib = moduleDotted; specs.push(s); }   // tag source library -> its own toolbox category
   }
   return { alias, importStmt: importStatement(moduleDotted, alias), specs };
 }
@@ -124,12 +132,14 @@ function curationToRegistrySpecs(librarySpec, selected, opts = {}) {
   const dropped = [];
   for (const sel of selected || []) {
     const e = sel && index.get(sel.ref);
-    const base = e ? entryToSpec(e, alias, opts.colour) : null;
-    if (!base) { if (sel && sel.ref) dropped.push(sel.ref); continue; }
-    if (sel.label) base.title = String(sel.label);    // display-only; lowering uses module/func
-    if (sel.group) base.group = String(sel.group);
-    base.lib = moduleDotted;                            // source library -> its own toolbox category
-    specs.push(base);
+    const variants = e ? entryToSpec(e, alias, opts.colour) : [];
+    if (!variants.length) { if (sel && sel.ref) dropped.push(sel.ref); continue; }
+    for (const base of variants) {
+      if (sel.label) base.title = String(sel.label);    // display-only; lowering uses module/func
+      if (sel.group) base.group = String(sel.group);
+      base.lib = moduleDotted;                            // source library -> its own toolbox category
+      specs.push(base);
+    }
   }
   return { alias, importStmt: importStatement(moduleDotted, alias), specs, dropped };
 }

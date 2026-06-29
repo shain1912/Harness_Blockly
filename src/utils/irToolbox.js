@@ -174,6 +174,14 @@ function libBlockEntry(b) {
 // of one lumped "Library". A library's blocks are bucketed by its source-library tag (lib, else the
 // block's module for built-ins); a curated library nests one sub-category per semantic group
 // (+ Other + Macros), an un-curated one is flat.
+// A toolbox block entry from a registered type (curated tabs reference existing types; look up the
+// spec for its argNames so the dragged-out block carries valid default shadows). null if unknown.
+function typeBlockEntry(reg, type) {
+  const spec = reg.getLibSpec ? reg.getLibSpec(type) : null;
+  if (!spec) return null;
+  return libBlockEntry({ type, argNames: spec.argNames || [] });
+}
+
 function libraryCategories() {
   const reg = (typeof window !== 'undefined' ? window : global).BlockPyLibRegistry;
   if (!reg || typeof reg.listLibBlocks !== 'function') return [];
@@ -217,6 +225,33 @@ function libraryCategories() {
   // libraries whose curation produced only macros (no plain blocks)
   for (const [libKey, entries] of macrosByLib) {
     if (!byLib.has(libKey)) cats.push({ kind: 'category', name: libKey, colour: '#009688', contents: [{ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: entries }] });
+  }
+
+  // Curated tabs (Phase C3): one extra category per curation, a purpose-driven subset that references
+  // the full library's already-registered block types. Grouped into sub-categories when the curation
+  // carries semantic groups; a ★ name marks it as the curated view, distinct from the full library.
+  const curations = (typeof reg.listCurations === 'function' ? reg.listCurations() : []) || [];
+  for (const cur of curations) {
+    const byGroup = new Map();
+    (cur.items || []).forEach((it) => {
+      const entry = typeBlockEntry(reg, it.type);
+      if (!entry) return;                                  // type was removed -> skip stale ref
+      const g = it.group || '';
+      if (!byGroup.has(g)) byGroup.set(g, []);
+      byGroup.get(g).push(entry);
+    });
+    const macroEntries = (cur.macros || []).map((m) => ({ kind: 'block', ...m.block }));
+    const anyGroup = [...byGroup.keys()].some((g) => g);
+    let contents;
+    if (!anyGroup && !macroEntries.length) {
+      contents = [...byGroup.values()].flat();
+    } else {
+      contents = [];
+      for (const [g, entries] of byGroup) if (g) contents.push({ kind: 'category', name: g, colour: '#00897b', contents: entries });
+      if (byGroup.has('') && byGroup.get('').length) contents.push({ kind: 'category', name: 'Other', colour: '#009688', contents: byGroup.get('') });
+      if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: macroEntries });
+    }
+    if (contents.length) cats.push({ kind: 'category', name: `★ ${cur.label || cur.key}`, colour: '#00796b', contents });
   }
   return cats;
 }

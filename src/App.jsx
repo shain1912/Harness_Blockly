@@ -6,7 +6,19 @@ import ConsoleLogs from './components/ConsoleLogs';
 import VariableWatch from './components/VariableWatch';
 import ASTTreeView from './components/ASTTreeView';
 import LibraryManager from './components/LibraryManager';
-import { runCode, initPyodide, interruptPyodide, pipInstall, writeImageToFS, prewarmEnvironment, isEnvironmentReady } from './utils/pyodideRunner';
+import { runCode, initPyodide, interruptPyodide, writeImageToFS, prewarmEnvironment, isEnvironmentReady } from './utils/pyodideRunner';
+
+// A pip PACKAGE name is not always the IMPORT name (opencv-python→cv2, pillow→PIL, …). Map the
+// common mismatches; default = the package lowercased with '-' → '_' (pydobot→pydobot, scikit→…).
+const PIP_IMPORT_ALIAS = {
+  'opencv-python': 'cv2', 'opencv-contrib-python': 'cv2', 'opencv-python-headless': 'cv2',
+  'pillow': 'PIL', 'scikit-learn': 'sklearn', 'scikit-image': 'skimage', 'beautifulsoup4': 'bs4',
+  'pyyaml': 'yaml', 'python-dateutil': 'dateutil', 'msgpack-python': 'msgpack', 'attrs': 'attr',
+};
+function pkgToImportName(pkg) {
+  const base = String(pkg).split(/[=<>!~ [@]/)[0].trim().toLowerCase();   // strip version/extra specifiers
+  return PIP_IMPORT_ALIAS[base] || base.replace(/-/g, '_');
+}
 
 export default function App() {
   const [code, setCode] = useState('');
@@ -481,7 +493,17 @@ for i in range(4):
       }
       const reader = resp.body.getReader();
       const dec = new TextDecoder();
-      for (;;) { const { done, value } = await reader.read(); if (done) break; const t = dec.decode(value, { stream: true }); if (t) setLogs((prev) => [...prev, t.replace(/\n+$/, '')]); }
+      let out = '';
+      for (;;) { const { done, value } = await reader.read(); if (done) break; const t = dec.decode(value, { stream: true }); if (t) { out += t; setLogs((prev) => [...prev, t.replace(/\n+$/, '')]); } }
+      // Auto-blockify: the whole point of installing is to get the blocks — so generate them right
+      // away into a toolbox tab (no separate Blockify step). Skip only if pip clearly failed.
+      if (/\berror\b|could not find|no matching distribution/i.test(out) && !/successfully installed/i.test(out)) {
+        setLogs((prev) => [...prev, `[pip] Install reported an error — skipping block generation. Fix the package name and retry.`]);
+        return;
+      }
+      const importName = pkgToImportName(pkg);
+      setLogs((prev) => [...prev, `[pip] Installed. Generating blocks for "${importName}" → toolbox…`]);
+      await handleBlockifyLibrary(importName);
     } catch (e) {
       setLogs((prev) => [...prev, `[pip] Error: ${e.message}. Make sure the backend is running.`]);
     }
@@ -707,108 +729,6 @@ for i in range(4):
     setLogs((prev) => [...prev, `[Library] Cleared all added libraries — ${removed.length} block(s).`]);
   };
 
-  // ── pip install handler ───────────────────────────────────────────────────────
-  const handlePipInstall = async (packageName) => {
-    setLogs(prev => [...prev, `[pip] Installing ${packageName}...`]);
-    const ok = await pipInstall(packageName, (msg) => setLogs(prev => [...prev, msg]));
-    if (ok) setPyodideReady(true);
-  };
-
-  const handleAbstractLibrary = async (libKey, customCode) => {
-    setIsAbstracting(true);
-    setAiThoughts([]);
-    setLogs(prev => [...prev, `[AI Agent] Abstracting library: "${libKey}"...`]);
-    const reg = window.BlockPyLibRegistry;
-
-    try {
-      // Best-effort introspection grounding (live Pyodide). Failure is fine — AI works from name.
-      let facts = null;
-      try {
-        const py = await window.BlockPyAstBridge.getPyodide();
-        const engine = new window.BlockPyAbstraction.LibraryAbstractionEngine();
-        facts = await engine.introspectModule(libKey, py);
-      } catch (_) { facts = null; }
-
-      // Ask the backend; on 503 (no keys) fall back to the offline preset.
-      let libName = libKey;
-      let blocks = [];
-      let thoughts = [];
-      let response = null;
-      try {
-        response = await fetch('/api/ai-abstract', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ libName: libKey, customCode, facts }),
-        });
-      } catch (_) {
-        response = null;   // backend unreachable (Express :3001 down / connection refused)
-      }
-      // Parse the JSON only when the response looks ok; a 503 (no keys) / 500 (outage) body may not
-      // be success-shaped.
-      let data = null;
-      if (response && response.ok) {
-        try { data = await response.json(); } catch (_) { data = null; }
-      }
-      if (!response || !response.ok || !data || !data.success) {
-        // ANY backend failure — unreachable (fetch threw), 503 (no keys), 500 (outage), or
-        // success:false — falls back to the offline preset when one exists (spec §6).
-        const preset = window.BlockPyAbstraction.AI_PRESETS[libKey];
-        if (!preset) {
-          const why = !response ? 'backend unreachable' : (!response.ok ? `backend ${response.status}` : ((data && data.error) || 'AI failed'));
-          setLogs(prev => [...prev, `[AI Agent] ${why} and no offline preset for "${libKey}".`]);
-          return;
-        }
-        blocks = preset.blocks;
-        thoughts = preset.thoughts;
-        const why = !response ? 'unreachable' : (!response.ok ? String(response.status) : 'AI failed');
-        setLogs(prev => [...prev, `[AI Agent] Backend ${why} — using offline preset for "${libKey}".`]);
-      } else {
-        libName = data.libName || libKey;
-        blocks = data.blocks || [];
-        thoughts = data.thoughts || [];
-      }
-
-      // Stream the thoughts for the UI.
-      const revealed = [];
-      for (const thought of thoughts) {
-        revealed.push(thought);
-        setAiThoughts([...revealed]);
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-
-      // Register each CALL block through the round-trip oracle. Macro-shaped responses (no
-      // func / no args array) are skipped in the MVP. Oracle failures are demoted (not registered).
-      let pyForOracle = null;
-      try { pyForOracle = await window.BlockPyAstBridge.getPyodide(); } catch (_) { pyForOracle = null; }
-      const registered = [];
-      let rejected = 0;
-      for (const b of blocks) {
-        if (typeof b.func !== 'string' || !Array.isArray(b.args)) { rejected++; continue; } // macro/invalid
-        const spec = reg.specFromDescriptor(b, libName);
-        if (pyForOracle) {
-          const ok = await reg.validateSpecParse(spec, window.BlockPyAstBridge.pythonToIR, pyForOracle);
-          if (!ok) { rejected++; setLogs(prev => [...prev, `[AI Agent] Demoted "${spec.title}" (round-trip oracle).`]); continue; }
-        }
-        const res = reg.registerLibBlock(spec);
-        if (!res.ok) { rejected++; setLogs(prev => [...prev, `[AI Agent] Demoted "${spec.title}" (${res.reason}).`]); continue; }
-        const stored = reg.getLibSpec(res.type) || spec;   // idempotent no-op keeps the FIRST spec; mirror the registry, not the new descriptor
-        registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames || stored.args, colour: stored.colour });
-      }
-      reg.persist();
-
-      setInstalledBlocks(prev => {
-        const filtered = prev.filter(p => !registered.some(r => r.type === p.type));
-        return [...filtered, ...registered];
-      });
-      setLogs(prev => [...prev, `[Library] ✅ Registered ${registered.length} block(s) for "${libName}"${rejected ? `, ${rejected} demoted` : ''}.`]);
-    } catch (err) {
-      console.error(err);
-      setLogs(prev => [...prev, `[AI Agent Error] ${err.message}`]);
-    } finally {
-      setIsAbstracting(false);
-    }
-  };
-
   // Auto-add a library's import as a REAL ir_* block (round-trips losslessly) so dragged library
   // blocks run without the user hand-adding `from PIL import Image`. Added once per library, before
   // the user drags usage, so it serializes first → the import precedes use in generated Python.
@@ -832,101 +752,139 @@ for i in range(4):
     catch (_) { return false; }
   };
 
-  // Phase B/C: introspection-based blocking. Hits /api/blockify (real Python, no AI cost) for the
-  // ground-truth LibrarySpec, then registers libRegistry blocks (window.BlockPyLibImport) into the
-  // Library palette + lossless IR round-trip. With a `purpose`, an extra LLM pass (/api/abstract-
-  // library) curates a small, grouped, friendly-labelled subset grounded in that spec (Phase C);
-  // without one, every entry is mapped (Phase B).
-  const handleBlockifyLibrary = async (moduleName, purpose) => {
-    const mod = (moduleName || '').trim();
-    if (!mod) return;
-    const wantCurate = !!(purpose && purpose.trim());
-    setIsAbstracting(true);
-    setAiThoughts([]);
-    setLogs(prev => [...prev, `[Blockify] Introspecting "${mod}" (real Python)...`]);
+  // Introspect a module (/api/blockify, real Python, no AI cost) → { spec, cached }. Logs + returns
+  // null on failure. Shared by Blockify (full) and Curate.
+  const introspectModule = async (mod) => {
+    let response = null;
+    try {
+      response = await fetch('/api/blockify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: mod }),
+      });
+    } catch (_) { response = null; }
+    let data = null;
+    if (response && response.ok) { try { data = await response.json(); } catch (_) { data = null; } }
+    if (!response || !response.ok || !data || !data.success || !data.spec) {
+      const why = !response ? 'backend unreachable (is the Express server running?)'
+        : (!response.ok ? `backend ${response.status}` : ((data && data.error) || 'introspection failed'));
+      setLogs((prev) => [...prev, `[Blockify] ${why} for "${mod}".`]);
+      return null;
+    }
+    return data;
+  };
+
+  // Register EVERY introspected entry of a library as Library-palette blocks. entryToSpec now emits
+  // BOTH a command (green statement) and a value (reporter) form where the return type is unknown,
+  // so a library's commands are finally draggable into the program flow. Idempotent re-run replaces
+  // the library's prior blocks (latest labels/signatures win). Returns { mapped, registered, ... }.
+  const registerFullLibrary = (librarySpec) => {
     const reg = window.BlockPyLibRegistry;
     const imp = window.BlockPyLibImport;
+    const mapped = imp.librarySpecToRegistrySpecs(librarySpec);
+    const removedTypes = reg.removeModules(imp.libraryModules(librarySpec));
+    const registered = [];
+    let rejected = 0;
+    for (const spec of mapped.specs) {
+      const res = reg.registerLibBlock(spec);
+      if (!res.ok) { rejected++; continue; }
+      const stored = reg.getLibSpec(res.type) || spec;
+      registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames, colour: stored.colour });
+    }
+    reg.persist();
+    setInstalledBlocks((prev) => {
+      const drop = new Set([...removedTypes, ...registered.map((r) => r.type)]);
+      return [...prev.filter((p) => !drop.has(p.type)), ...registered];
+    });
+    return { mapped, registered, rejected, removedTypes };
+  };
+
+  // Blockify (full): introspect a module and put EVERY API call into its own Library palette tab.
+  // No AI cost. Used by the Blockify field and automatically right after a `pip install`.
+  const handleBlockifyLibrary = async (moduleName) => {
+    const mod = (moduleName || '').trim();
+    if (!mod) return;
+    setIsAbstracting(true);
+    setAiThoughts([]);
+    setLogs((prev) => [...prev, `[Blockify] Introspecting "${mod}" (real Python)...`]);
     try {
-      let response = null;
-      try {
-        response = await fetch('/api/blockify', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: mod }),
-        });
-      } catch (_) { response = null; }
-      let data = null;
-      if (response && response.ok) { try { data = await response.json(); } catch (_) { data = null; } }
-      if (!response || !response.ok || !data || !data.success || !data.spec) {
-        const why = !response ? 'backend unreachable (is the Express server running?)'
-          : (!response.ok ? `backend ${response.status}` : ((data && data.error) || 'introspection failed'));
-        setLogs(prev => [...prev, `[Blockify] ${why} for "${mod}".`]);
-        return;
-      }
+      const data = await introspectModule(mod);
+      if (!data) return;
       const librarySpec = data.spec;
-
-      // Phase C — purpose-driven curation (grounded LLM selection of a labelled subset).
-      let mapped;
-      let macroCount = 0;
-      let macroDefs = [];
-      if (wantCurate) {
-        setLogs(prev => [...prev, `[Curate] Asking the AI to pick blocks for: "${purpose.trim()}"…`]);
-        let cres = null;
-        try {
-          cres = await fetch('/api/abstract-library', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ spec: librarySpec, purpose: purpose.trim() }),
-          });
-        } catch (_) { cres = null; }
-        let cdata = null;
-        if (cres && cres.ok) { try { cdata = await cres.json(); } catch (_) { cdata = null; } }
-        if (!cres || !cres.ok || !cdata || !cdata.success) {
-          const why = !cres ? 'backend unreachable' : (!cres.ok ? `backend ${cres.status}` : ((cdata && cdata.error) || 'AI failed'));
-          setLogs(prev => [...prev, `[Curate] ${why} — falling back to full blockify for "${mod}".`]);
-          mapped = imp.librarySpecToRegistrySpecs(librarySpec);
-        } else {
-          mapped = imp.curationToRegistrySpecs(librarySpec, cdata.selected || []);
-          // Phase C2: composite macro blocks (grounded multi-step workflows) — added after the
-          // fresh-removal below so they aren't wiped by removeMacrosBySource.
-          macroDefs = imp.macrosToRegistry(librarySpec, cdata.macros || []);
-          macroCount = macroDefs.length;
-          setAiThoughts([...(cdata.thoughts || []),
-            `Curated ${mapped.specs.length} of ${librarySpec.entries.length} entries${macroCount ? ` (+${macroCount} macro workflow${macroCount > 1 ? 's' : ''})` : ''} for: ${purpose.trim()}`,
-            `Add this import to run the blocks: ${mapped.importStmt}`]);
-        }
-      } else {
-        mapped = imp.librarySpecToRegistrySpecs(librarySpec);
-        setAiThoughts([
-          `Introspected ${librarySpec.module} → ${librarySpec.entries.length} API entries${data.cached ? ' (cached)' : ''}.`,
-          `Alias "${mapped.alias}" — add this import to run the blocks: ${mapped.importStmt}`,
-          `Mapping ${mapped.specs.length} blocks into the Library palette…`,
-        ]);
-      }
-
-      // Fresh registration: replace this library's prior blocks + macros so a re-run's labels/
-      // groups/macros win (not shadowed by first-spec). Done here — after the curation network
-      // round-trip — so the old palette stays visible during the wait, then swaps atomically.
-      const removedTypes = reg.removeModules(imp.libraryModules(librarySpec));
-      reg.removeMacrosBySource(librarySpec.module);
-
-      const registered = [];
-      let rejected = 0;
-      for (const spec of mapped.specs) {
-        const res = reg.registerLibBlock(spec);
-        if (!res.ok) { rejected++; continue; }
-        const stored = reg.getLibSpec(res.type) || spec;
-        registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames, colour: stored.colour });
-      }
-      for (const md of macroDefs) reg.addMacro(md);
-      reg.persist();
-      setInstalledBlocks(prev => {
-        const drop = new Set([...removedTypes, ...registered.map(r => r.type)]);
-        return [...prev.filter(p => !drop.has(p.type)), ...registered];
-      });
+      const { mapped, registered, rejected } = registerFullLibrary(librarySpec);
+      setAiThoughts([
+        `Introspected ${librarySpec.module} → ${librarySpec.entries.length} API entries${data.cached ? ' (cached)' : ''}.`,
+        `Alias "${mapped.alias}" — add this import to run the blocks: ${mapped.importStmt}`,
+        `Added ${registered.length} blocks (command + value forms) to the "${librarySpec.module}" palette tab.`,
+      ]);
       const addedImport = registered.length ? ensureLibraryImportBlock(librarySpec.module, mapped.alias) : false;
-      const tag = wantCurate ? 'Curate' : 'Blockify';
-      setLogs(prev => [...prev, `[${tag}] ✅ ${registered.length} block(s)${macroCount ? ` + ${macroCount} macro(s)` : ''} from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. ${addedImport ? 'Added import block' : 'Import'}: ${mapped.importStmt}`]);
+      refreshToolboxNow();
+      setLogs((prev) => [...prev, `[Blockify] ✅ ${registered.length} block(s) from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. ${addedImport ? 'Added import block' : 'Import'}: ${mapped.importStmt}`]);
     } catch (err) {
       console.error(err);
-      setLogs(prev => [...prev, `[Blockify Error] ${err.message}`]);
+      setLogs((prev) => [...prev, `[Blockify Error] ${err.message}`]);
+    } finally {
+      setIsAbstracting(false);
+    }
+  };
+
+  // Curate: full-blockify the library (so every block stays available) AND add a SEPARATE, small
+  // purpose-driven tab — a VIEW over those blocks that the AI picks for the stated goal. The full
+  // tab is never wiped; the curated tab shows just a handful, grouped. Falls back gracefully (full
+  // tab only) if the AI backend is unreachable.
+  const handleCurateLibrary = async (moduleName, purpose) => {
+    const mod = (moduleName || '').trim();
+    const want = (purpose || '').trim();
+    if (!mod || !want) return;
+    const reg = window.BlockPyLibRegistry;
+    const imp = window.BlockPyLibImport;
+    setIsAbstracting(true);
+    setAiThoughts([]);
+    setLogs((prev) => [...prev, `[Curate] Introspecting "${mod}", then asking the AI to pick blocks for: "${want}"…`]);
+    try {
+      const data = await introspectModule(mod);
+      if (!data) return;
+      const librarySpec = data.spec;
+      // Full library first (idempotent) so the curated view's types exist and the full tab stays.
+      const { mapped } = registerFullLibrary(librarySpec);
+
+      let cres = null;
+      try {
+        cres = await fetch('/api/abstract-library', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ spec: librarySpec, purpose: want }),
+        });
+      } catch (_) { cres = null; }
+      let cdata = null;
+      if (cres && cres.ok) { try { cdata = await cres.json(); } catch (_) { cdata = null; } }
+      if (!cres || !cres.ok || !cdata || !cdata.success) {
+        const why = !cres ? 'backend unreachable' : (!cres.ok ? `backend ${cres.status}` : ((cdata && cdata.error) || 'AI failed'));
+        setLogs((prev) => [...prev, `[Curate] ${why} — the full "${mod}" tab is available; no curated tab added.`]);
+        refreshToolboxNow();
+        return;
+      }
+      // Map the AI's selection to EXISTING block types (both forms per entry); skip unknown refs.
+      const cur = imp.curationToRegistrySpecs(librarySpec, cdata.selected || []);
+      const items = [];
+      for (const s of cur.specs) {
+        const type = reg.blockType(s);
+        if (reg.getLibSpec(type)) items.push({ type, label: s.title, group: s.group || '' });
+      }
+      const macros = imp.macrosToRegistry(librarySpec, cdata.macros || []);
+      const key = `${librarySpec.module} · ${want}`.slice(0, 60);
+      const res = reg.addCuration({ key, label: want, lib: librarySpec.module, items, macros });
+      if (!res.ok) {
+        setLogs((prev) => [...prev, `[Curate] AI returned no usable blocks for "${want}" — the full "${mod}" tab is available.`]);
+        refreshToolboxNow();
+        return;
+      }
+      ensureLibraryImportBlock(librarySpec.module, mapped.alias);
+      refreshToolboxNow();
+      setAiThoughts([...(cdata.thoughts || []),
+        `Curated ${items.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} into a new tab "★ ${want}".`,
+        `Add this import to run the blocks: ${mapped.importStmt}`]);
+      setLogs((prev) => [...prev, `[Curate] ✅ New tab "★ ${want}" — ${items.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} for "${mod}". The full library tab is still available.`]);
+    } catch (err) {
+      console.error(err);
+      setLogs((prev) => [...prev, `[Curate Error] ${err.message}`]);
     } finally {
       setIsAbstracting(false);
     }
@@ -1051,16 +1009,13 @@ for i in range(4):
               {activeAuxTab === 'ai' && (
                 <div className="ai-tab-scroll">
                   <LibraryManager
-                    onAbstract={handleAbstractLibrary}
                     onBlockify={handleBlockifyLibrary}
-                    onPipInstall={handlePipInstall}
+                    onCurate={handleCurateLibrary}
                     onRemoveLibrary={handleRemoveLibrary}
                     onClearLibraries={handleClearLibraries}
                     installedBlocks={installedBlocks}
                     aiThoughts={aiThoughts}
                     isAbstracting={isAbstracting}
-                    pyodideReady={pyodideReady}
-                    pyodideLoading={pyodideLoading}
                     pipPkg={pipPkg}
                     onPipPkgChange={setPipPkg}
                     onPipInstallShell={handlePipInstallShell}

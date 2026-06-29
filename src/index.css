@@ -1837,6 +1837,8 @@ select:focus, .pip-input:focus {
 .lib-row-name { flex: 1; min-width: 0; font-weight: 500; color: var(--text-primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lib-row-name i { color: var(--accent-teal); margin-right: 5px; }
+.lib-row-curated { border-color: var(--accent-coral, #e8845b); background: rgba(232, 132, 91, 0.07); }
+.lib-row-curated .lib-row-name i { color: var(--accent-coral, #e8845b); }
 .lib-row-count { color: var(--text-muted); font-size: 0.72rem; white-space: nowrap; }
 .lib-row-builtin {
   font-size: 0.66rem; color: var(--text-muted); padding: 2px 6px;

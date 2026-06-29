@@ -90,9 +90,12 @@ test('curation: selects a grounded subset, applies friendly labels, keeps call s
   ];
   const out = imp.curationToRegistrySpecs(SPEC, selected);
   expect(out.dropped).toEqual(['PIL.Image.NOT_REAL']);
-  expect(out.specs.length).toBe(2);
+  // 2 valid refs, each emitted as BOTH a value (reporter) and a command (statement) form.
+  expect(out.specs.length).toBe(4);
+  expect(out.specs.filter((s) => s.hasOutput).length).toBe(2);
+  expect(out.specs.filter((s) => !s.hasOutput).length).toBe(2);
 
-  const blend = out.specs.find((s) => s.func === 'blend');
+  const blend = out.specs.find((s) => s.func === 'blend');   // reporter form (listed first)
   expect(blend).toMatchObject({ module: 'Image', func: 'blend', title: '두 이미지 블렌드', group: '합성' });
   expect(blend.argNames).toEqual(['im1', 'im2', 'alpha']);   // signature from introspection, not the LLM
 
