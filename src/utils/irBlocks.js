@@ -4,6 +4,13 @@
  */
 
 const Blockly = (typeof window !== 'undefined' && window.Blockly);
+
+// MakeCode-style +/- buttons for ir_call's argument list (white-circle minus/plus glyphs + a "+kw"
+// pill). Inline data-URIs so no asset pipeline is needed. Module scope so every ir block def sees them.
+const ARITY_MINUS_SVG = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCI+PGNpcmNsZSBjeD0iOSIgY3k9IjkiIHI9IjgiIGZpbGw9IiNmZmYiIHN0cm9rZT0iI2NjYyIvPjxyZWN0IHg9IjQuNSIgeT0iOCIgd2lkdGg9IjkiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiM1NzVFNzUiLz48L3N2Zz4=';
+const ARITY_PLUS_SVG = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCI+PGNpcmNsZSBjeD0iOSIgY3k9IjkiIHI9IjgiIGZpbGw9IiNmZmYiIHN0cm9rZT0iI2NjYyIvPjxyZWN0IHg9IjQuNSIgeT0iOCIgd2lkdGg9IjkiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiM1NzVFNzUiLz48cmVjdCB4PSI4IiB5PSI0LjUiIHdpZHRoPSIyIiBoZWlnaHQ9IjkiIHJ4PSIxIiBmaWxsPSIjNTc1RTc1Ii8+PC9zdmc+';
+const ARITY_KW_SVG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="26" height="16"><rect x="0.5" y="0.5" width="25" height="15" rx="7.5" fill="#fff" stroke="#ccc"/><text x="13" y="11.5" font-size="9" font-family="sans-serif" text-anchor="middle" fill="#575E75">+kw</text></svg>');
+
 if (Blockly) {
   Blockly.Blocks['ir_name'] = {
     init() {
@@ -420,26 +427,89 @@ if (Blockly) {
       } else {
         this.appendValueInput('FUNC');
       }
-      // No args/kwargs -> render `()`; otherwise open on the first arg/kw and always CLOSE with `)`.
+      // Positional slots carry the introspected parameter name (x, y, …) for a known library call;
+      // each keyword slot has an EDITABLE name field bound to kw_ so the user can type `verbose=`.
+      const params = lib ? lib.params : null;
+      const self = this;
       if (this.nargs_ === 0 && this.kw_.length === 0) {
         this.appendDummyInput('CLOSE').appendField('()');
-        this.setColour(lib ? lib.colour : '#6a8a5b');
-        return;
+      } else {
+        for (let t = 0; t < this.nargs_; t++) {
+          const inp = this.appendValueInput('ARG' + t).appendField(t === 0 ? '(' : ',');
+          if (params && params[t]) inp.appendField(String(params[t]));
+        }
+        for (let t = 0; t < this.kw_.length; t++) {
+          const name = this.kw_[t];
+          const lead = (t === 0 && this.nargs_ === 0) ? '(' : ',';
+          if (name === null || name === undefined) {
+            this.appendValueInput('KW' + t).appendField(lead + '**');
+          } else {
+            const idx = t;
+            const f = new Blockly.FieldTextInput(String(name), (v) => { self.kw_[idx] = v; return v; });
+            this.appendValueInput('KW' + t).appendField(lead).appendField(f, 'KWNAME' + t).appendField('=');
+          }
+        }
+        this.appendDummyInput('CLOSE').appendField(')');
       }
-      // For a known library call, positional slots carry the introspected parameter name (x, y, …);
-      // for methods the receiver is params[0]-less, so the t-th positional arg is params[t].
-      const params = lib ? lib.params : null;
-      for (let t = 0; t < this.nargs_; t++) {
-        const inp = this.appendValueInput('ARG' + t).appendField(t === 0 ? '(' : ',');
-        if (params && params[t]) inp.appendField(String(params[t]));
-      }
-      for (let t = 0; t < this.kw_.length; t++) {
-        const name = this.kw_[t];
-        const label = (name === null || name === undefined) ? '**' : name + '=';
-        this.appendValueInput('KW' + t).appendField((t === 0 && this.nargs_ === 0) ? '(' + label : ',' + label);
-      }
-      this.appendDummyInput('CLOSE').appendField(')');
+      this.appendCallButtons_();
       this.setColour(lib ? lib.colour : '#6a8a5b');
+    },
+    // ── interactive argument editing: [−] [+] [+kw] on the trailing input ───────────
+    appendCallButtons_() {
+      const close = this.getInput('CLOSE');
+      if (!close || !Blockly.FieldImage) return;
+      if (this.nargs_ + this.kw_.length > 0) {
+        close.appendField(new Blockly.FieldImage(ARITY_MINUS_SVG, 16, 16, '−', function () {
+          const b = this.getSourceBlock && this.getSourceBlock(); if (b) b.changeArgs_(-1);
+        }), 'BTN_MINUS');
+      }
+      close.appendField(new Blockly.FieldImage(ARITY_PLUS_SVG, 16, 16, '+', function () {
+        const b = this.getSourceBlock && this.getSourceBlock(); if (b) b.changeArgs_(1);
+      }), 'BTN_PLUS');
+      close.appendField(new Blockly.FieldImage(ARITY_KW_SVG, 26, 16, '+kw', function () {
+        const b = this.getSourceBlock && this.getSourceBlock(); if (b) b.addKw_();
+      }), 'BTN_KW');
+    },
+    changeArgs_(delta) {
+      if (delta < 0) {
+        if (this.kw_.length > 0) this.kw_ = this.kw_.slice(0, -1);  // remove a keyword before a positional
+        else if (this.nargs_ > 0) this.nargs_ -= 1;
+        else return;
+      } else {
+        this.nargs_ += 1;
+      }
+      this.reshapePreserving_();
+    },
+    addKw_() {
+      this.kw_ = this.kw_.concat(['name']);
+      this.reshapePreserving_();
+    },
+    // Rebuild the shape while keeping user-attached blocks; new empty value slots get an ir_name shadow.
+    reshapePreserving_() {
+      const ev = Blockly.Events;
+      const prevGroup = (ev && ev.getGroup && ev.getGroup()) || false;
+      if (ev && ev.setGroup) ev.setGroup(true);
+      const saved = {};
+      for (const input of this.inputList) {
+        if (input.connection && input.connection.targetConnection) {
+          const tb = input.connection.targetBlock();
+          if (tb && !tb.isShadow()) saved[input.name] = input.connection.targetConnection;   // keep real children only
+        }
+      }
+      this.updateShape_();
+      for (const nm in saved) {
+        const input = this.getInput(nm);
+        if (input && input.connection && !input.connection.targetConnection) {
+          try { input.connection.connect(saved[nm]); } catch (e) { /* slot gone */ }
+        }
+      }
+      for (const input of this.inputList) {
+        if (input.connection && !input.connection.targetConnection && /^(ARG|KW)\d+$/.test(input.name)) {
+          try { input.connection.setShadowState({ type: 'ir_name', fields: { ID: 'arg' } }); } catch (e) { /* */ }
+        }
+      }
+      if (this.rendered && typeof this.render === 'function') this.render();
+      if (ev && ev.setGroup) ev.setGroup(prevGroup);
     },
   };
 }
