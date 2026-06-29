@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 
 export default function LibraryManager({
   onBlockify,
@@ -23,6 +23,31 @@ export default function LibraryManager({
   const [blockifyMod, setBlockifyMod] = useState('pydobot');
   const [curateMod, setCurateMod] = useState('');
   const [curatePurpose, setCuratePurpose] = useState('');
+
+  // AI key config (Curate needs MiniMax). Status comes from the backend; raw keys never returned.
+  const [aiCfg, setAiCfg] = useState({ configured: false, count: 0, masked: [], configPath: '' });
+  const [keyInput, setKeyInput] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
+  const [keyMsg, setKeyMsg] = useState('');
+  const refreshAiCfg = async () => {
+    try { const r = await fetch('/api/ai-config'); if (r.ok) setAiCfg(await r.json()); } catch (_) { /* backend down */ }
+  };
+  useEffect(() => { refreshAiCfg(); }, []);
+  const saveKey = async () => {
+    const raw = keyInput.trim();
+    if (!raw) return;
+    setSavingKey(true); setKeyMsg('');
+    try {
+      const keys = raw.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);   // allow several keys
+      const r = await fetch('/api/ai-config', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys }),
+      });
+      const d = await r.json().catch(() => null);
+      if (r.ok && d && d.success) { setKeyInput(''); setKeyMsg(`✅ ${d.count} key(s) saved`); await refreshAiCfg(); }
+      else { setKeyMsg(`⚠️ ${(d && d.error) || `save failed (${r.status})`}`); }
+    } catch (e) { setKeyMsg(`⚠️ ${e.message} — is the backend running?`); }
+    finally { setSavingKey(false); }
+  };
 
   const handleBlockifyClick = () => {
     if (onBlockify && blockifyMod.trim()) onBlockify(blockifyMod.trim());
@@ -150,7 +175,34 @@ export default function LibraryManager({
               {isAbstracting ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>} Curate
             </button>
           </form>
-          <small className="form-hint">Keeps the full library tab and adds a separate <b>★ curated</b> tab — the AI picks just the blocks (grouped) needed for that goal. Needs the AI backend.</small>
+          <small className="form-hint">Keeps the full library tab and adds a separate <b>★ curated</b> tab — the AI picks just the blocks (grouped) needed for that goal. Needs an AI key (below).</small>
+
+          {/* AI key — saved per-machine (NOT bundled into the build) */}
+          <div className="ai-key-box">
+            <div className="ai-key-status">
+              <i className={`fa-solid ${aiCfg.configured ? 'fa-key icon-cyan' : 'fa-triangle-exclamation'}`}></i>
+              {aiCfg.configured
+                ? <span>AI key set — {aiCfg.count} key{aiCfg.count !== 1 ? 's' : ''} <code>{aiCfg.masked.join(', ')}</code></span>
+                : <span>No AI key yet — Curate is disabled until you add one.</span>}
+            </div>
+            <form className="pip-form" onSubmit={(e) => { e.preventDefault(); saveKey(); }}>
+              <input
+                className="pip-input"
+                type="password"
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                placeholder={aiCfg.configured ? 'replace key… (paste new)' : 'paste MiniMax API key (several: comma/newline)'}
+                autoComplete="off"
+              />
+              <button type="submit" className="btn btn-secondary btn-sm" disabled={savingKey || !keyInput.trim()}>
+                {savingKey ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-floppy-disk"></i>} Save
+              </button>
+            </form>
+            <small className="form-hint">
+              Stored only on this PC{aiCfg.configPath ? <> (<code>{aiCfg.configPath}</code>)</> : ''} — never committed or bundled into the .exe.
+              {keyMsg ? <> · <b>{keyMsg}</b></> : null}
+            </small>
+          </div>
         </div>
 
         {/* AI thoughts */}

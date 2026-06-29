@@ -125,18 +125,49 @@ function seedStarterFile() {
 }
 
 // ─── MiniMax API Key Pool (Round-Robin) ───────────────────────────────────────
-const MINIMAX_KEYS = [
-  process.env.MINIMAX1,
-  process.env.MINIMAX2,
-  process.env.MINIMAX3,
-  process.env.MINIMAX4
-].filter(Boolean);
+// Keys come from (in order): the dev .env (MINIMAX1~4), a writable per-machine config the in-app
+// Settings panel saves (BLOCKPY_CONFIG, set by Electron to userData), and an optional read-only
+// config you can pre-seed next to the .exe (BLOCKPY_CONFIG_RO). NOTHING is baked into the build —
+// a distributed .exe ships with zero keys, so a key is never extractable from the binary.
+let MINIMAX_KEYS = [];
 
-if (MINIMAX_KEYS.length === 0) {
-  console.error('[MiniMax] ⚠️  No API keys found in .env (MINIMAX1~MINIMAX4). AI endpoints will be unavailable.');
+// The single writable config the Settings panel POSTs to. Electron points this at userData; dev
+// falls back to a gitignored file in the cwd.
+function primaryConfigPath() {
+  return process.env.BLOCKPY_CONFIG || path.join(process.cwd(), 'blockpy-config.json');
+}
+
+// All config files we READ keys from (writable primary + optional alongside-exe read-only seed).
+function configPaths() {
+  const out = [primaryConfigPath()];
+  if (process.env.BLOCKPY_CONFIG_RO) out.push(process.env.BLOCKPY_CONFIG_RO);
+  return out;
+}
+
+// A config file is JSON: { "keys": ["sk-...", ...] } (also accepts MINIMAX1..4 keys). Missing/bad → [].
+function keysFromFile(p) {
+  try {
+    if (!p || !fs.existsSync(p)) return [];
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    if (Array.isArray(raw.keys)) return raw.keys.filter(Boolean);
+    return [raw.MINIMAX1, raw.MINIMAX2, raw.MINIMAX3, raw.MINIMAX4].filter(Boolean);
+  } catch (_) { return []; }
 }
 
 let keyIndex = 0;
+function loadKeys() {
+  const envKeys = [process.env.MINIMAX1, process.env.MINIMAX2, process.env.MINIMAX3, process.env.MINIMAX4].filter(Boolean);
+  const fileKeys = configPaths().flatMap(keysFromFile);
+  MINIMAX_KEYS = [...new Set([...envKeys, ...fileKeys].map((k) => String(k).trim()).filter(Boolean))];
+  keyIndex = 0;
+  return MINIMAX_KEYS;
+}
+loadKeys();
+
+if (MINIMAX_KEYS.length === 0) {
+  console.error('[MiniMax] ⚠️  No API keys yet (env/.env or config). Set one in the app Settings — AI endpoints stay 503 until then.');
+}
+
 function getNextKey() {
   const key = MINIMAX_KEYS[keyIndex % MINIMAX_KEYS.length];
   keyIndex++;
@@ -185,6 +216,35 @@ app.post('/api/desugar', (req, res) => {
   if (!code) return res.status(400).json({ error: 'code is required' });
   const result = BlockPyDesugarer.desugarPythonCode(code);
   res.json(result);
+});
+
+// ─── AI key config (in-app Settings) ─────────────────────────────────────────
+// Local-only (the server binds 127.0.0.1). GET returns STATUS ONLY — raw keys never leave the box,
+// just a masked preview. POST saves keys to the per-machine config file and reloads the pool.
+app.get('/api/ai-config', (req, res) => {
+  res.json({
+    configured: MINIMAX_KEYS.length > 0,
+    count: MINIMAX_KEYS.length,
+    masked: MINIMAX_KEYS.map((k) => (k.length > 8 ? `${k.slice(0, 4)}…${k.slice(-4)}` : '••••')),
+    configPath: primaryConfigPath(),
+    model: MINIMAX_MODEL,
+  });
+});
+
+app.post('/api/ai-config', (req, res) => {
+  const { keys, key } = req.body || {};
+  let list = Array.isArray(keys) ? keys : (key != null ? [key] : null);
+  if (!list) return res.status(400).json({ error: 'provide {keys:[...]} or {key:"..."}' });
+  list = list.map((s) => String(s).trim()).filter(Boolean).slice(0, 8);   // cap the pool
+  const p = primaryConfigPath();
+  try {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({ keys: list }, null, 2), 'utf8');
+  } catch (e) {
+    return res.status(500).json({ error: `could not write config: ${e.message}` });
+  }
+  loadKeys();
+  res.json({ success: true, configured: MINIMAX_KEYS.length > 0, count: MINIMAX_KEYS.length, configPath: p });
 });
 
 // ─── 2. AI Normalize: MiniMax rewrites Python into block-friendly form ────────

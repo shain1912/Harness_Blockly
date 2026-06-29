@@ -1839,6 +1839,10 @@ select:focus, .pip-input:focus {
 .lib-row-name i { color: var(--accent-teal); margin-right: 5px; }
 .lib-row-curated { border-color: var(--accent-coral, #e8845b); background: rgba(232, 132, 91, 0.07); }
 .lib-row-curated .lib-row-name i { color: var(--accent-coral, #e8845b); }
+.ai-key-box { margin-top: 8px; padding: 8px; border: 1px dashed var(--hairline); border-radius: 7px; background: var(--surface-soft); }
+.ai-key-status { display: flex; align-items: center; gap: 6px; font-size: 0.74rem; color: var(--text-secondary); margin-bottom: 6px; }
+.ai-key-status code { font-size: 0.7rem; color: var(--text-muted); }
+.ai-key-status .fa-triangle-exclamation { color: #e8a23c; }
 .lib-row-count { color: var(--text-muted); font-size: 0.72rem; white-space: nowrap; }
 .lib-row-builtin {
   font-size: 0.66rem; color: var(--text-muted); padding: 2px 6px;

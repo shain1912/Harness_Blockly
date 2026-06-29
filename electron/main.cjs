@@ -31,6 +31,18 @@ if (fs.existsSync(BUNDLED_PY)) {
   console.log('[python] bundled runtime not found — falling back to system python');
 }
 
+// AI key config (option A): the in-app Settings panel saves the MiniMax key to a per-machine,
+// per-user file — NOT bundled into the .exe (a shipped binary carries zero keys). Also read an
+// optional pre-seed file placed next to the executable, so a machine can be configured without UI.
+// Both set before requiring server.js, which reads them at module-load.
+if (!process.env.BLOCKPY_CONFIG) {
+  process.env.BLOCKPY_CONFIG = path.join(app.getPath('userData'), 'blockpy-config.json');
+}
+if (!process.env.BLOCKPY_CONFIG_RO) {
+  process.env.BLOCKPY_CONFIG_RO = path.join(path.dirname(process.execPath), 'blockpy-config.json');
+}
+console.log('[ai] key config:', process.env.BLOCKPY_CONFIG);
+
 const { start } = require('../server.js');
 
 let mainWindow = null;
