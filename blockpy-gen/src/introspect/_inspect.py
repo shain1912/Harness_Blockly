@@ -1,4 +1,4 @@
-import importlib, inspect, json, os, re, sys
+import importlib, inspect, json, os, re, sys, enum
 import importlib.metadata as _md
 
 # Running this script by absolute path makes sys.path[0] the script's own dir, not the spawn
@@ -34,6 +34,40 @@ def _returns(fn):
 def _doc(o):
     d = inspect.getdoc(o) or ''
     return (d.strip().split('\n')[0] if d else '')[:200]
+
+_SIMPLE_TYPES = (int, float, complex, bool, str, bytes)
+
+def _short_repr(v):
+    try:
+        r = repr(v)
+    except Exception:
+        return ''
+    return r if len(r) <= 60 else r[:57] + '...'
+
+def _const_type(v):
+    """Python type NAME if v is a surfaceable module constant (simple scalar, small tuple/frozenset of
+    scalars, or enum member); else None. EXACT-type checks (not isinstance) reject numpy/pandas scalars
+    that subclass int/float — we never lower a wrapper object as if it were a plain literal. Enum first
+    (IntEnum is also an int)."""
+    if isinstance(v, enum.Enum):
+        return type(v).__name__
+    t = type(v)
+    if t in _SIMPLE_TYPES:
+        return t.__name__
+    if t in (tuple, frozenset):
+        try:
+            items = list(v)
+        except Exception:
+            return None
+        if len(items) <= 12 and all(type(x) in _SIMPLE_TYPES for x in items):
+            return t.__name__
+    return None
+
+def _prefix_hint(name):
+    """The UPPERCASE token before the first underscore (IMREAD for IMREAD_COLOR) so the UI can group an
+    enum-like family; '' means a singleton constant (math.pi)."""
+    head = name.split('_', 1)[0] if '_' in name else ''
+    return head if (head and head.isupper()) else ''
 
 def _clean_import(line):
     line = (line or '').strip()
@@ -144,6 +178,20 @@ def _walk(mod, modname, root, public, entries, seen, cap, strict):
             seen.add(key)
             entries.append({'kind': 'function', 'name': n, 'module': modname, 'qualName': modname + '.' + n,
                             'params': _params(obj) or [], 'doc': _doc(obj), 'returns': _returns(obj)})
+        elif not inspect.ismodule(obj):
+            # A module-level VALUE (cv2.IMREAD_COLOR, math.pi). Surfaced as a reporter that lowers to the
+            # dotted name — never the literal — so it round-trips. getmembers already fetched obj (no new
+            # attribute access / import side effect).
+            vt = _const_type(obj)
+            if vt is None:
+                continue
+            key = (modname, 'constant', n)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append({'kind': 'constant', 'name': n, 'module': modname, 'qualName': modname + '.' + n,
+                            'valueType': vt, 'valueRepr': _short_repr(obj), 'prefix': _prefix_hint(n),
+                            'params': [], 'returns': True})
 
 def main():
     name = sys.argv[1]
@@ -163,12 +211,36 @@ def main():
     seen = set()
     _walk(mod, name, root, public, entries, seen, HARD_CEIL, strict=False)
     total = len(entries)
-    # When truncating, keep the headline API (module functions + class constructors) over the long
-    # tail of methods, so a giant class (e.g. numpy.ndarray's 800 methods) can't starve common
-    # top-level functions like np.sqrt. Stable sort preserves alphabetical order within each kind.
-    order = {'function': 0, 'class': 1, 'method': 2}
-    entries.sort(key=lambda e: order.get(e['kind'], 3))
-    return {'module': name, 'entries': entries[:max_entries], 'total': total, 'truncated': total > max_entries}
+    return {'module': name, 'entries': _select(entries, max_entries), 'total': total, 'truncated': total > max_entries}
+
+def _select(entries, cap):
+    """Keep ALL module functions + class constructors (the headline API, usually modest), then
+    FAIR-SHARE the remaining budget across methods/constants/properties round-robin so no kind is
+    starved — e.g. cv2 keeps BOTH its methods AND its IMREAD_*/COLOR_* constants, instead of the 2500
+    constants (or 800 methods) crowding the other out. Order within a kind stays as discovered."""
+    head = [e for e in entries if e['kind'] in ('function', 'class')]
+    if len(head) >= cap:
+        return head[:cap]
+    buckets = {}
+    for e in entries:
+        if e['kind'] in ('function', 'class'):
+            continue
+        buckets.setdefault(e['kind'], []).append(e)
+    kinds = [k for k in ('method', 'constant', 'property') if buckets.get(k)]
+    idx = {k: 0 for k in kinds}
+    chosen = []
+    budget = cap - len(head)
+    while budget > 0 and kinds:
+        for k in list(kinds):
+            if budget <= 0:
+                break
+            i = idx[k]
+            chosen.append(buckets[k][i])
+            idx[k] = i + 1
+            budget -= 1
+            if idx[k] >= len(buckets[k]):
+                kinds.remove(k)
+    return head + chosen
 
 # A library can print a banner/log to stdout when imported (e.g. pygame's "Hello from the
 # pygame community"). That text would land in front of our JSON and break JSON.parse on the

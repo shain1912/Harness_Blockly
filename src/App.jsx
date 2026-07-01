@@ -872,12 +872,15 @@ for i in range(4):
       const stored = reg.getLibSpec(res.type) || spec;
       registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames, colour: stored.colour });
     }
+    // Module constants (cv2.IMREAD_COLOR, math.pi) — value reporters, registered alongside the calls.
+    let constCount = 0;
+    if (reg.registerConst) for (const c of (mapped.consts || [])) { if (reg.registerConst(c).ok) constCount++; }
     reg.persist();
     setInstalledBlocks((prev) => {
       const drop = new Set([...removedTypes, ...registered.map((r) => r.type)]);
       return [...prev.filter((p) => !drop.has(p.type)), ...registered];
     });
-    return { mapped, registered, rejected, removedTypes };
+    return { mapped, registered, rejected, removedTypes, constCount };
   };
 
   // After installing a package, blockify the INSTALLED direct dependencies it pulled in (mapped
@@ -913,15 +916,15 @@ for i in range(4):
       const data = await introspectModule(mod);
       if (!data) return;
       const librarySpec = data.spec;
-      const { mapped, registered, rejected } = registerFullLibrary(librarySpec);
+      const { mapped, registered, rejected, constCount } = registerFullLibrary(librarySpec);
       setAiThoughts([
         `Introspected ${librarySpec.module} → ${librarySpec.entries.length} API entries${data.cached ? ' (cached)' : ''}.`,
         `Alias "${mapped.alias}" — add this import to run the blocks: ${mapped.importStmt}`,
-        `Added ${registered.length} blocks (command + value forms) to the "${librarySpec.module}" palette tab.`,
+        `Added ${registered.length} blocks (command + value forms)${constCount ? ` + ${constCount} constant(s)` : ''} to the "${librarySpec.module}" palette tab.`,
       ]);
-      const addedImport = registered.length ? ensureLibraryImportBlock(librarySpec.module, mapped.alias) : false;
+      const addedImport = (registered.length || constCount) ? ensureLibraryImportBlock(librarySpec.module, mapped.alias) : false;
       refreshToolboxNow();
-      setLogs((prev) => [...prev, `[Blockify] ✅ ${registered.length} block(s) from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. ${addedImport ? 'Added import block' : 'Import'}: ${mapped.importStmt}`]);
+      setLogs((prev) => [...prev, `[Blockify] ✅ ${registered.length} block(s)${constCount ? ` + ${constCount} constant(s)` : ''} from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. ${addedImport ? 'Added import block' : 'Import'}: ${mapped.importStmt}`]);
       // Honest truncation notice: a huge library (numpy ≈ 3500 API entries) is capped, not silently
       // trimmed — tell the user how many were left out and how to get a focused subset.
       if (librarySpec.truncated && librarySpec.total) {

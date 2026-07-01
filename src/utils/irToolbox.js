@@ -227,6 +227,28 @@ function typeBlockEntry(reg, type) {
   return libCallEntry(reg, type);
 }
 
+// A module constant renders as a pre-filled ir_attribute{dotted} reporter (lowers to the exact dotted
+// name — lossless, no new block type). Build the library's "Constants" sub-category, grouping a shared
+// UPPERCASE prefix family (IMREAD_*, COLOR_*) into its own nested sub-category so a flag-heavy library
+// (cv2 has thousands) stays navigable; singletons (math.pi) and lone-prefix consts sit at the top.
+function constEntry(c) { return { kind: 'block', type: 'ir_attribute', extraState: { dotted: c.dotted } }; }
+function constSubcategory(consts) {
+  if (!consts || !consts.length) return null;
+  const byPrefix = new Map();
+  const singles = [];
+  for (const c of consts) {
+    if (c.prefix) { if (!byPrefix.has(c.prefix)) byPrefix.set(c.prefix, []); byPrefix.get(c.prefix).push(c); }
+    else singles.push(c);
+  }
+  const contents = [];
+  for (const [p, list] of [...byPrefix].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (list.length >= 2) contents.push({ kind: 'category', name: p, colour: '#00897b', contents: list.map(constEntry) });
+    else singles.push(...list);                          // a lone prefixed const isn't worth its own sub-category
+  }
+  for (const c of singles.sort((a, b) => a.name.localeCompare(b.name))) contents.push(constEntry(c));
+  return contents.length ? { kind: 'category', name: 'Constants', colour: '#00897b', contents } : null;
+}
+
 function libraryCategories() {
   const reg = (typeof window !== 'undefined' ? window : global).BlockPyLibRegistry;
   if (!reg || typeof reg.listLibBlocks !== 'function') return [];
@@ -254,9 +276,17 @@ function libraryCategories() {
     macrosByLib.get(k).push({ kind: 'block', ...m.block });
   });
 
+  const constsByLib = new Map();      // libKey -> [const records]
+  ((typeof reg.listConsts === 'function' ? reg.listConsts() : []) || []).forEach((c) => {
+    const k = c.lib || c.module || 'Library';
+    if (!constsByLib.has(k)) constsByLib.set(k, []);
+    constsByLib.get(k).push(c);
+  });
+
   const cats = [];
   for (const [libKey, L] of byLib) {
     const macroEntries = macrosByLib.get(libKey) || [];
+    const constCat = constSubcategory(constsByLib.get(libKey));
     let contents;
     if (!L.anyGroup && !macroEntries.length) {
       contents = [...L.groups.values()].flat();                         // flat library
@@ -266,11 +296,18 @@ function libraryCategories() {
       if (L.groups.has('') && L.groups.get('').length) contents.push({ kind: 'category', name: 'Other', colour: '#009688', contents: L.groups.get('') });
       if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: macroEntries });
     }
+    if (constCat) contents = [...contents, constCat];                   // Constants sub-category after the calls
     cats.push({ kind: 'category', name: libKey, colour: '#009688', contents });
   }
   // libraries whose curation produced only macros (no plain blocks)
   for (const [libKey, entries] of macrosByLib) {
     if (!byLib.has(libKey)) cats.push({ kind: 'category', name: libKey, colour: '#009688', contents: [{ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: entries }] });
+  }
+  // libraries that produced ONLY constants (e.g. a constants-only module) still get a tab
+  for (const [libKey, consts] of constsByLib) {
+    if (cats.some((c) => c.name === libKey)) continue;
+    const constCat = constSubcategory(consts);
+    if (constCat) cats.push({ kind: 'category', name: libKey, colour: '#009688', contents: [constCat] });
   }
 
   // Curated tabs (Phase C3): one extra category per curation, a purpose-driven subset that references

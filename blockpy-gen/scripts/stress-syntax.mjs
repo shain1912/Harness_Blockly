@@ -28,8 +28,10 @@ for (const mod of MODULES) {
   const spec = await introspectModule(mod, { maxEntries: 500 });
   const B = makeBlockly();
   const { types } = defineBlocks(B, spec);
-  const step = Math.max(1, Math.floor(spec.entries.length / SAMPLE));
-  for (let i = 0; i < spec.entries.length; i += step) {
+  // defineBlocks skips VALUE_KINDS (constants/properties), so `types` holds only call blocks — sample
+  // over `types` directly instead of spec.entries (which now includes non-block value entries).
+  const step = Math.max(1, Math.floor(types.length / SAMPLE));
+  for (let i = 0; i < types.length; i += step) {
     const t = types[i];
     const inputs = shapeOf(B, t);
     const out = B.Python.forBlock[t]({}, gen(inputs));

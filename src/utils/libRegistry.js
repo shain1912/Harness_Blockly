@@ -15,10 +15,16 @@ const MACROS = new Map();                 // macro name -> { name, label, group,
 // block type (lib_<module>_<func>[_stmt]) is unique in SPECS — so the curated tab references the
 // full library's existing types. key -> { key, label, lib, items:[{type,label,group}], macros:[…] }.
 const CURATIONS = new Map();
+// A module CONSTANT is a VALUE, not a call: keyed by its dotted reference (cv2.IMREAD_COLOR). It
+// renders as a pre-filled ir_attribute{dotted} reporter that lowers to exactly that dotted name, so
+// it round-trips losslessly with no new block type. dotted -> {dotted,name,module,lib,colour,...}.
+const CONSTS = new Map();
 const STORAGE_KEY = 'blockpy.libRegistry.v1';
 const MACRO_STORAGE_KEY = 'blockpy.libRegistry.macros.v1';
 const CURATION_STORAGE_KEY = 'blockpy.libRegistry.curations.v1';
+const CONST_STORAGE_KEY = 'blockpy.libRegistry.consts.v1';
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const CONST_DOTTED = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
 
 function blockType(spec) {
   return `lib_${spec.module || ''}_${spec.func}${spec.hasOutput ? '' : '_stmt'}`;
@@ -164,6 +170,28 @@ function findLibCall(recv, attr) {
   return { isModule: !m.method, params: (m.argNames || []).slice(m.method ? 1 : 0), colour: m.colour || '#009688' };
 }
 
+// ── Module constants (Feature 2): value reporters, not call blocks ────────────────
+// Register a constant by its dotted reference. Idempotent (re-blockify: last wins). Rejected if the
+// dotted path isn't a valid attribute chain (so the ir_attribute{dotted} block always lowers cleanly).
+function registerConst(c) {
+  if (!c || typeof c.dotted !== 'string' || !CONST_DOTTED.test(c.dotted)) return { ok: false, reason: 'const needs a dotted attribute path' };
+  const dot = c.dotted.lastIndexOf('.');
+  const stored = {
+    dotted: c.dotted,
+    name: c.name || c.dotted.slice(dot + 1),
+    module: c.module || c.dotted.slice(0, dot),
+    lib: c.lib || '',
+    colour: c.colour || '#009688',
+    valueType: c.valueType || '',
+    valueRepr: c.valueRepr || '',
+    prefix: c.prefix || '',
+  };
+  CONSTS.set(stored.dotted, stored);
+  return { ok: true, dotted: stored.dotted };
+}
+function findConst(dotted) { return (dotted && CONSTS.get(dotted)) || null; }
+function listConsts() { return [...CONSTS.values()]; }
+
 function listLibBlocks() {
   const byModule = new Map();
   for (const [type, spec] of SPECS) {
@@ -194,6 +222,7 @@ function removeModules(modules) {
     removed.push(type);
     if (B && B.Blocks && B.Blocks[type]) { try { delete B.Blocks[type]; } catch (_) { /* keep going */ } }
   }
+  for (const [d, c] of [...CONSTS]) if (set.has(c.module || '')) CONSTS.delete(d);   // drop this library's constants too (re-blockify replaces them)
   persist();
   return removed;
 }
@@ -238,7 +267,7 @@ function removeCurationsByLib(lib) {
   persistCurations();
 }
 
-function clearAll() { SPECS.clear(); MACROS.clear(); CURATIONS.clear(); }
+function clearAll() { SPECS.clear(); MACROS.clear(); CURATIONS.clear(); CONSTS.clear(); }
 
 // ── Library (toolbox-tab) management ────────────────────────────────────────────
 // A toolbox tab is keyed by `lib` (the source library, e.g. 'PIL.Image') falling back to the
@@ -259,6 +288,13 @@ function listLibraries() {
     const key = m.srcModule || 'Library';
     if (!byLib.has(key)) byLib.set(key, { lib: key, blockCount: 0, userCount: 0, macroCount: 0 });
     byLib.get(key).macroCount++;
+  }
+  for (const c of CONSTS.values()) {                 // a lib with ONLY constants still gets a tab row
+    const key = _libKey(c);
+    if (!byLib.has(key)) byLib.set(key, { lib: key, blockCount: 0, userCount: 0, macroCount: 0 });
+    const e = byLib.get(key);
+    e.blockCount++;
+    e.userCount++;
   }
   const rows = [...byLib.values()]
     .map((e) => ({ ...e, builtin: e.userCount === 0 && e.macroCount === 0, curation: false }));
@@ -283,6 +319,7 @@ function removeLibraryByTab(libKey) {
     if (B && B.Blocks && B.Blocks[type]) { try { delete B.Blocks[type]; } catch (_) { /* keep going */ } }
   }
   for (const [name, m] of [...MACROS]) if ((m.srcModule || 'Library') === libKey) MACROS.delete(name);
+  for (const [d, c] of [...CONSTS]) if (_libKey(c) === libKey) CONSTS.delete(d);   // drop this tab's constants
   removeCurationsByLib(libKey);   // removing the source library removes its curated tabs too
   persist();
   return removed;
@@ -300,6 +337,7 @@ function removeAllUserLibraries() {
   }
   MACROS.clear();
   CURATIONS.clear();
+  CONSTS.clear();   // no built-in constants — all are user-added
   persist();
   return removed;
 }
@@ -312,6 +350,15 @@ function persist() {
   } catch (_) { /* non-fatal */ }
   persistMacros();
   persistCurations();
+  persistConsts();
+}
+
+function persistConsts() {
+  try {
+    const ls = (typeof window !== 'undefined') ? window.localStorage : null;
+    if (!ls) return;
+    ls.setItem(CONST_STORAGE_KEY, JSON.stringify([...CONSTS.values()]));
+  } catch (_) { /* non-fatal */ }
 }
 
 function persistCurations() {
@@ -347,8 +394,21 @@ function hydrate() {
     }
     hydrateMacros();
     hydrateCurations();
+    hydrateConsts();
     return out;
   } catch (_) { clearAll(); return []; }
+}
+
+function hydrateConsts() {
+  try {
+    const ls = (typeof window !== 'undefined') ? window.localStorage : null;
+    if (!ls) return [];
+    const raw = ls.getItem(CONST_STORAGE_KEY);
+    const consts = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(consts)) return [];
+    for (const c of consts) registerConst(c);
+    return listConsts();
+  } catch (_) { return []; }
 }
 
 function hydrateCurations() {
@@ -411,5 +471,6 @@ api.BlockPyLibRegistry = {
   removeModules, addMacro, listMacros, removeMacro, removeMacrosBySource, persistMacros, hydrateMacros,
   listLibraries, removeLibraryByTab, removeAllUserLibraries,
   addCuration, listCurations, removeCuration, removeCurationsByLib, persistCurations, hydrateCurations,
+  registerConst, findConst, listConsts, persistConsts, hydrateConsts,
 };
 if (typeof module !== 'undefined') module.exports = api.BlockPyLibRegistry;

@@ -1,4 +1,4 @@
-import { validateSpec } from '../spec.js';
+import { validateSpec, VALUE_KINDS } from '../spec.js';
 import { blockType } from './naming.js';
 import { makeGenerator } from './codegen.js';
 
@@ -9,6 +9,7 @@ export function defineBlocks(Blockly, spec, opts = {}) {
   const colour = opts.colour ?? 230;
   const types = [];
   for (const entry of spec.entries) {
+    if (VALUE_KINDS.has(entry.kind)) continue;   // constants/properties are attribute VALUES, not call blocks (no generator)
     const type = blockType(spec.module, entry);
     if (Blockly && Blockly.Blocks && !Blockly.Blocks[type]) {
       Blockly.Blocks[type] = { init: makeInit(spec.module, entry, colour) };

@@ -273,10 +273,9 @@ if (Blockly) {
     init() {
       this.dotted_ = null;
       this.attr_ = 'attr';
-      this.updateShape_();
+      this.updateShape_();          // updateShape_ also sets the colour (emerald if a recognized library value)
       this.setInputsInline(true);
       this.setOutput(true);
-      this.setColour('#a07a4a');
     },
     // An attribute/method name is a fixed, non-editable label (like a function name) — never an
     // editable text field. A module-rooted chain (cv2.imread) is one whole dotted label; a general
@@ -290,12 +289,22 @@ if (Blockly) {
     updateShape_() {
       if (this.getInput('VALUE')) this.removeInput('VALUE');
       if (this.getInput('ATTRROW')) this.removeInput('ATTRROW');
+      const reg = (typeof window !== 'undefined' ? window : global).BlockPyLibRegistry;
+      let colour = '#a07a4a';
       if (this.dotted_) {
         this.appendDummyInput('ATTRROW').appendField(String(this.dotted_));
+        // A recognized module constant (cv2.IMREAD_COLOR) gets its library colour — the same look the
+        // toolbox palette shows — so a converted constant and a dragged one are visually identical.
+        const c = reg && reg.findConst && reg.findConst(String(this.dotted_));
+        if (c) colour = c.colour || '#009688';
       } else {
         this.appendValueInput('VALUE');
         this.appendDummyInput('ATTRROW').appendField('.' + String(this.attr_));
+        // Feature 1: a recognized class property (name-based) gets its library colour too.
+        const a = reg && reg.findAttr && reg.findAttr(String(this.attr_));
+        if (a) colour = a.colour || '#009688';
       }
+      this.setColour(colour);
     },
   };
   Blockly.Blocks['ir_subscript'] = {

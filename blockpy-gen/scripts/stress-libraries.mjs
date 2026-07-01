@@ -4,7 +4,7 @@
 import { introspectModule } from '../src/introspect/introspect.js';
 import { defineBlocks } from '../src/blocks/define.js';
 import { buildToolbox } from '../src/blocks/toolbox.js';
-import { validateSpec } from '../src/spec.js';
+import { validateSpec, VALUE_KINDS } from '../src/spec.js';
 
 // A fake Blockly whose blocks actually run init() (recording the input shape) so we exercise
 // the real defineBlocks init path, and whose Python generators we can invoke per block.
@@ -73,14 +73,16 @@ for (const mod of MODULES) {
   const tb = buildToolbox(spec);
   row.cats = tb.contents.length;
 
-  // run init() + the generator for every entry
-  for (let i = 0; i < spec.entries.length; i++) {
+  // run init() + the generator for every CALL entry. defineBlocks skips VALUE_KINDS (constants/
+  // properties are not call blocks), so `types` aligns 1:1 with the call entries, not spec.entries.
+  const callEntries = spec.entries.filter((e) => !VALUE_KINDS.has(e.kind));
+  for (let i = 0; i < callEntries.length; i++) {
     const t = types[i];
     let shape;
     try { shape = buildShape(B, t); }
     catch (e) { row.shapeErr++; shapeFail++; continue; }
     // statement/output must match entry.returns
-    const e = spec.entries[i];
+    const e = callEntries[i];
     if (e.returns !== shape.output) { row.note = row.note || `returns/shape mismatch @${e.name}`; }
     try {
       const g = B.Python.forBlock[t];

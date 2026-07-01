@@ -59,6 +59,9 @@ function requiredParamNames(entry) {
 // you don't want the palette doubled — class/value -> reporter, `-> None` -> command.
 function entryToSpec(entry, alias, colour, opts = {}) {
   if (!entry || typeof entry.name !== 'string' || !IMP_IDENT.test(entry.name)) return [];
+  // Value kinds (constant/property) are NOT calls — mapped separately (entryToConst / property path).
+  // Guard here so they never fall through and register as a bogus call block (math.pi() / obj.device()).
+  if (entry.kind === 'constant' || entry.kind === 'property') return [];
   const reqd = requiredParamNames(entry);
 
   let base;
@@ -78,6 +81,25 @@ function entryToSpec(entry, alias, colour, opts = {}) {
   if (entry.returns === false) return [{ ...base, hasOutput: false }];
   if (opts.both === false) return [{ ...base, hasOutput: true }];
   return [{ ...base, hasOutput: true }, { ...base, hasOutput: false }];
+}
+
+// A module CONSTANT entry -> a registry const record. The block is a pre-filled ir_attribute{dotted}
+// reporter that lowers to the EXACT dotted reference (never the literal value), so round-trip is
+// lossless. The receiver alias is the entry's own module leaf (list_ports for a submodule constant,
+// cv2 for a top constant) — matching how the code references it, exactly like functions.
+function entryToConst(entry, alias, colour) {
+  if (!entry || entry.kind !== 'constant' || typeof entry.name !== 'string' || !IMP_IDENT.test(entry.name)) return null;
+  const ownAlias = entryModuleAlias(entry) || alias;
+  if (!IMP_IDENT.test(ownAlias)) return null;
+  return {
+    name: entry.name,
+    module: ownAlias,
+    dotted: `${ownAlias}.${entry.name}`,
+    valueType: entry.valueType || '',
+    valueRepr: entry.valueRepr || '',
+    prefix: entry.prefix || '',
+    colour,
+  };
 }
 
 // The import a user must add for the leaf alias to resolve: dotted -> `from <parent> import <leaf>`,
@@ -121,10 +143,13 @@ function librarySpecToRegistrySpecs(librarySpec, opts = {}) {
   const colour = opts.colour;
   const entries = (librarySpec && librarySpec.entries) || [];
   const specs = [];
+  const consts = [];
   for (const e of entries) {
     for (const s of entryToSpec(e, alias, colour, { both: opts.both })) { s.lib = moduleDotted; specs.push(s); }   // tag source library -> its own toolbox category
+    const c = entryToConst(e, alias, colour);
+    if (c) { c.lib = moduleDotted; consts.push(c); }
   }
-  return { alias, importStmt: importStatement(moduleDotted, alias), specs };
+  return { alias, importStmt: importStatement(moduleDotted, alias), specs, consts };
 }
 
 // The canonical reference for an entry: its qualName when introspection supplied one, else a
@@ -244,5 +269,6 @@ const impApi = (typeof window !== 'undefined' ? window : global);
 impApi.BlockPyLibImport = {
   librarySpecToRegistrySpecs, curationToRegistrySpecs, macrosToRegistry, libraryModules,
   entryQualName, requiredParamNames, importStatement, importBlockJson, argToIr, splitTopArgs,
+  entryToConst, entryModuleAlias,
 };
 if (typeof module !== 'undefined') module.exports = impApi.BlockPyLibImport;
