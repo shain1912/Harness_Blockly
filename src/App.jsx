@@ -11,14 +11,11 @@ import stdlibSpecs from './data/stdlibSpecs.json';
 
 // A pip PACKAGE name is not always the IMPORT name (opencv-python→cv2, pillow→PIL, …). Map the
 // common mismatches; default = the package lowercased with '-' → '_' (pydobot→pydobot, scikit→…).
-const PIP_IMPORT_ALIAS = {
-  'opencv-python': 'cv2', 'opencv-contrib-python': 'cv2', 'opencv-python-headless': 'cv2',
-  'pillow': 'PIL', 'scikit-learn': 'sklearn', 'scikit-image': 'skimage', 'beautifulsoup4': 'bs4',
-  'pyyaml': 'yaml', 'python-dateutil': 'dateutil', 'msgpack-python': 'msgpack', 'attrs': 'attr',
-};
-function pkgToImportName(pkg) {
-  const base = String(pkg).split(/[=<>!~ [@]/)[0].trim().toLowerCase();   // strip version/extra specifiers
-  return PIP_IMPORT_ALIAS[base] || base.replace(/-/g, '_');
+// Strip version/extra specifiers → the bare package name as typed. The backend (/api/blockify →
+// _inspect.py) resolves the real import name from installed metadata (pyserial→serial, pillow→PIL,
+// opencv-python→cv2), so there is NO hardcoded pip→import table here.
+function pkgBaseName(pkg) {
+  return String(pkg).split(/[=<>!~ [@]/)[0].trim();
 }
 
 export default function App() {
@@ -72,6 +69,7 @@ export default function App() {
   const isSyncingFromCodeRef = useRef(0);
   const syncGenRef = useRef(0);   // monotonic id; only the LATEST sync's workspace load is applied
   const blocklySnapshotRef = useRef(null);
+  const autoBlockifiedRef = useRef(new Set());   // dotted submodules already auto-blockified this session (convert-time)
   const associatedPythonRef = useRef('');
   const abstractionEngineRef = useRef(null);
   const shellAbortRef = useRef(null);
@@ -83,6 +81,61 @@ export default function App() {
                           .replace(/\s+/g, ' ')
                           .trim();
     return clean(codeA) === clean(codeB);
+  };
+
+  // Collect the DOTTED submodule paths a program imports, so we can blockify exactly what it uses:
+  //   import a.b.c              → "a.b.c"
+  //   from a.b import c, d      → "a.b.c", "a.b.d"   (only when the source module itself is dotted,
+  //                                                   so `from math import sqrt` is NOT probed)
+  // The imported leaf (list_ports) is the call receiver, so the block lowers to list_ports.comports().
+  const submoduleImportCandidates = (ir) => {
+    const out = [];
+    const seen = new Set();
+    const DOTTED = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
+    const add = (dotted) => {
+      if (!dotted || seen.has(dotted) || !DOTTED.test(dotted)) return;
+      seen.add(dotted); out.push(dotted);
+    };
+    const visit = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(visit); return; }
+      if (node.type === 'Import') {
+        for (const a of node.names || []) add(a && a.name);                       // import a.b.c
+      } else if (node.type === 'ImportFrom') {
+        const mod = node.module || '';
+        if (mod.indexOf('.') >= 0) for (const a of node.names || []) {            // from a.b import c → a.b.c
+          if (a && a.name && a.name !== '*') add(mod + '.' + a.name);
+        }
+      }
+      for (const k in node) { if (k !== 'type') visit(node[k]); }
+    };
+    visit(ir && ir.body);
+    return out;
+  };
+
+  // Convert-time: blockify the exact submodules the code imports so a call like list_ports.comports()
+  // renders as a recognized (emerald, param-labeled) library block on first paint instead of a bare
+  // generic call. Attempted once per module per session; best-effort and SILENT on failure (a probed
+  // candidate may not be a module at all), so it never blocks or spams the normal conversion.
+  const autoBlockifyImports = async (ir) => {
+    const reg = window.BlockPyLibRegistry;
+    if (!reg || !window.BlockPyLibImport) return;
+    const cands = submoduleImportCandidates(ir).filter((c) => !autoBlockifiedRef.current.has(c));
+    if (!cands.length) return;
+    let any = false;
+    for (const cand of cands) {
+      autoBlockifiedRef.current.add(cand);                                        // attempt once, success or not
+      try {
+        const data = await introspectModule(cand, { quiet: true });
+        if (!data || !data.spec) continue;
+        const { registered } = registerFullLibrary(data.spec);
+        if (registered.length) {
+          any = true;
+          setLogs((prev) => [...prev, `[Blockify] ✅ ${registered.length} block(s) from imported submodule "${cand}".`]);
+        }
+      } catch (_) { /* best-effort — never break conversion */ }
+    }
+    if (any) refreshToolboxNow();
   };
 
   // Compile Python to Blockly blocks via the CPython-3.12 ast single-IR pipeline (Pyodide):
@@ -114,6 +167,10 @@ export default function App() {
       if (shouldDesugar && window.BlockPyIrDesugar) {
         ir = window.BlockPyIrDesugar.desugarIr(ir);
       }
+      // Register blocks for any imported submodule (serial.tools.list_ports) BEFORE building blocks,
+      // so ir_call.updateShape_ recognizes list_ports.comports() and paints it styled on first render.
+      await autoBlockifyImports(ir);
+      if (myGen !== syncGenRef.current) return;   // a newer sync started while we awaited the probe
       const blocklyJson = window.BlockPyIR.irToBlockly(ir);
       // Library calls stay as the unified ir_call block; ir_call.updateShape_ styles a registered
       // call emerald with parameter-name labels (same look as the toolbox), so converting from Python
@@ -521,9 +578,12 @@ for i in range(4):
         setLogs((prev) => [...prev, `[pip] Install reported an error — skipping block generation. Fix the package name and retry.`]);
         return;
       }
-      const importName = pkgToImportName(pkg);
-      setLogs((prev) => [...prev, `[pip] Installed. Generating blocks for "${importName}" → toolbox…`]);
-      await handleBlockifyLibrary(importName);
+      const pkgName = pkgBaseName(pkg);
+      setLogs((prev) => [...prev, `[pip] Installed. Generating blocks for "${pkgName}" → toolbox…`]);
+      await handleBlockifyLibrary(pkgName);
+      // Also blockify the installed dependencies pip just pulled in, so transitive libraries
+      // (e.g. pydobot → pyserial) get their own toolbox tabs instead of bare green call blocks.
+      await blockifyDependencies(pkgName);
     } catch (e) {
       setLogs((prev) => [...prev, `[pip] Error: ${e.message}. Make sure the backend is running.`]);
     }
@@ -774,7 +834,7 @@ for i in range(4):
 
   // Introspect a module (/api/blockify, real Python, no AI cost) → { spec, cached }. Logs + returns
   // null on failure. Shared by Blockify (full) and Curate.
-  const introspectModule = async (mod) => {
+  const introspectModule = async (mod, opts = {}) => {
     let response = null;
     try {
       response = await fetch('/api/blockify', {
@@ -784,6 +844,9 @@ for i in range(4):
     let data = null;
     if (response && response.ok) { try { data = await response.json(); } catch (_) { data = null; } }
     if (!response || !response.ok || !data || !data.success || !data.spec) {
+      // Convert-time auto-blockify probes candidate submodules that may not be modules at all
+      // (`from math import sqrt` → "math.sqrt"); a failed probe is expected, so stay silent.
+      if (opts.quiet) return null;
       const why = !response ? 'backend unreachable (is the Express server running?)'
         : (!response.ok ? `backend ${response.status}` : ((data && data.error) || 'introspection failed'));
       setLogs((prev) => [...prev, `[Blockify] ${why} for "${mod}".`]);
@@ -815,6 +878,27 @@ for i in range(4):
       return [...prev.filter((p) => !drop.has(p.type)), ...registered];
     });
     return { mapped, registered, rejected, removedTypes };
+  };
+
+  // After installing a package, blockify the INSTALLED direct dependencies it pulled in (mapped
+  // to their real import names by the backend, e.g. pydobot → pyserial → serial). Capped so a
+  // dependency-heavy package can't flood the toolbox; best-effort (never blocks the main flow).
+  const blockifyDependencies = async (pkgName) => {
+    let deps = [];
+    try {
+      const r = await fetch('/api/deps', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: pkgName }),
+      });
+      if (r.ok) { const d = await r.json(); deps = (d && d.deps) || []; }
+    } catch (_) { /* backend down — skip silently */ }
+    if (!deps.length) return;
+    const CAP = 20;
+    const use = deps.slice(0, CAP);
+    if (deps.length > CAP) setLogs((prev) => [...prev, `[pip] ${deps.length} dependencies found — blockifying the first ${CAP}.`]);
+    setLogs((prev) => [...prev, `[pip] Dependencies of "${pkgName}": ${use.map((d) => d.import).join(', ')} — generating blocks…`]);
+    for (const d of use) {
+      await handleBlockifyLibrary(d.import);
+    }
   };
 
   // Blockify (full): introspect a module and put EVERY API call into its own Library palette tab.

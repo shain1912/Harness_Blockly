@@ -24,6 +24,18 @@
 
 const IMP_IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+// A submodule entry carries its OWN dotted `module` (e.g. serial.tools.list_ports); the receiver
+// alias for its functions/classes is that module's leaf (list_ports) — NOT the top-package alias —
+// so the block lowers to `list_ports.comports(...)`, matching `from serial.tools import list_ports`.
+// Top-level entries carry the top module (leaf === the passed alias), so behavior is unchanged; a
+// hand-built spec entry with no `module` field returns '' and falls back to the passed alias.
+function entryModuleAlias(entry) {
+  const m = (entry && typeof entry.module === 'string') ? entry.module : '';
+  if (!m) return '';
+  const leaf = m.includes('.') ? m.slice(m.lastIndexOf('.') + 1) : m;
+  return IMP_IDENT.test(leaf) ? leaf : '';
+}
+
 // positional/keyword params without a default = the essential, representable signature.
 function requiredParamNames(entry) {
   return (entry.params || [])
@@ -56,8 +68,10 @@ function entryToSpec(entry, alias, colour, opts = {}) {
     if (!IMP_IDENT.test(recv)) return [];
     base = { module: recv, func: entry.name, argNames: [recv, ...reqd], colour, title: `${recv}.${entry.name}` };
   } else {
-    // function or class: module-rooted call under the leaf alias
-    base = { module: alias, func: entry.name, argNames: reqd, colour, title: `${alias}.${entry.name}` };
+    // function or class: module-rooted call under its OWN module's leaf alias (a submodule keeps its
+    // own receiver, e.g. list_ports.comports), falling back to the top-package alias for top entries.
+    const ownAlias = entryModuleAlias(entry) || alias;
+    base = { module: ownAlias, func: entry.name, argNames: reqd, colour, title: `${ownAlias}.${entry.name}` };
   }
 
   if (entry.kind === 'class') return [{ ...base, hasOutput: true }];
@@ -93,7 +107,7 @@ function libraryModules(librarySpec, opts = {}) {
   const mods = new Set();
   for (const e of (librarySpec && librarySpec.entries) || []) {
     if (e && e.kind === 'method') { if (e.owner) mods.add(String(e.owner).toLowerCase()); }
-    else mods.add(alias);
+    else mods.add(entryModuleAlias(e) || alias);   // submodule entries register under their own leaf alias
   }
   return [...mods];
 }

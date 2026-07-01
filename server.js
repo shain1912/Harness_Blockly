@@ -58,24 +58,29 @@ const PYTHON_CMD = process.env.PYTHON_CMD || (process.platform === 'win32' ? 'py
 // /api/run-python and /api/pip-install. BLOCKIFY_ALLOW (comma-separated) optionally restricts
 // which modules may be introspected; unset = allow any (local single-user posture).
 const { pathToFileURL } = require('url');
+// In the packaged Electron app __dirname lives inside app.asar, but blockpy-gen is asarUnpack'd
+// (dynamic import()/spawn of files inside an asar fails). Redirect to the on-disk unpacked copy.
+// In dev __dirname is the repo root, so this is a no-op.
+function genBase() {
+  let base = __dirname;
+  if (base.includes('app.asar') && !base.includes('app.asar.unpacked')) {
+    base = base.replace('app.asar', 'app.asar.unpacked');
+  }
+  return base;
+}
 let _introspectPromise = null;
 function getIntrospect() {
   if (!_introspectPromise) {
-    // In the packaged Electron app __dirname lives inside app.asar, but blockpy-gen is
-    // asarUnpack'd (dynamic ESM import() can't read from inside an asar). Redirect to the
-    // on-disk unpacked copy. In dev __dirname is the repo root, so this is a no-op.
-    let base = __dirname;
-    if (base.includes('app.asar') && !base.includes('app.asar.unpacked')) {
-      base = base.replace('app.asar', 'app.asar.unpacked');
-    }
-    const url = pathToFileURL(path.join(base, 'blockpy-gen', 'src', 'introspect', 'introspect.js')).href;
+    const url = pathToFileURL(path.join(genBase(), 'blockpy-gen', 'src', 'introspect', 'introspect.js')).href;
     _introspectPromise = import(url).then((m) => m.introspectModule);
   }
   return _introspectPromise;
 }
 const BLOCKIFY_ALLOW = (process.env.BLOCKIFY_ALLOW || '').split(',').map((s) => s.trim()).filter(Boolean);
 const _blockifyCache = new Map();
-const MODULE_PATH_RE = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+// Accepts a dotted import path (numpy, PIL.Image) OR a pip distribution name with dashes
+// (opencv-python, scikit-learn) — _inspect.py resolves a distribution name to its real import.
+const MODULE_PATH_RE = /^[A-Za-z0-9_]+([.-][A-Za-z0-9_]+)*$/;
 if (BLOCKIFY_ALLOW.length === 0) {
   console.warn('[blockify] No BLOCKIFY_ALLOW set — /api/blockify will import ANY requested module (executes top-level code). Local single-user use only; set BLOCKIFY_ALLOW=mod1,mod2 to restrict.');
 }
@@ -411,6 +416,27 @@ app.post('/api/blockify', async (req, res) => {
     console.error('[/api/blockify]', e.message);
     res.status(500).json({ success: false, error: String(e.message || e) });
   }
+});
+
+// Installed DIRECT dependencies of a distribution, mapped to import names (pyserial->serial).
+// Lets a `pip install <pkg>` also blockify what it pulled in. Metadata only — no import/AI.
+app.post('/api/deps', (req, res) => {
+  const moduleName = ((req.body && req.body.module) || '').trim();
+  if (!moduleName) return res.status(400).json({ error: 'module is required' });
+  if (!MODULE_PATH_RE.test(moduleName)) return res.status(400).json({ error: 'invalid module name' });
+  const f = path.join(genBase(), 'blockpy-gen', 'src', 'introspect', '_deps.py');
+  let child;
+  try { child = spawn(PYTHON_CMD, [f, moduleName], { env: process.env }); }
+  catch (e) { return res.status(500).json({ error: String(e.message || e) }); }
+  let out = '', err = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { err += d; });
+  child.on('error', (e) => res.status(500).json({ error: String(e.message || e) }));
+  child.on('close', (code) => {
+    if (code !== 0) return res.status(500).json({ error: err.trim() || ('exit ' + code) });
+    try { res.json({ success: true, ...JSON.parse(out) }); }
+    catch (e) { res.status(500).json({ error: 'bad deps output: ' + e.message }); }
+  });
 });
 
 // ─── 3.6 Abstract library by purpose (LLM curation + macros, grounded) ────────
