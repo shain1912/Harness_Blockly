@@ -82,42 +82,51 @@ def _import(name):
             return importlib.import_module(alt), alt
         raise
 
+# Any callable that isn't a class or module = something we can build a call block for. Critically
+# this includes C-level routines (builtin_function_or_method, method_descriptor) and callable
+# objects (e.g. numpy ufuncs like np.add) that `inspect.isfunction` does NOT match — the reason a
+# C-extension library used to expose almost none of its real API as blocks.
+def _is_call(obj):
+    return callable(obj) and not inspect.isclass(obj) and not inspect.ismodule(obj)
+
+def _method_names(cls):
+    """Public callable attributes of a class, INCLUDING C methods. dir()+getattr sees C methods
+    (method_descriptor) that inspect.getmembers(predicate=isfunction) misses; a property returns its
+    descriptor object (not callable) so it's naturally skipped."""
+    out = []
+    for mn in dir(cls):
+        try:
+            mo = getattr(cls, mn)
+        except Exception:
+            continue
+        if _is_call(mo):
+            out.append((mn, mo))
+    return out
+
 # Walk ONE module object's public members into `entries`, each tagged with its own dotted `module`
 # (so a submodule function lowers to <submodule-leaf>.func, matching the code's receiver). `strict`
-# (submodule walks) drops re-exported functions from OTHER packages by __module__ so `serial.tools`
+# (submodule walks) drops re-exported callables from OTHER packages by __module__ so `serial.tools`
 # re-importing `sys`/`os` names doesn't pollute the palette; the top module keeps its old behavior.
+# A callable whose signature can't be read (many C routines) is still emitted with 0 fixed args
+# (the block's [+] button grows them) rather than dropped — coverage over precision.
 def _walk(mod, modname, root, public, entries, seen, cap, strict):
     for n, obj in inspect.getmembers(mod):
         if len(entries) >= cap:
             return
         if not public(n):
             continue
-        if inspect.isfunction(obj) or inspect.isbuiltin(obj):
-            if strict and not (getattr(obj, '__module__', '') or '').startswith(root):
-                continue
-            key = (modname, 'function', n)
-            if key in seen:
-                continue
-            p = _params(obj)
-            if p is not None:
-                seen.add(key)
-                entries.append({'kind': 'function', 'name': n, 'module': modname, 'qualName': modname + '.' + n,
-                                'params': p, 'doc': _doc(obj), 'returns': _returns(obj)})
-        elif inspect.isclass(obj) and (getattr(obj, '__module__', '') or '').startswith(root):
+        if inspect.isclass(obj) and (getattr(obj, '__module__', '') or '').startswith(root):
             key = (modname, 'class', n)
             if key in seen:
                 continue
             seen.add(key)
-            cp = _params(obj.__init__) if hasattr(obj, '__init__') else []
+            cp = _params(obj)                          # signature() on the class reads __init__/__new__/__text_signature__
             entries.append({'kind': 'class', 'name': n, 'module': modname, 'qualName': modname + '.' + n,
                             'params': cp or [], 'doc': _doc(obj), 'returns': True})
-            for mn, mo in inspect.getmembers(obj, predicate=inspect.isfunction):
+            for mn, mo in _method_names(obj):
                 if len(entries) >= cap:
                     return
                 if not public(mn):
-                    continue
-                mp = _params(mo)
-                if mp is None:
                     continue
                 mk = (modname, 'method', n, mn)
                 if mk in seen:
@@ -125,22 +134,41 @@ def _walk(mod, modname, root, public, entries, seen, cap, strict):
                 seen.add(mk)
                 entries.append({'kind': 'method', 'owner': n, 'name': mn, 'module': modname,
                                 'qualName': modname + '.' + n + '.' + mn,
-                                'params': mp, 'doc': _doc(mo), 'returns': _returns(mo)})
+                                'params': _params(mo) or [], 'doc': _doc(mo), 'returns': _returns(mo)})
+        elif _is_call(obj):
+            if strict and not (getattr(obj, '__module__', '') or '').startswith(root):
+                continue
+            key = (modname, 'function', n)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append({'kind': 'function', 'name': n, 'module': modname, 'qualName': modname + '.' + n,
+                            'params': _params(obj) or [], 'doc': _doc(obj), 'returns': _returns(obj)})
 
 def main():
     name = sys.argv[1]
     include_private = '--include-private' in sys.argv
-    max_entries = 200
+    max_entries = 1000
     for a in sys.argv[2:]:
         if a.startswith('--max='):
             max_entries = int(a.split('=', 1)[1])
     mod, name = _import(name)
     root = name.split('.')[0]
     def public(n): return include_private or not n.startswith('_')
+    # Walk up to a hard ceiling ABOVE max_entries so we can report the TRUE size (`total`) instead of
+    # silently truncating — the UI tells the user "showing N of M, use Curate to trim" rather than
+    # pretending a 3000-method library only has 200 blocks. The ceiling just bounds a pathological lib.
+    HARD_CEIL = max(max_entries, 8000)
     entries = []
     seen = set()
-    _walk(mod, name, root, public, entries, seen, max_entries, strict=False)
-    return {'module': name, 'entries': entries[:max_entries]}
+    _walk(mod, name, root, public, entries, seen, HARD_CEIL, strict=False)
+    total = len(entries)
+    # When truncating, keep the headline API (module functions + class constructors) over the long
+    # tail of methods, so a giant class (e.g. numpy.ndarray's 800 methods) can't starve common
+    # top-level functions like np.sqrt. Stable sort preserves alphabetical order within each kind.
+    order = {'function': 0, 'class': 1, 'method': 2}
+    entries.sort(key=lambda e: order.get(e['kind'], 3))
+    return {'module': name, 'entries': entries[:max_entries], 'total': total, 'truncated': total > max_entries}
 
 # A library can print a banner/log to stdout when imported (e.g. pygame's "Hello from the
 # pygame community"). That text would land in front of our JSON and break JSON.parse on the

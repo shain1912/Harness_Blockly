@@ -397,7 +397,7 @@ Rules:
 app.post('/api/blockify', async (req, res) => {
   const moduleName = ((req.body && req.body.module) || '').trim();
   const includePrivate = !!(req.body && req.body.includePrivate);
-  const maxEntries = Math.min(Number((req.body && req.body.maxEntries) || 200) || 200, 500);
+  const maxEntries = Math.min(Number((req.body && req.body.maxEntries) || 1000) || 1000, 3000);
   if (!moduleName) return res.status(400).json({ error: 'module is required' });
   if (!MODULE_PATH_RE.test(moduleName)) return res.status(400).json({ error: 'invalid module name' });
   if (BLOCKIFY_ALLOW.length && !BLOCKIFY_ALLOW.includes(moduleName)) {

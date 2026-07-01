@@ -922,6 +922,11 @@ for i in range(4):
       const addedImport = registered.length ? ensureLibraryImportBlock(librarySpec.module, mapped.alias) : false;
       refreshToolboxNow();
       setLogs((prev) => [...prev, `[Blockify] ✅ ${registered.length} block(s) from "${mod}" added to the Library palette${rejected ? `, ${rejected} skipped` : ''}. ${addedImport ? 'Added import block' : 'Import'}: ${mapped.importStmt}`]);
+      // Honest truncation notice: a huge library (numpy ≈ 3500 API entries) is capped, not silently
+      // trimmed — tell the user how many were left out and how to get a focused subset.
+      if (librarySpec.truncated && librarySpec.total) {
+        setLogs((prev) => [...prev, `[Blockify] ⚠ "${mod}" has ${librarySpec.total} API entries — showing the first ${librarySpec.entries.length}. Use Curate to pick a focused subset.`]);
+      }
     } catch (err) {
       console.error(err);
       setLogs((prev) => [...prev, `[Blockify Error] ${err.message}`]);

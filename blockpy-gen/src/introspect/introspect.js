@@ -7,7 +7,7 @@ const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '_inspect.py');
 
 // Introspect an importable Python module via a real `python` subprocess -> LibrarySpec.
 export function introspectModule(name, opts = {}) {
-  const { python = 'python', maxEntries = 200, includePrivate = false, cwd } = opts;
+  const { python = 'python', maxEntries = 1000, includePrivate = false, cwd } = opts;
   const args = [SCRIPT, name, `--max=${maxEntries}`];
   if (includePrivate) args.push('--include-private');
   return new Promise((resolve, reject) => {
