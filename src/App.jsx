@@ -69,7 +69,9 @@ export default function App() {
   const isSyncingFromCodeRef = useRef(0);
   const syncGenRef = useRef(0);   // monotonic id; only the LATEST sync's workspace load is applied
   const blocklySnapshotRef = useRef(null);
-  const autoBlockifiedRef = useRef(new Set());   // dotted submodules already auto-blockified this session (convert-time)
+  const introspectedSpecsRef = useRef(new Map());  // dotted module -> cached LibrarySpec (or null) this session
+  const pipAttemptedRef = useRef(new Set());        // modules we've already tried to auto-pip-install (once each)
+  const registeredSymRef = useRef(new Set());       // module::kind::owner.name already materialized (convert-time)
   const associatedPythonRef = useRef('');
   const abstractionEngineRef = useRef(null);
   const shellAbortRef = useRef(null);
@@ -83,59 +85,131 @@ export default function App() {
     return clean(codeA) === clean(codeB);
   };
 
-  // Collect the DOTTED submodule paths a program imports, so we can blockify exactly what it uses:
-  //   import a.b.c              → "a.b.c"
-  //   from a.b import c, d      → "a.b.c", "a.b.d"   (only when the source module itself is dotted,
-  //                                                   so `from math import sqrt` is NOT probed)
-  // The imported leaf (list_ports) is the call receiver, so the block lowers to list_ports.comports().
-  const submoduleImportCandidates = (ir) => {
-    const out = [];
-    const seen = new Set();
-    const DOTTED = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
-    const add = (dotted) => {
-      if (!dotted || seen.has(dotted) || !DOTTED.test(dotted)) return;
-      seen.add(dotted); out.push(dotted);
+  // Which library SYMBOLS a program actually references, so Convert can materialize exactly those
+  // (used-symbols-only) into the toolbox in their proper category. Resolves imported module aliases:
+  //   import numpy as np        → np.mean            => module 'numpy',                 attr 'mean'
+  //   import a.b.c              → a.b.c.func         => module 'a.b.c',                 attr 'func'
+  //   from serial.tools import list_ports → list_ports.comports() => module 'serial.tools.list_ports', attr 'comports'
+  //   np.linalg.inv            → module 'numpy.linalg', attr 'inv'  (submodule chains resolve too)
+  // A method/property on a non-module receiver (ser.baudrate) is collected as a bare attr name, later
+  // matched against the referenced libraries' introspected method/property entries. A bare from-imported
+  // symbol (`from math import sqrt; sqrt(x)`) stays a generic block (no module prefix) — a known limit.
+  const referencedSymbols = (ir) => {
+    const IDT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    const alias = new Map();     // local binding -> dotted module
+    const collect = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(collect); return; }
+      if (node.type === 'Import') {
+        for (const a of node.names || []) {
+          if (!a || !a.name) continue;
+          if (a.asname) alias.set(a.asname, a.name);                 // import a.b.c as w -> w -> a.b.c
+          else { const top = a.name.split('.')[0]; alias.set(top, top); }  // import a.b.c binds 'a'; chain resolved below
+        }
+      } else if (node.type === 'ImportFrom') {
+        const mod = node.module || '';
+        for (const a of node.names || []) {
+          if (!a || !a.name || a.name === '*') continue;
+          alias.set(a.asname || a.name, mod ? mod + '.' + a.name : a.name);   // from a.b import c -> c -> a.b.c
+        }
+      }
+      for (const k in node) if (k !== 'type') collect(node[k]);
     };
+    collect(ir && ir.body);
+
+    const moduleAttrs = new Map();   // dotted module -> Set(attr)
+    const bareAttrs = new Set();
+    const flatten = (n) => { const path = []; let cur = n; while (cur && cur.type === 'Attribute') { path.unshift(cur.attr); cur = cur.value; } return { base: (cur && cur.type === 'Name') ? cur.id : null, path }; };
     const visit = (node) => {
       if (!node || typeof node !== 'object') return;
       if (Array.isArray(node)) { node.forEach(visit); return; }
-      if (node.type === 'Import') {
-        for (const a of node.names || []) add(a && a.name);                       // import a.b.c
-      } else if (node.type === 'ImportFrom') {
-        const mod = node.module || '';
-        if (mod.indexOf('.') >= 0) for (const a of node.names || []) {            // from a.b import c → a.b.c
-          if (a && a.name && a.name !== '*') add(mod + '.' + a.name);
+      if (node.type === 'Attribute') {
+        const { base, path } = flatten(node);
+        const attr = path[path.length - 1];
+        if (attr && IDT.test(attr)) {
+          if (base && alias.has(base)) {
+            const module = [alias.get(base), ...path.slice(0, -1)].join('.');   // np.linalg.inv -> numpy.linalg / inv
+            if (!moduleAttrs.has(module)) moduleAttrs.set(module, new Set());
+            moduleAttrs.get(module).add(attr);
+          } else {
+            bareAttrs.add(attr);                                                // method/property on a local receiver
+          }
         }
       }
-      for (const k in node) { if (k !== 'type') visit(node[k]); }
+      for (const k in node) if (k !== 'type') visit(node[k]);
     };
     visit(ir && ir.body);
-    return out;
+    return { moduleAttrs, bareAttrs };
   };
 
-  // Convert-time: blockify the exact submodules the code imports so a call like list_ports.comports()
-  // renders as a recognized (emerald, param-labeled) library block on first paint instead of a bare
-  // generic call. Attempted once per module per session; best-effort and SILENT on failure (a probed
-  // candidate may not be a module at all), so it never blocks or spams the normal conversion.
-  const autoBlockifyImports = async (ir) => {
+  // Stream a `pip install <pkg>` (backend). Returns true on success. Used by both the Library pip
+  // button and convert-time auto-install of a referenced-but-missing library.
+  const pipInstall = async (pkg) => {
+    try {
+      const resp = await fetch('/api/pip-install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ package: pkg }) });
+      if (!resp.ok || !resp.body) return false;
+      const reader = resp.body.getReader(); const dec = new TextDecoder(); let out = '';
+      for (;;) { const { done, value } = await reader.read(); if (done) break; const t = dec.decode(value, { stream: true }); if (t) out += t; }
+      return /successfully installed|already satisfied/i.test(out) && !/no matching distribution|could not find a version/i.test(out);
+    } catch (_) { return false; }
+  };
+
+  // Register only SPECIFIC symbols of a library (additive, idempotent — NO removeModules), so a
+  // library's toolbox tab GROWS to match what the code actually uses instead of dumping the whole API.
+  const registerUsedLibrary = (librarySpec) => {
     const reg = window.BlockPyLibRegistry;
-    if (!reg || !window.BlockPyLibImport) return;
-    const cands = submoduleImportCandidates(ir).filter((c) => !autoBlockifiedRef.current.has(c));
-    if (!cands.length) return;
-    let any = false;
-    for (const cand of cands) {
-      autoBlockifiedRef.current.add(cand);                                        // attempt once, success or not
-      try {
-        const data = await introspectModule(cand, { quiet: true });
-        if (!data || !data.spec) continue;
-        const { registered } = registerFullLibrary(data.spec);
-        if (registered.length) {
-          any = true;
-          setLogs((prev) => [...prev, `[Blockify] ✅ ${registered.length} block(s) from imported submodule "${cand}".`]);
-        }
-      } catch (_) { /* best-effort — never break conversion */ }
+    const imp = window.BlockPyLibImport;
+    if (!reg || !imp) return { registered: [] };
+    const mapped = imp.librarySpecToRegistrySpecs(librarySpec);
+    const registered = [];
+    for (const spec of mapped.specs) {
+      const res = reg.registerLibBlock(spec);
+      if (!res.ok) continue;
+      const stored = reg.getLibSpec(res.type) || spec;
+      registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames, colour: stored.colour });
     }
-    if (any) refreshToolboxNow();
+    if (reg.registerConst) for (const c of (mapped.consts || [])) reg.registerConst(c);
+    if (reg.registerProp) for (const p of (mapped.props || [])) reg.registerProp(p);
+    reg.persist();
+    setInstalledBlocks((prev) => { const have = new Set(prev.map((p) => p.type)); return [...prev, ...registered.filter((r) => !have.has(r.type))]; });
+    return { registered };
+  };
+
+  // Convert-time exception rule: every library symbol the code references becomes a recognized block in
+  // its proper toolbox place, on first paint. Introspects each referenced module (cached; auto-pip-installs
+  // it once if missing), then materializes ONLY the used entries (functions/classes/constants by name;
+  // methods/properties by name for local receivers). Returns true if the toolbox grew.
+  const autoBlockifyRefs = async (ir) => {
+    const reg = window.BlockPyLibRegistry;
+    if (!reg || !window.BlockPyLibImport) return false;
+    const { moduleAttrs, bareAttrs } = referencedSymbols(ir);
+    let changed = false;
+    for (const [module, attrs] of moduleAttrs) {
+      let spec = introspectedSpecsRef.current.get(module);
+      if (spec === undefined) {
+        let data = await introspectModule(module, { quiet: true, maxEntries: 3000 });
+        if ((!data || !data.spec) && !pipAttemptedRef.current.has(module)) {
+          pipAttemptedRef.current.add(module);
+          const top = module.split('.')[0];
+          setLogs((prev) => [...prev, `[pip] Auto-installing "${top}" (referenced in converted code)…`]);
+          if (await pipInstall(top)) data = await introspectModule(module, { quiet: true, maxEntries: 3000 });
+          setLogs((prev) => [...prev, (data && data.spec) ? `[pip] Installed "${top}".` : `[pip] Could not auto-install "${top}" — its calls stay generic.`]);
+        }
+        spec = (data && data.spec) ? data.spec : null;
+        introspectedSpecsRef.current.set(module, spec);
+      }
+      if (!spec) continue;
+      const reduced = (spec.entries || []).filter((e) => {
+        const used = attrs.has(e.name) || ((e.kind === 'method' || e.kind === 'property') && bareAttrs.has(e.name));
+        if (!used) return false;
+        const key = `${module}::${e.kind}::${e.owner || ''}.${e.name}`;
+        if (registeredSymRef.current.has(key)) return false;
+        registeredSymRef.current.add(key);
+        return true;
+      });
+      if (reduced.length) { registerUsedLibrary({ ...spec, entries: reduced }); changed = true; }
+    }
+    return changed;
   };
 
   // Compile Python to Blockly blocks via the CPython-3.12 ast single-IR pipeline (Pyodide):
@@ -167,10 +241,12 @@ export default function App() {
       if (shouldDesugar && window.BlockPyIrDesugar) {
         ir = window.BlockPyIrDesugar.desugarIr(ir);
       }
-      // Register blocks for any imported submodule (serial.tools.list_ports) BEFORE building blocks,
-      // so ir_call.updateShape_ recognizes list_ports.comports() and paints it styled on first render.
-      await autoBlockifyImports(ir);
-      if (myGen !== syncGenRef.current) return;   // a newer sync started while we awaited the probe
+      // Convert-time exception rule: materialize every referenced library symbol into the toolbox
+      // (auto-installing a missing library) BEFORE building blocks, so lib.func()/lib.CONST/obj.attr
+      // paint recognized (emerald) on first render and every canvas block has a toolbox home.
+      const grew = await autoBlockifyRefs(ir);
+      if (grew) refreshToolboxNow();
+      if (myGen !== syncGenRef.current) return;   // a newer sync started while we awaited introspection/install
       const blocklyJson = window.BlockPyIR.irToBlockly(ir);
       // Library calls stay as the unified ir_call block; ir_call.updateShape_ styles a registered
       // call emerald with parameter-name labels (same look as the toolbox), so converting from Python
@@ -838,7 +914,8 @@ for i in range(4):
     let response = null;
     try {
       response = await fetch('/api/blockify', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ module: mod }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ module: mod, ...(opts.maxEntries ? { maxEntries: opts.maxEntries } : {}) }),
       });
     } catch (_) { response = null; }
     let data = null;
