@@ -470,71 +470,109 @@ function describeSpecEntry(spec, e) {
   return `- [${kind}] ${qn}(${ps}) -> ${e.returns === false ? 'stmt' : 'value'}`;
 }
 
+// School-level abstraction knob: same library, different granularity (초=angle-only, 고=PWM/timing).
+const CURATE_LEVELS = {
+  beginner: { cap: 8, guide:
+    'AUDIENCE: elementary students (초등). Pick the FEWEST, most INTUITIVE HIGH-LEVEL operations (e.g. "move to angle", not "set PWM pulse width"). HIDE low-level/timing/register/config/tuning operations. Prefer wrapping multi-step workflows into MACROS so one block does a whole task. Labels: plain everyday words, no jargon.' },
+  intermediate: { cap: 16, guide:
+    'AUDIENCE: middle-school students (중등). Pick common operations with a few key parameters exposed. A couple of macros for frequent workflows. Labels: clear, lightly technical.' },
+  advanced: { cap: 34, guide:
+    'AUDIENCE: high-school / advanced students (고등). Expose the FULLER API INCLUDING lower-level control (timing/PWM/config/tuning parameters). FEWER macros — prefer primitives so learners compose themselves. Labels: precise, technical.' },
+};
+function normLevel(x) {
+  const s = String(x || '').toLowerCase();
+  if (s === '초' || s.startsWith('beg') || s.startsWith('element')) return 'beginner';
+  if (s === '고' || s.startsWith('adv') || s.startsWith('high')) return 'advanced';
+  return 'intermediate';
+}
+// The representable arity of an entry (for deterministic macro checking). Methods carry the receiver
+// as the macro step's first arg, so callable args = step.args minus the receiver.
+function entryArity(e) {
+  const ps = e.params || [];
+  const pos = ps.filter((p) => p.kind === 'positional' || p.kind === 'keyword');
+  return { isMethod: e.kind === 'method', required: pos.filter((p) => !p.hasDefault).length, total: pos.length, vararg: ps.some((p) => p.kind === 'vararg') };
+}
+
 app.post('/api/abstract-library', async (req, res) => {
-  const { spec, purpose, max } = req.body || {};
+  const { spec, purpose, max, level } = req.body || {};
   if (!spec || typeof spec.module !== 'string' || !Array.isArray(spec.entries)) {
     return res.status(400).json({ error: 'a LibrarySpec {module, entries[]} is required (call /api/blockify first)' });
   }
   if (!purpose || !String(purpose).trim()) return res.status(400).json({ error: 'purpose is required' });
   if (MINIMAX_KEYS.length === 0) return res.status(503).json({ error: 'No MiniMax API keys configured.' });
 
-  const limit = Math.min(Number(max) || 18, 40);
-  const validRefs = new Set(spec.entries.map((e) => e.qualName || (e.kind === 'method' ? `${spec.module}.${e.owner}.${e.name}` : `${spec.module}.${e.name}`)));
-  // The model often copies the WHOLE descriptor line ("PIL.Image.open(fp, …) -> value") as the
-  // ref; qualNames never contain '(', so strip from the first paren to recover the bare ref.
-  const stripSig = (s) => String(s || '').split('(')[0].trim();
-  const apiText = spec.entries.map((e) => describeSpecEntry(spec, e)).join('\n');
+  const lvl = normLevel(level);
+  const lvlCfg = CURATE_LEVELS[lvl];
+  const limit = Math.min(Number(max) || lvlCfg.cap, 40);
+  const entries = spec.entries;
+  const refOf = (e) => e.qualName || (e.kind === 'method' ? `${spec.module}.${e.owner}.${e.name}` : `${spec.module}.${e.name}`);
+  // Indexed menu (technique A: the model returns INTEGER indices, so it CANNOT reference a name that
+  // isn't in the list). Each line carries the first docstring line (technique B: semantic grounding).
+  const apiText = entries.map((e, i) => {
+    const base = describeSpecEntry(spec, e).replace(/^- /, '');
+    const doc = (e.doc || '').split('\n')[0].trim();
+    return `[${i}] ${base}${doc ? '  // ' + doc.slice(0, 100) : ''}`;
+  }).join('\n');
 
-  try {
-    const systemPrompt = `You curate a Python library's API into a small, purpose-focused set of visual blocks.
-You are given the library's REAL API (ground truth) and the user's PURPOSE.
+  const systemPrompt = `You curate a Python library's REAL API (ground truth) into a small, purpose-focused set of visual blocks for students.
 
-Respond in strict JSON only — no markdown. Schema:
+${lvlCfg.guide}
+
+Respond in STRICT JSON only — no markdown. Reference every API item by its integer INDEX "i" from the list (NEVER names/signatures). Schema:
 {
-  "thoughts": ["short reasoning", "..."],
-  "groups": [ { "name": "Category name", "entries": [ { "ref": "<exact qualName from the list>", "label": "friendly short label" } ] } ],
-  "macros": [ { "name": "snake_case_id", "label": "friendly label", "group": "Category name",
-               "params": ["p1"], "steps": [ { "ref": "<exact qualName>", "assign": "var", "args": ["p1 or 'literal' or a prior var"] } ], "result": "var" } ]
+  "thoughts": ["short reasoning"],
+  "groups": [ { "name": "Category", "entries": [ { "i": <index>, "label": "friendly short label" } ] } ],
+  "macros": [ { "name": "snake_id", "label": "friendly label", "group": "Category",
+               "params": ["p1"], "steps": [ { "i": <index>, "assign": "var", "args": ["p1 | 'literal' | prior var"] } ], "result": "var" } ]
 }
 
 Rules:
-- "ref" MUST be copied EXACTLY from the API list — never invent names or signatures.
+- "i" MUST be an integer index shown in the list. Do not invent.
 - Select ONLY operations relevant to the PURPOSE; at most ${limit} entries total across groups.
 - Group into 2-5 intuitive categories. Write labels in the SAME LANGUAGE as the purpose.
-- Macros chain 2-4 real calls into one task (optional). Each step.ref MUST be in the list; steps run top-to-bottom; later steps may use earlier "assign" vars.
-- Prefer the most common, beginner-friendly operations.`;
-    const userContent = `Library module: ${spec.module}\nPurpose: ${String(purpose).trim()}\n\nREAL API (use ONLY these refs):\n${apiText}`;
+- Macros chain 2-4 real calls into one task; a step's args count must fit that call's parameters; later steps may use earlier "assign" vars.`;
+  const userContent = `Library module: ${spec.module}\nPurpose: ${String(purpose).trim()}\nLevel: ${lvl}\n\nREAL API (reference by index "i"):\n${apiText}`;
 
-    const { thinkingText, responseText } = await callMiniMax(systemPrompt, userContent, { maxTokens: 2600 });
-    let parsed;
-    try {
-      const jsonStr = responseText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-      parsed = JSON.parse(jsonStr);
-    } catch {
-      throw new Error('MiniMax returned invalid JSON: ' + responseText.slice(0, 200));
-    }
+  // technique D: retry once if the model returns unparseable JSON.
+  async function askOnce(extra) {
+    const { thinkingText, responseText } = await callMiniMax(systemPrompt + (extra || ''), userContent, { maxTokens: 2600 });
+    const jsonStr = responseText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+    return { parsed: JSON.parse(jsonStr), thinkingText };
+  }
 
-    // Flatten groups -> selected[]; drop hallucinated refs.
+  try {
+    let parsed, thinkingText;
+    try { ({ parsed, thinkingText } = await askOnce('')); }
+    catch { ({ parsed, thinkingText } = await askOnce('\n\nYour previous reply was not valid JSON. Return ONLY the JSON object, nothing else.')); }
+
+    const idxOk = (i) => Number.isInteger(i) && i >= 0 && i < entries.length;
+    // groups -> selected[] (map index -> real ref); drop out-of-range indices.
     const selected = [];
     let droppedSel = 0;
     for (const g of parsed.groups || []) {
       for (const en of (g && g.entries) || []) {
-        const ref = en && stripSig(en.ref);
-        if (ref && validRefs.has(ref)) selected.push({ ref, label: en.label || '', group: (g.name || '') });
+        const i = en && en.i;
+        if (idxOk(i)) selected.push({ ref: refOf(entries[i]), label: (en.label || ''), group: (g.name || '') });
         else droppedSel++;
       }
     }
-    // Validate macros: every step.ref must be real; otherwise drop the whole macro.
+    // macros: every step index valid AND its arg count fits the real signature (technique C: deterministic
+    // arity verification) — otherwise drop the whole macro so no wrong-arity workflow is emitted.
     const macros = [];
     let droppedMac = 0;
     for (const m of parsed.macros || []) {
       const steps = Array.isArray(m && m.steps) ? m.steps : [];
-      const normSteps = steps.map((s) => (s ? { assign: s.assign, args: s.args, ref: stripSig(s.ref) } : null));
-      if (!m || !m.name || !normSteps.length || !normSteps.every((s) => s && validRefs.has(s.ref))) { droppedMac++; continue; }
+      const ok = m && m.name && steps.length && steps.every((s) => {
+        if (!s || !idxOk(s.i)) return false;
+        const a = entryArity(entries[s.i]);
+        const callArgs = a.isMethod ? Math.max(0, (Array.isArray(s.args) ? s.args.length : 0) - 1) : (Array.isArray(s.args) ? s.args.length : 0);
+        return callArgs >= a.required && (a.vararg || callArgs <= a.total);
+      });
+      if (!ok) { droppedMac++; continue; }
       macros.push({
         name: String(m.name), label: m.label || m.name, group: m.group || '',
         params: Array.isArray(m.params) ? m.params.map(String) : [],
-        steps: normSteps.map((s) => ({ ref: s.ref, assign: s.assign ? String(s.assign) : '', args: Array.isArray(s.args) ? s.args.map(String) : [] })),
+        steps: steps.map((s) => ({ ref: refOf(entries[s.i]), assign: s.assign ? String(s.assign) : '', args: Array.isArray(s.args) ? s.args.map(String) : [] })),
         result: m.result ? String(m.result) : '',
       });
     }
@@ -543,7 +581,11 @@ Rules:
       ...(parsed.thoughts || []),
     ].slice(0, 8);
 
-    res.json({ success: true, module: spec.module, selected, macros, thoughts, dropped: { selected: droppedSel, macros: droppedMac } });
+    // Deterministic cap: enforce the level's size limit even if the model over-selects, so the
+    // beginner view stays genuinely small (the LLM's count is only guidance).
+    const capped = selected.slice(0, limit);
+
+    res.json({ success: true, module: spec.module, level: lvl, selected: capped, macros, thoughts, dropped: { selected: droppedSel + (selected.length - capped.length), macros: droppedMac } });
   } catch (err) {
     console.error('[/api/abstract-library]', err.message);
     res.status(500).json({ success: false, error: err.message });

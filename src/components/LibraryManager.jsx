@@ -23,6 +23,7 @@ export default function LibraryManager({
   const [blockifyMod, setBlockifyMod] = useState('pydobot');
   const [curateMod, setCurateMod] = useState('');
   const [curatePurpose, setCuratePurpose] = useState('');
+  const [curateLevel, setCurateLevel] = useState('intermediate');   // 초/중/고 abstraction level
 
   // AI key config (Curate needs MiniMax). Status comes from the backend; raw keys never returned.
   const [aiCfg, setAiCfg] = useState({ configured: false, count: 0, masked: [], configPath: '' });
@@ -53,7 +54,7 @@ export default function LibraryManager({
     if (onBlockify && blockifyMod.trim()) onBlockify(blockifyMod.trim());
   };
   const handleCurateClick = () => {
-    if (onCurate && curateMod.trim() && curatePurpose.trim()) onCurate(curateMod.trim(), curatePurpose.trim());
+    if (onCurate && curateMod.trim() && curatePurpose.trim()) onCurate(curateMod.trim(), curatePurpose.trim(), curateLevel);
   };
 
   return (
@@ -175,7 +176,21 @@ export default function LibraryManager({
               {isAbstracting ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>} Curate
             </button>
           </form>
-          <small className="form-hint">Keeps the full library tab and adds a separate <b>★ curated</b> tab — the AI picks just the blocks (grouped) needed for that goal. Needs an AI key (below).</small>
+          {/* Abstraction level: same library, different granularity (초=고수준·각도만 … 고=저수준·PWM/타이밍). */}
+          <div className="curate-level" role="radiogroup" aria-label="Abstraction level">
+            <span className="curate-level-label">수준</span>
+            {[['beginner', '초등', '고수준·직관 (각도만)'], ['intermediate', '중등', '핵심 파라미터'], ['advanced', '고등', '저수준·정밀 (PWM/타이밍)']].map(([val, ko, tip]) => (
+              <button
+                key={val}
+                type="button"
+                className={`curate-level-btn${curateLevel === val ? ' active' : ''}`}
+                title={tip}
+                aria-pressed={curateLevel === val}
+                onClick={() => setCurateLevel(val)}
+              >{ko}</button>
+            ))}
+          </div>
+          <small className="form-hint">Keeps the full library tab and adds a separate <b>★ curated</b> tab — the AI picks just the blocks (grouped) needed for that goal, at the chosen <b>수준</b>. Needs an AI key (below).</small>
 
           {/* AI key — saved per-machine (NOT bundled into the build) */}
           <div className="ai-key-box">

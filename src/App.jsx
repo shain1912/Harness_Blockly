@@ -1136,9 +1136,10 @@ for i in range(4):
   // purpose-driven tab — a VIEW over those blocks that the AI picks for the stated goal. The full
   // tab is never wiped; the curated tab shows just a handful, grouped. Falls back gracefully (full
   // tab only) if the AI backend is unreachable.
-  const handleCurateLibrary = async (moduleName, purpose) => {
+  const handleCurateLibrary = async (moduleName, purpose, level) => {
     const mod = (moduleName || '').trim();
     const want = (purpose || '').trim();
+    const lvl = level || 'intermediate';
     if (!mod || !want) return;
     const reg = window.BlockPyLibRegistry;
     const imp = window.BlockPyLibImport;
@@ -1156,7 +1157,7 @@ for i in range(4):
       try {
         cres = await fetch('/api/abstract-library', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ spec: librarySpec, purpose: want }),
+          body: JSON.stringify({ spec: librarySpec, purpose: want, level: lvl }),
         });
       } catch (_) { cres = null; }
       let cdata = null;
@@ -1175,8 +1176,11 @@ for i in range(4):
         if (reg.getLibSpec(type)) items.push({ type, label: s.title, group: s.group || '' });
       }
       const macros = imp.macrosToRegistry(librarySpec, cdata.macros || []);
-      const key = `${librarySpec.module} · ${want}`.slice(0, 60);
-      const res = reg.addCuration({ key, label: want, lib: librarySpec.module, items, macros });
+      // include level in the key so 초/중/고 views of the same purpose are distinct tabs.
+      const lvlTag = { beginner: '초', intermediate: '중', advanced: '고' }[cdata.level || lvl] || '';
+      const key = `${librarySpec.module} · ${want}${lvlTag ? ' · ' + lvlTag : ''}`.slice(0, 60);
+      const label = `${want}${lvlTag ? ` (${lvlTag})` : ''}`;
+      const res = reg.addCuration({ key, label, lib: librarySpec.module, items, macros });
       if (!res.ok) {
         setLogs((prev) => [...prev, `[Curate] AI returned no usable blocks for "${want}" — the full "${mod}" tab is available.`]);
         refreshToolboxNow();
@@ -1185,9 +1189,9 @@ for i in range(4):
       ensureLibraryImportBlock(librarySpec.module, mapped.alias);
       refreshToolboxNow();
       setAiThoughts([...(cdata.thoughts || []),
-        `Curated ${items.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} into a new tab "★ ${want}".`,
+        `Curated ${items.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} at ${cdata.level || lvl} level into a new tab "★ ${label}".`,
         `Add this import to run the blocks: ${mapped.importStmt}`]);
-      setLogs((prev) => [...prev, `[Curate] ✅ New tab "★ ${want}" — ${items.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} for "${mod}". The full library tab is still available.`]);
+      setLogs((prev) => [...prev, `[Curate] ✅ New tab "★ ${label}" (${cdata.level || lvl}) — ${items.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} for "${mod}". The full library tab is still available.`]);
     } catch (err) {
       console.error(err);
       setLogs((prev) => [...prev, `[Curate Error] ${err.message}`]);

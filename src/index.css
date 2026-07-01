@@ -507,6 +507,17 @@ body {
   overflow: hidden;
 }
 
+/* Curate abstraction-level selector (초/중/고). */
+.curate-level { display: flex; align-items: center; gap: 6px; margin: 6px 0 2px; flex-wrap: wrap; }
+.curate-level-label { font-size: 12px; opacity: 0.7; margin-right: 2px; }
+.curate-level-btn {
+  font-size: 12px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid rgba(0, 150, 136, 0.35); background: transparent; color: inherit;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.curate-level-btn:hover { border-color: #009688; }
+.curate-level-btn.active { background: #009688; border-color: #009688; color: #fff; font-weight: 600; }
+
 /* Convert loading motion — overlays the editor pane while Convert introspects + builds blocks. */
 .convert-overlay {
   position: absolute;
