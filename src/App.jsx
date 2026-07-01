@@ -240,11 +240,17 @@ export default function App() {
     if (!reg || !imp) return false;
     const { moduleAttrs, bareAttrs, bareFuncs } = referencedSymbols(ir);
     let changed = false;
+    // A small/cohesive module (a submodule like serial.tools.list_ports) → materialize ALL its members
+    // so the whole sub-library is available (the user expects "전부 다"). A large library (numpy) →
+    // used-symbols-only so the toolbox doesn't flood. `whole` is the per-module policy switch.
+    const WHOLE_CAP = 100;
     for (const [module, attrs] of moduleAttrs) {
       const spec = await getSpec(module);
       if (!spec) continue;
-      const reduced = (spec.entries || []).filter((e) => {
-        const used = attrs.has(e.name) || ((e.kind === 'method' || e.kind === 'property') && bareAttrs.has(e.name));
+      const all = spec.entries || [];
+      const whole = all.length <= WHOLE_CAP;
+      const reduced = all.filter((e) => {
+        const used = whole || attrs.has(e.name) || ((e.kind === 'method' || e.kind === 'property') && bareAttrs.has(e.name));
         if (!used) return false;
         const key = `${module}::${e.kind}::${e.owner || ''}.${e.name}`;
         if (registeredSymRef.current.has(key)) return false;

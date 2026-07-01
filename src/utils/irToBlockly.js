@@ -634,6 +634,13 @@ function collectModules(ir) {
         const bind = a.asname || ((a.name || '').split('.')[0]);
         if (bind) mods.add(bind);
       }
+    } else if (st && st.type === 'ImportFrom') {
+      // `from serial.tools import list_ports` binds list_ports as a MODULE namespace, so
+      // list_ports.comports() must render as a fixed dotted label (module function), NOT an editable
+      // `list_ports ▾` variable-method. Add each imported name as a known module root.
+      for (const a of (st.names || [])) {
+        if (a && a.name && a.name !== '*') mods.add(a.asname || a.name);
+      }
     }
   }
   return mods;
