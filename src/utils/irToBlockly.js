@@ -230,6 +230,17 @@ let _varNames = null;
 // one is a fixed dotted label (cv2.imread), not an editable attribute on a variable. Reset per call.
 let _modules = null;
 
+// A non-string Constant's block-face text: PYTHON literals (None/True/False), not JS (null/true/false)
+// — so `def f() -> None` shows `-> None`, not `-> null`. Numbers stringify plainly; exotic values
+// (bytes/complex, carried as {__py__:…}) fall back to JSON. blocklyToIr.pyConstValue is the inverse.
+function pyConstText(v) {
+  if (v === null || v === undefined) return 'None';
+  if (v === true) return 'True';
+  if (v === false) return 'False';
+  if (typeof v === 'number') return String(v);
+  return JSON.stringify(v);
+}
+
 // A pure Name/Attribute chain -> its dotted string ("cv2.imread", "os.path.join"); else null.
 function exprToDotted(e) {
   if (!e) return null;
@@ -245,7 +256,7 @@ const EXPR_HANDLERS = {
   // bool, None, …) stays the JSON-encoded ir_const.
   Constant: (n) => (typeof n.value === 'string'
     ? blk('ir_str', { TEXT: n.value })
-    : blk('ir_const', { VALUE: JSON.stringify(n.value) })),
+    : blk('ir_const', { VALUE: pyConstText(n.value) })),
   List:  eltsBlock('ir_list'),
   Tuple: eltsBlock('ir_tuple'),
   // Python has no empty set literal (Set([]) unparses to the unroundtrippable "{*()}").

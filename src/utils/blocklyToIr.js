@@ -10,6 +10,19 @@
  * _CommentUnparser re-emits it. The bubble is the source of truth (a deleted bubble => no comment).
  */
 
+// Parse an ir_const VALUE field. Accepts PYTHON literals (None/True/False, numbers) shown on the block
+// face AND legacy JSON (null/true/false, numbers, {__py__:…} for bytes/complex) from older snapshots.
+// Inverse of irToBlockly.pyConstText — keeps the None/True/False round-trip lossless.
+function pyConstValue(t) {
+  const s = String(t == null ? '' : t).trim();
+  if (s === 'None' || s === 'null' || s === '') return null;
+  if (s === 'True' || s === 'true') return true;
+  if (s === 'False' || s === 'false') return false;
+  if (/^-?\d+$/.test(s)) return parseInt(s, 10);
+  if (/^-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?$/.test(s)) return parseFloat(s);
+  try { return JSON.parse(s); } catch (_) { return s; }   // {__py__:…} bytes/complex, or a bare token
+}
+
 // block -> a collection of element expressions (List/Tuple/Set).
 function eltsToExpr(astType) {
   return (b) => {
@@ -41,7 +54,7 @@ const BLOCK_TO_EXPR = {
       : f;
     return { type: 'Name', id };
   },
-  ir_const: (b) => ({ type: 'Constant', value: JSON.parse(b.fields.VALUE) }),
+  ir_const: (b) => ({ type: 'Constant', value: pyConstValue(b.fields.VALUE) }),
   // The rounded string block: its TEXT field is the raw content (no JSON quoting).
   ir_str: (b) => ({ type: 'Constant', value: b.fields.TEXT == null ? '' : String(b.fields.TEXT) }),
   ir_list:  eltsToExpr('List'),

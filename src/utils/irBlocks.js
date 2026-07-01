@@ -27,7 +27,7 @@ if (Blockly) {
       this.appendDummyInput().appendField(new Blockly.FieldTextInput('1'), 'VALUE');
       this.setOutput(true);
       this.setColour('#a55b80');
-      this.setTooltip('Constant literal (JSON-encoded value)');
+      this.setTooltip('Constant literal (number / None / True / False)');
     },
   };
   // A rounded TEXT string literal: type the content directly between the quotes (no JSON quoting).
