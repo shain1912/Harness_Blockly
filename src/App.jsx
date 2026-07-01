@@ -118,8 +118,9 @@ export default function App() {
     };
     collect(ir && ir.body);
 
-    const moduleAttrs = new Map();   // dotted module -> Set(attr)
-    const bareAttrs = new Set();
+    const moduleAttrs = new Map();   // dotted module -> Set(attr)   (lib.func / lib.CONST)
+    const bareAttrs = new Set();     // method/property names on local receivers
+    const bareFuncs = new Map();     // dotted module -> Set(symbol)  (from lib import f; f(...))
     const flatten = (n) => { const path = []; let cur = n; while (cur && cur.type === 'Attribute') { path.unshift(cur.attr); cur = cur.value; } return { base: (cur && cur.type === 'Name') ? cur.id : null, path }; };
     const visit = (node) => {
       if (!node || typeof node !== 'object') return;
@@ -136,11 +137,16 @@ export default function App() {
             bareAttrs.add(attr);                                                // method/property on a local receiver
           }
         }
+      } else if (node.type === 'Call' && node.func && node.func.type === 'Name' && alias.has(node.func.id)) {
+        // `from math import sqrt; sqrt(x)` — a bare call of a from-imported symbol. alias resolves the
+        // binding (sqrt -> math.sqrt); split into module + symbol so autoBlockifyRefs can recognize it.
+        const dotted = alias.get(node.func.id); const d = dotted.lastIndexOf('.');
+        if (d > 0) { const m = dotted.slice(0, d), s = dotted.slice(d + 1); if (!bareFuncs.has(m)) bareFuncs.set(m, new Set()); bareFuncs.get(m).add(s); }
       }
       for (const k in node) if (k !== 'type') visit(node[k]);
     };
     visit(ir && ir.body);
-    return { moduleAttrs, bareAttrs };
+    return { moduleAttrs, bareAttrs, bareFuncs };
   };
 
   // Register only SPECIFIC symbols of a library (additive, idempotent — NO removeModules), so a
@@ -172,20 +178,24 @@ export default function App() {
   // install path; note the package name may differ from the import, e.g. opencv-python -> cv2).
   const autoBlockifyRefs = async (ir) => {
     const reg = window.BlockPyLibRegistry;
-    if (!reg || !window.BlockPyLibImport) return false;
-    const { moduleAttrs, bareAttrs } = referencedSymbols(ir);
+    const imp = window.BlockPyLibImport;
+    if (!reg || !imp) return false;
+    const { moduleAttrs, bareAttrs, bareFuncs } = referencedSymbols(ir);
     let changed = false;
-    for (const [module, attrs] of moduleAttrs) {
+    const specFor = async (module) => {
       let spec = introspectedSpecsRef.current.get(module);
       if (spec === undefined) {
         const data = await introspectModule(module, { quiet: true, maxEntries: 3000 });
         spec = (data && data.spec) ? data.spec : null;
         introspectedSpecsRef.current.set(module, spec);
         if (!spec) setLogs((prev) => [...prev, `[Convert] "${module}" isn't installed — its blocks stay generic. Install it in the Library pip field (by package name).`]);
+        if (spec) for (const e of (spec.entries || [])) if (e.kind === 'class') classNamesRef.current.add(e.name);   // Tier-1 type inference
       }
+      return spec;
+    };
+    for (const [module, attrs] of moduleAttrs) {
+      const spec = await specFor(module);
       if (!spec) continue;
-      for (const e of (spec.entries || [])) if (e.kind === 'class') classNamesRef.current.add(e.name);   // Tier-1 type inference
-
       const reduced = (spec.entries || []).filter((e) => {
         const used = attrs.has(e.name) || ((e.kind === 'method' || e.kind === 'property') && bareAttrs.has(e.name));
         if (!used) return false;
@@ -195,6 +205,21 @@ export default function App() {
         return true;
       });
       if (reduced.length) { registerUsedLibrary({ ...spec, entries: reduced }); changed = true; }
+    }
+    // Bare from-imports (`from math import sqrt; sqrt(x)`): register a BARE spec (module '') that lowers
+    // to `sqrt(...)` and colours the bare call, filed under the source library's tab. Text stays lossless.
+    for (const [module, syms] of (bareFuncs || new Map())) {
+      const spec = await specFor(module);
+      if (!spec) continue;
+      for (const sym of syms) {
+        const key = `${module}::bare::${sym}`;
+        if (registeredSymRef.current.has(key)) continue;
+        const entry = (spec.entries || []).find((e) => e.name === sym && (e.kind === 'function' || e.kind === 'class'));
+        if (!entry) continue;
+        registeredSymRef.current.add(key);
+        const res = reg.registerLibBlock({ module: '', func: sym, argNames: imp.requiredParamNames(entry), colour: '#009688', title: sym, lib: module, hasOutput: entry.returns !== false });
+        if (res.ok) changed = true;
+      }
     }
     return changed;
   };

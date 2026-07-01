@@ -427,6 +427,8 @@ if (Blockly) {
           const fn = String(this.funcName_);
           const d = fn.lastIndexOf('.');
           lib = reg.findLibCall(fn.slice(0, d), fn.slice(d + 1));
+        } else if (this.funcName_ != null && reg.findBareFunc) {
+          lib = reg.findBareFunc(String(this.funcName_));   // bare `from math import sqrt; sqrt(x)`
         }
       }
       // Three callee shapes, all ONE block: a fixed name label (print, len); a method on a variable

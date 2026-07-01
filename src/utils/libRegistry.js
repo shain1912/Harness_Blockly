@@ -228,6 +228,17 @@ function findAttr(attr, ownerType) {
 }
 function listProps() { return [...PROPS.values()]; }
 
+// Recognize a BARE call `f(...)` that a `from mod import f` bound to a library function/class — matched
+// against specs registered with an empty module (the bare form). Enables colouring `sqrt(x)` after
+// `from math import sqrt` without a module prefix, losslessly.
+function findBareFunc(name) {
+  if (!name) return null;
+  for (const [, spec] of SPECS) {
+    if (spec.module === '' && spec.func === name && !spec.method) return { params: (spec.argNames || []).slice(), colour: spec.colour || '#009688' };
+  }
+  return null;
+}
+
 function listLibBlocks() {
   const byModule = new Map();
   for (const [type, spec] of SPECS) {
@@ -541,5 +552,6 @@ api.BlockPyLibRegistry = {
   addCuration, listCurations, removeCuration, removeCurationsByLib, persistCurations, hydrateCurations,
   registerConst, findConst, listConsts, persistConsts, hydrateConsts,
   registerProp, findAttr, listProps, persistProps, hydrateProps,
+  findBareFunc,
 };
 if (typeof module !== 'undefined') module.exports = api.BlockPyLibRegistry;
