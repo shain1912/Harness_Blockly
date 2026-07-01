@@ -102,6 +102,17 @@ function entryToConst(entry, alias, colour) {
   };
 }
 
+// A class PROPERTY entry -> a registry prop record. The block is a pre-filled ir_attribute attr-form
+// (`<recv>.device`) with an ir_name receiver shadow, lowering to Attribute(recv, attr) — lossless. The
+// receiver default is the owner lowercased (listportinfo.device), like the method receiver model.
+function entryToProp(entry, alias, colour) {
+  if (!entry || entry.kind !== 'property' || typeof entry.name !== 'string' || !IMP_IDENT.test(entry.name)) return null;
+  if (typeof entry.owner !== 'string' || !IMP_IDENT.test(entry.owner)) return null;
+  const recv = entry.owner.toLowerCase();
+  if (!IMP_IDENT.test(recv)) return null;
+  return { attr: entry.name, owner: entry.owner, recv, module: entryModuleAlias(entry) || alias, colour };
+}
+
 // The import a user must add for the leaf alias to resolve: dotted -> `from <parent> import <leaf>`,
 // single-segment -> `import <module>`.
 function importStatement(moduleDotted, alias) {
@@ -144,12 +155,15 @@ function librarySpecToRegistrySpecs(librarySpec, opts = {}) {
   const entries = (librarySpec && librarySpec.entries) || [];
   const specs = [];
   const consts = [];
+  const props = [];
   for (const e of entries) {
     for (const s of entryToSpec(e, alias, colour, { both: opts.both })) { s.lib = moduleDotted; specs.push(s); }   // tag source library -> its own toolbox category
     const c = entryToConst(e, alias, colour);
     if (c) { c.lib = moduleDotted; consts.push(c); }
+    const p = entryToProp(e, alias, colour);
+    if (p) { p.lib = moduleDotted; props.push(p); }
   }
-  return { alias, importStmt: importStatement(moduleDotted, alias), specs, consts };
+  return { alias, importStmt: importStatement(moduleDotted, alias), specs, consts, props };
 }
 
 // The canonical reference for an entry: its qualName when introspection supplied one, else a
@@ -269,6 +283,6 @@ const impApi = (typeof window !== 'undefined' ? window : global);
 impApi.BlockPyLibImport = {
   librarySpecToRegistrySpecs, curationToRegistrySpecs, macrosToRegistry, libraryModules,
   entryQualName, requiredParamNames, importStatement, importBlockJson, argToIr, splitTopArgs,
-  entryToConst, entryModuleAlias,
+  entryToConst, entryToProp, entryModuleAlias,
 };
 if (typeof module !== 'undefined') module.exports = impApi.BlockPyLibImport;

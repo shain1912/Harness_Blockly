@@ -19,10 +19,15 @@ const CURATIONS = new Map();
 // renders as a pre-filled ir_attribute{dotted} reporter that lowers to exactly that dotted name, so
 // it round-trips losslessly with no new block type. dotted -> {dotted,name,module,lib,colour,...}.
 const CONSTS = new Map();
+// A class PROPERTY is a VALUE attribute (obj.device). Keyed uniquely by lib::Owner.attr. findAttr is
+// NAME-BASED (colours the first property matching the attr name), consistent with method colouring —
+// colour is derived only, never persisted or part of lowering, so a cross-class name clash is cosmetic.
+const PROPS = new Map();
 const STORAGE_KEY = 'blockpy.libRegistry.v1';
 const MACRO_STORAGE_KEY = 'blockpy.libRegistry.macros.v1';
 const CURATION_STORAGE_KEY = 'blockpy.libRegistry.curations.v1';
 const CONST_STORAGE_KEY = 'blockpy.libRegistry.consts.v1';
+const PROP_STORAGE_KEY = 'blockpy.libRegistry.props.v1';
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const CONST_DOTTED = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
 
@@ -192,6 +197,29 @@ function registerConst(c) {
 function findConst(dotted) { return (dotted && CONSTS.get(dotted)) || null; }
 function listConsts() { return [...CONSTS.values()]; }
 
+// ── Class properties (Feature 1): value attributes (obj.device), not calls ────────
+function _propKey(p) { return `${p.lib || p.module || 'Library'}::${p.owner || ''}.${p.attr}`; }
+function registerProp(p) {
+  if (!p || typeof p.attr !== 'string' || !IDENT.test(p.attr)) return { ok: false, reason: 'prop needs a valid attr name' };
+  const stored = {
+    attr: p.attr,
+    owner: p.owner || '',
+    recv: p.recv || String(p.owner || 'obj').toLowerCase(),
+    module: p.module || '',
+    lib: p.lib || '',
+    colour: p.colour || '#009688',
+  };
+  PROPS.set(_propKey(stored), stored);
+  return { ok: true };
+}
+// Name-based lookup for ir_attribute colouring: first registered property with this attr name.
+function findAttr(attr) {
+  if (!attr) return null;
+  for (const p of PROPS.values()) if (p.attr === attr) return { colour: p.colour || '#009688', owner: p.owner };
+  return null;
+}
+function listProps() { return [...PROPS.values()]; }
+
 function listLibBlocks() {
   const byModule = new Map();
   for (const [type, spec] of SPECS) {
@@ -223,6 +251,7 @@ function removeModules(modules) {
     if (B && B.Blocks && B.Blocks[type]) { try { delete B.Blocks[type]; } catch (_) { /* keep going */ } }
   }
   for (const [d, c] of [...CONSTS]) if (set.has(c.module || '')) CONSTS.delete(d);   // drop this library's constants too (re-blockify replaces them)
+  for (const [k, p] of [...PROPS]) if (set.has(p.module || '')) PROPS.delete(k);     // and its properties
   persist();
   return removed;
 }
@@ -267,7 +296,7 @@ function removeCurationsByLib(lib) {
   persistCurations();
 }
 
-function clearAll() { SPECS.clear(); MACROS.clear(); CURATIONS.clear(); CONSTS.clear(); }
+function clearAll() { SPECS.clear(); MACROS.clear(); CURATIONS.clear(); CONSTS.clear(); PROPS.clear(); }
 
 // ── Library (toolbox-tab) management ────────────────────────────────────────────
 // A toolbox tab is keyed by `lib` (the source library, e.g. 'PIL.Image') falling back to the
@@ -291,6 +320,13 @@ function listLibraries() {
   }
   for (const c of CONSTS.values()) {                 // a lib with ONLY constants still gets a tab row
     const key = _libKey(c);
+    if (!byLib.has(key)) byLib.set(key, { lib: key, blockCount: 0, userCount: 0, macroCount: 0 });
+    const e = byLib.get(key);
+    e.blockCount++;
+    e.userCount++;
+  }
+  for (const p of PROPS.values()) {                  // properties count toward the tab too
+    const key = _libKey(p);
     if (!byLib.has(key)) byLib.set(key, { lib: key, blockCount: 0, userCount: 0, macroCount: 0 });
     const e = byLib.get(key);
     e.blockCount++;
@@ -320,6 +356,7 @@ function removeLibraryByTab(libKey) {
   }
   for (const [name, m] of [...MACROS]) if ((m.srcModule || 'Library') === libKey) MACROS.delete(name);
   for (const [d, c] of [...CONSTS]) if (_libKey(c) === libKey) CONSTS.delete(d);   // drop this tab's constants
+  for (const [k, p] of [...PROPS]) if (_libKey(p) === libKey) PROPS.delete(k);     // and its properties
   removeCurationsByLib(libKey);   // removing the source library removes its curated tabs too
   persist();
   return removed;
@@ -338,6 +375,7 @@ function removeAllUserLibraries() {
   MACROS.clear();
   CURATIONS.clear();
   CONSTS.clear();   // no built-in constants — all are user-added
+  PROPS.clear();
   persist();
   return removed;
 }
@@ -351,6 +389,7 @@ function persist() {
   persistMacros();
   persistCurations();
   persistConsts();
+  persistProps();
 }
 
 function persistConsts() {
@@ -358,6 +397,14 @@ function persistConsts() {
     const ls = (typeof window !== 'undefined') ? window.localStorage : null;
     if (!ls) return;
     ls.setItem(CONST_STORAGE_KEY, JSON.stringify([...CONSTS.values()]));
+  } catch (_) { /* non-fatal */ }
+}
+
+function persistProps() {
+  try {
+    const ls = (typeof window !== 'undefined') ? window.localStorage : null;
+    if (!ls) return;
+    ls.setItem(PROP_STORAGE_KEY, JSON.stringify([...PROPS.values()]));
   } catch (_) { /* non-fatal */ }
 }
 
@@ -395,6 +442,7 @@ function hydrate() {
     hydrateMacros();
     hydrateCurations();
     hydrateConsts();
+    hydrateProps();
     return out;
   } catch (_) { clearAll(); return []; }
 }
@@ -408,6 +456,18 @@ function hydrateConsts() {
     if (!Array.isArray(consts)) return [];
     for (const c of consts) registerConst(c);
     return listConsts();
+  } catch (_) { return []; }
+}
+
+function hydrateProps() {
+  try {
+    const ls = (typeof window !== 'undefined') ? window.localStorage : null;
+    if (!ls) return [];
+    const raw = ls.getItem(PROP_STORAGE_KEY);
+    const props = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(props)) return [];
+    for (const p of props) registerProp(p);
+    return listProps();
   } catch (_) { return []; }
 }
 
@@ -472,5 +532,6 @@ api.BlockPyLibRegistry = {
   listLibraries, removeLibraryByTab, removeAllUserLibraries,
   addCuration, listCurations, removeCuration, removeCurationsByLib, persistCurations, hydrateCurations,
   registerConst, findConst, listConsts, persistConsts, hydrateConsts,
+  registerProp, findAttr, listProps, persistProps, hydrateProps,
 };
 if (typeof module !== 'undefined') module.exports = api.BlockPyLibRegistry;

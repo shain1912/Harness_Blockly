@@ -249,6 +249,26 @@ function constSubcategory(consts) {
   return contents.length ? { kind: 'category', name: 'Constants', colour: '#00897b', contents } : null;
 }
 
+// A class property renders as an ir_attribute attr-form (`<recv>.device`) with an ir_name receiver
+// shadow (so a dragged block is complete and round-trips to Attribute(recv, attr)). Grouped by owning
+// class when a library has more than one, so the Properties sub-category stays organized.
+function propEntry(p) { return { kind: 'block', type: 'ir_attribute', extraState: { attr: p.attr }, inputs: { VALUE: name(p.recv || 'obj') } }; }
+function propSubcategory(props) {
+  if (!props || !props.length) return null;
+  const byOwner = new Map();
+  for (const p of props) { const o = p.owner || ''; if (!byOwner.has(o)) byOwner.set(o, []); byOwner.get(o).push(p); }
+  let contents;
+  if (byOwner.size <= 1) {
+    contents = props.slice().sort((a, b) => a.attr.localeCompare(b.attr)).map(propEntry);
+  } else {
+    contents = [];
+    for (const [o, list] of [...byOwner].sort((a, b) => a[0].localeCompare(b[0]))) {
+      contents.push({ kind: 'category', name: o || 'Other', colour: '#00897b', contents: list.sort((a, b) => a.attr.localeCompare(b.attr)).map(propEntry) });
+    }
+  }
+  return contents.length ? { kind: 'category', name: 'Properties', colour: '#00897b', contents } : null;
+}
+
 function libraryCategories() {
   const reg = (typeof window !== 'undefined' ? window : global).BlockPyLibRegistry;
   if (!reg || typeof reg.listLibBlocks !== 'function') return [];
@@ -283,10 +303,18 @@ function libraryCategories() {
     constsByLib.get(k).push(c);
   });
 
+  const propsByLib = new Map();       // libKey -> [prop records]
+  ((typeof reg.listProps === 'function' ? reg.listProps() : []) || []).forEach((p) => {
+    const k = p.lib || p.module || 'Library';
+    if (!propsByLib.has(k)) propsByLib.set(k, []);
+    propsByLib.get(k).push(p);
+  });
+
   const cats = [];
   for (const [libKey, L] of byLib) {
     const macroEntries = macrosByLib.get(libKey) || [];
     const constCat = constSubcategory(constsByLib.get(libKey));
+    const propCat = propSubcategory(propsByLib.get(libKey));
     let contents;
     if (!L.anyGroup && !macroEntries.length) {
       contents = [...L.groups.values()].flat();                         // flat library
@@ -296,18 +324,19 @@ function libraryCategories() {
       if (L.groups.has('') && L.groups.get('').length) contents.push({ kind: 'category', name: 'Other', colour: '#009688', contents: L.groups.get('') });
       if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: macroEntries });
     }
-    if (constCat) contents = [...contents, constCat];                   // Constants sub-category after the calls
+    if (propCat) contents = [...contents, propCat];                     // Properties + Constants sub-categories after the calls
+    if (constCat) contents = [...contents, constCat];
     cats.push({ kind: 'category', name: libKey, colour: '#009688', contents });
   }
   // libraries whose curation produced only macros (no plain blocks)
   for (const [libKey, entries] of macrosByLib) {
     if (!byLib.has(libKey)) cats.push({ kind: 'category', name: libKey, colour: '#009688', contents: [{ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: entries }] });
   }
-  // libraries that produced ONLY constants (e.g. a constants-only module) still get a tab
-  for (const [libKey, consts] of constsByLib) {
+  // libraries that produced ONLY value blocks (constants and/or properties) still get a tab
+  for (const libKey of new Set([...constsByLib.keys(), ...propsByLib.keys()])) {
     if (cats.some((c) => c.name === libKey)) continue;
-    const constCat = constSubcategory(consts);
-    if (constCat) cats.push({ kind: 'category', name: libKey, colour: '#009688', contents: [constCat] });
+    const extra = [propSubcategory(propsByLib.get(libKey)), constSubcategory(constsByLib.get(libKey))].filter(Boolean);
+    if (extra.length) cats.push({ kind: 'category', name: libKey, colour: '#009688', contents: extra });
   }
 
   // Curated tabs (Phase C3): one extra category per curation, a purpose-driven subset that references

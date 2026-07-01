@@ -1,4 +1,4 @@
-import importlib, inspect, json, os, re, sys, enum
+import importlib, inspect, json, os, re, sys, enum, ast, textwrap, functools
 import importlib.metadata as _md
 
 # Running this script by absolute path makes sys.path[0] the script's own dir, not the spawn
@@ -68,6 +68,77 @@ def _prefix_hint(name):
     enum-like family; '' means a singleton constant (math.pi)."""
     head = name.split('_', 1)[0] if '_' in name else ''
     return head if (head and head.isupper()) else ''
+
+def _is_property_descriptor(raw):
+    # property/cached_property, or a C-level data descriptor (__slots__ member_descriptor, extension
+    # getset_descriptor). These hold a VALUE and are NOT callable — attribute reads, not methods.
+    if isinstance(raw, (property, functools.cached_property)):
+        return True
+    return type(raw).__name__ in ('member_descriptor', 'getset_descriptor')
+
+_NESTED_SCOPE = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+def _self_assigns(func):
+    """`<recv>.<name> = ...` assigned directly in a method's OWN body, where <recv> is the method's
+    first positional parameter. Does NOT descend into nested defs/lambdas/inner classes — those rebind
+    their own `self`, so a `self.x` there is not an attribute of this class (avoids false positives)."""
+    posargs = list(func.args.posonlyargs) + list(func.args.args)
+    if not posargs:
+        return set()
+    recv = posargs[0].arg
+    out = set()
+    stack = list(func.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, _NESTED_SCOPE):
+            continue                                   # a nested scope has its own receiver — skip it
+        targets = node.targets if isinstance(node, ast.Assign) else ([node.target] if isinstance(node, ast.AnnAssign) else [])
+        for t in targets:
+            if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == recv:
+                out.add(t.attr)
+        for child in ast.iter_child_nodes(node):
+            if not isinstance(child, _NESTED_SCOPE):
+                stack.append(child)
+    return out
+
+def _instance_attrs(cls):
+    """Instance attributes a class exposes but that aren't class-level descriptors: PEP 526 annotations
+    (`device: str`) and `self.<name> = ...` set in __init__/__post_init__. The latter is found by AST —
+    parsing the source, NEVER executing it — so e.g. pyserial's ListPortInfo.device (assigned in
+    __init__) is discoverable even though it doesn't exist on the class object."""
+    names = set()
+    for k in getattr(cls, '__mro__', [cls]):
+        if k is object:
+            continue
+        ann = k.__dict__.get('__annotations__') if hasattr(k, '__dict__') else None
+        if isinstance(ann, dict):
+            names.update(ann.keys())
+        for mname in ('__init__', '__post_init__'):
+            m = k.__dict__.get(mname)
+            if m is None:
+                continue
+            try:
+                tree = ast.parse(textwrap.dedent(inspect.getsource(m)))
+            except Exception:
+                continue
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    names |= _self_assigns(node)
+    return names
+
+def _property_names(cls):
+    """Public value-attributes of a class: class-level descriptors (read via getattr_static so no
+    getter runs / no instance is built) UNION instance attributes (annotations + __init__ self.x)."""
+    names = set()
+    for pn in dir(cls):
+        try:
+            raw = inspect.getattr_static(cls, pn)
+        except Exception:
+            continue
+        if _is_property_descriptor(raw):
+            names.add(pn)
+    names |= _instance_attrs(cls)
+    return names
 
 def _clean_import(line):
     line = (line or '').strip()
@@ -169,6 +240,18 @@ def _walk(mod, modname, root, public, entries, seen, cap, strict):
                 entries.append({'kind': 'method', 'owner': n, 'name': mn, 'module': modname,
                                 'qualName': modname + '.' + n + '.' + mn,
                                 'params': _params(mo) or [], 'doc': _doc(mo), 'returns': _returns(mo)})
+            for pn in _property_names(obj):
+                if len(entries) >= cap:
+                    return
+                if not public(pn):
+                    continue
+                pk = (modname, 'property', n, pn)
+                if pk in seen:
+                    continue
+                seen.add(pk)
+                entries.append({'kind': 'property', 'owner': n, 'name': pn, 'module': modname,
+                                'qualName': modname + '.' + n + '.' + pn,
+                                'params': [], 'returns': True})
         elif _is_call(obj):
             if strict and not (getattr(obj, '__module__', '') or '').startswith(root):
                 continue
