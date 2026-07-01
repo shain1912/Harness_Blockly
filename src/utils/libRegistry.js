@@ -212,10 +212,18 @@ function registerProp(p) {
   PROPS.set(_propKey(stored), stored);
   return { ok: true };
 }
-// Name-based lookup for ir_attribute colouring: first registered property with this attr name.
-function findAttr(attr) {
+// Lookup for ir_attribute colouring. ownerType (Tier-1 type inference) makes it PRECISE:
+//   - a class name  -> match only a property of THAT class (no cross-class name clash);
+//   - '__user__'    -> the receiver is an instance of a user-defined class -> never a library value;
+//   - undefined/null-> receiver type unknown (loop var, param) -> name-based first match (fallback).
+function findAttr(attr, ownerType) {
   if (!attr) return null;
-  for (const p of PROPS.values()) if (p.attr === attr) return { colour: p.colour || '#009688', owner: p.owner };
+  if (ownerType === '__user__') return null;
+  for (const p of PROPS.values()) {
+    if (p.attr !== attr) continue;
+    if (ownerType) { if (p.owner === ownerType) return { colour: p.colour || '#009688', owner: p.owner }; }
+    else return { colour: p.colour || '#009688', owner: p.owner };
+  }
   return null;
 }
 function listProps() { return [...PROPS.values()]; }

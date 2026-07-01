@@ -72,6 +72,7 @@ export default function App() {
   const blocklySnapshotRef = useRef(null);
   const introspectedSpecsRef = useRef(new Map());  // dotted module -> cached LibrarySpec (or null) this session
   const registeredSymRef = useRef(new Set());       // module::kind::owner.name already materialized (convert-time)
+  const classNamesRef = useRef(new Set());          // library class names seen (Tier-1 receiver-type inference)
   const associatedPythonRef = useRef('');
   const abstractionEngineRef = useRef(null);
   const shellAbortRef = useRef(null);
@@ -183,6 +184,8 @@ export default function App() {
         if (!spec) setLogs((prev) => [...prev, `[Convert] "${module}" isn't installed — its blocks stay generic. Install it in the Library pip field (by package name).`]);
       }
       if (!spec) continue;
+      for (const e of (spec.entries || [])) if (e.kind === 'class') classNamesRef.current.add(e.name);   // Tier-1 type inference
+
       const reduced = (spec.entries || []).filter((e) => {
         const used = attrs.has(e.name) || ((e.kind === 'method' || e.kind === 'property') && bareAttrs.has(e.name));
         if (!used) return false;
@@ -194,6 +197,51 @@ export default function App() {
       if (reduced.length) { registerUsedLibrary({ ...spec, entries: reduced }); changed = true; }
     }
     return changed;
+  };
+
+  // Tier-1 receiver-type inference (deterministic): tag each `<var>.attr` node with the class `var` was
+  // constructed from, so property colouring is PRECISE (ser.baudrate colours as serial.Serial; a user
+  // object's dog.name does NOT colour). `var = Lib.Class(...)`/`Class(...)` -> that class; `var =
+  // UserClass(...)` (a class defined in this code) -> '__user__' (suppress). Everything else stays
+  // name-based. Mutates `_ownerType` onto Attribute nodes; irToBlockly carries it (display-only).
+  const annotateOwnerTypes = (ir) => {
+    const userClasses = new Set();
+    const walk = (node, fn) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach((c) => walk(c, fn)); return; }
+      fn(node);
+      for (const k in node) if (k !== 'type') walk(node[k], fn);
+    };
+    walk(ir && ir.body, (n) => { if (n.type === 'ClassDef' && n.name) userClasses.add(n.name); });
+    const libClasses = classNamesRef.current;
+    const calleeName = (fn) => (!fn ? null : fn.type === 'Name' ? fn.id : fn.type === 'Attribute' ? fn.attr : null);
+    const varType = new Map();
+    // A method's receiver (`self`) is always an instance of a user-defined class in converted code, so
+    // `self.attr` must NOT colour by name (it's the user's own attribute, not a library property).
+    walk(ir && ir.body, (n) => {
+      if (n.type === 'ClassDef' && Array.isArray(n.body)) {
+        for (const m of n.body) {
+          if ((m.type === 'FunctionDef' || m.type === 'AsyncFunctionDef') && m.args) {
+            const pos = [...(m.args.posonlyargs || []), ...(m.args.args || [])];
+            if (pos[0] && pos[0].arg) varType.set(pos[0].arg, '__user__');
+          }
+        }
+      }
+    });
+    walk(ir && ir.body, (n) => {
+      if (n.type === 'Assign' && Array.isArray(n.targets) && n.targets.length === 1
+          && n.targets[0].type === 'Name' && n.value && n.value.type === 'Call') {
+        const cn = calleeName(n.value.func);
+        if (cn) {
+          if (userClasses.has(cn)) varType.set(n.targets[0].id, '__user__');
+          else if (libClasses.has(cn)) varType.set(n.targets[0].id, cn);
+        }
+      }
+    });
+    if (!varType.size) return;
+    walk(ir && ir.body, (n) => {
+      if (n.type === 'Attribute' && n.value && n.value.type === 'Name' && varType.has(n.value.id)) n._ownerType = varType.get(n.value.id);
+    });
   };
 
   // Compile Python to Blockly blocks via the CPython-3.12 ast single-IR pipeline (Pyodide):
@@ -231,6 +279,7 @@ export default function App() {
       // paint recognized (emerald) on first render and every canvas block has a toolbox home.
       const grew = await autoBlockifyRefs(ir);
       if (grew) refreshToolboxNow();
+      annotateOwnerTypes(ir);   // Tier-1: tag attribute receivers with their inferred class for precise colouring
       if (myGen !== syncGenRef.current) return;   // a newer sync started while we awaited introspection/install
       const blocklyJson = window.BlockPyIR.irToBlockly(ir);
       // Library calls stay as the unified ir_call block; ir_call.updateShape_ styles a registered

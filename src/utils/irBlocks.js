@@ -270,9 +270,11 @@ if (Blockly) {
   Blockly.Blocks['ir_attribute'] = {
     dotted_: null,
     attr_: 'attr',
+    ownerType_: null,
     init() {
       this.dotted_ = null;
       this.attr_ = 'attr';
+      this.ownerType_ = null;
       this.updateShape_();          // updateShape_ also sets the colour (emerald if a recognized library value)
       this.setInputsInline(true);
       this.setOutput(true);
@@ -280,10 +282,12 @@ if (Blockly) {
     // An attribute/method name is a fixed, non-editable label (like a function name) — never an
     // editable text field. A module-rooted chain (cv2.imread) is one whole dotted label; a general
     // access on a variable/expression keeps the receiver as a VALUE input + a fixed `.name` label.
-    saveExtraState() { return this.dotted_ ? { dotted: this.dotted_ } : { attr: this.attr_ }; },
+    // ownerType_ (inferred receiver class, Tier-1) is display-only — ignored by lowering.
+    saveExtraState() { return this.dotted_ ? { dotted: this.dotted_ } : (this.ownerType_ ? { attr: this.attr_, ownerType: this.ownerType_ } : { attr: this.attr_ }); },
     loadExtraState(state) {
       this.dotted_ = (state && state.dotted) || null;
       this.attr_ = (state && state.attr) || 'attr';
+      this.ownerType_ = (state && state.ownerType) || null;
       this.updateShape_();
     },
     updateShape_() {
@@ -300,8 +304,9 @@ if (Blockly) {
       } else {
         this.appendValueInput('VALUE');
         this.appendDummyInput('ATTRROW').appendField('.' + String(this.attr_));
-        // Feature 1: a recognized class property (name-based) gets its library colour too.
-        const a = reg && reg.findAttr && reg.findAttr(String(this.attr_));
+        // A recognized class property gets its library colour. With an inferred receiver type (Tier-1)
+        // the match is PRECISE to that class; otherwise it falls back to name-based (unknown receiver).
+        const a = reg && reg.findAttr && reg.findAttr(String(this.attr_), this.ownerType_ || undefined);
         if (a) colour = a.colour || '#009688';
       }
       this.setColour(colour);

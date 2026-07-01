@@ -294,8 +294,10 @@ const EXPR_HANDLERS = {
       return { type: 'ir_attribute', extraState: { dotted } };
     }
     // The attr/method name is a fixed label, not an editable field; receiver stays a VALUE input.
-    return { type: 'ir_attribute', extraState: { attr: n.attr },
-      inputs: { VALUE: { block: exprToBlock(n.value) } } };
+    // _ownerType (Tier-1 inferred receiver class) is carried for PRECISE property colouring (display-only).
+    const extraState = { attr: n.attr };
+    if (n._ownerType) extraState.ownerType = n._ownerType;
+    return { type: 'ir_attribute', extraState, inputs: { VALUE: { block: exprToBlock(n.value) } } };
   },
   Subscript: (n) => blk('ir_subscript', {},
     { VALUE: { block: exprToBlock(n.value) }, SLICE: { block: exprToBlock(n.slice) } }),
