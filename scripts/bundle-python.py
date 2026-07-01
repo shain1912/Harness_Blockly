@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEST = ROOT / "python-embed"
-PKGS = ["numpy", "opencv-python", "pillow"]
+PKGS = ["numpy", "opencv-python", "pillow", "jedi"]   # jedi = Tier-2 receiver-type oracle for /api/infer-types
 # 3.12 has wheels for everything we need; the bundled runtime is independent of system Python.
 PY_VERSIONS = ["3.12.8", "3.12.7", "3.12.10", "3.12.6"]
 

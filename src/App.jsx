@@ -176,25 +176,72 @@ export default function App() {
   // methods/properties by name for local receivers). No auto-install: a not-installed library stays a
   // generic block — install it once via the Library pip field using its PACKAGE name (the single
   // install path; note the package name may differ from the import, e.g. opencv-python -> cv2).
+  // Introspect a module once per session (cached). Records its class names for Tier-1 inference; logs a
+  // hint if not installed. Returns the LibrarySpec or null.
+  const getSpec = async (module) => {
+    let spec = introspectedSpecsRef.current.get(module);
+    if (spec === undefined) {
+      const data = await introspectModule(module, { quiet: true, maxEntries: 3000 });
+      spec = (data && data.spec) ? data.spec : null;
+      introspectedSpecsRef.current.set(module, spec);
+      if (spec) { for (const e of (spec.entries || [])) if (e.kind === 'class') classNamesRef.current.add(e.name); }
+      else setLogs((prev) => [...prev, `[Convert] "${module}" isn't installed — its blocks stay generic. Install it in the Library pip field (by package name).`]);
+    }
+    return spec;
+  };
+
+  // Tier-2 oracle: ask the backend (Jedi) for each attribute receiver's inferred class. Display-only —
+  // a wrong/absent answer never affects lowering. Builtin containers are dropped (their methods aren't
+  // library blocks). Returns { name: {type, module} }.
+  const inferTypes = async (code) => {
+    try {
+      const r = await fetch('/api/infer-types', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+      if (!r.ok) return {};
+      const d = await r.json();
+      const out = {};
+      for (const [name, v] of Object.entries((d && d.vars) || {})) {
+        // drop builtins (list/dict/… — not library blocks) and __main__ (user-defined classes in the
+        // script itself — let the __user__ heuristic suppress them, don't introspect the wrong __main__).
+        if (v && v.type && v.module && v.module !== 'builtins' && v.module !== '__main__') out[name] = v;
+      }
+      return out;
+    } catch (_) { return {}; }
+  };
+
+  // Register the classes Jedi resolved (e.g. ListPortInfo from serial.tools.list_ports_common) — just
+  // that class + its methods/properties — so `p.device` colours precisely. This is what makes a
+  // return-typed receiver work where static heuristics can't. Additive; returns true if the toolbox grew.
+  const registerInferredClasses = async (jediVars) => {
+    const reg = window.BlockPyLibRegistry;
+    if (!reg) return false;
+    const byModule = new Map();
+    for (const v of Object.values(jediVars || {})) { if (!byModule.has(v.module)) byModule.set(v.module, new Set()); byModule.get(v.module).add(v.type); }
+    let changed = false;
+    for (const [module, types] of byModule) {
+      const spec = await getSpec(module);
+      if (!spec) continue;
+      for (const t of types) classNamesRef.current.add(t);
+      const fresh = (spec.entries || []).filter((e) => {
+        const want = (e.kind === 'class' && types.has(e.name)) || ((e.kind === 'method' || e.kind === 'property') && types.has(e.owner));
+        if (!want) return false;
+        const key = `${module}::${e.kind}::${e.owner || ''}.${e.name}`;
+        if (registeredSymRef.current.has(key)) return false;
+        registeredSymRef.current.add(key);
+        return true;
+      });
+      if (fresh.length) { registerUsedLibrary({ ...spec, entries: fresh }); changed = true; }
+    }
+    return changed;
+  };
+
   const autoBlockifyRefs = async (ir) => {
     const reg = window.BlockPyLibRegistry;
     const imp = window.BlockPyLibImport;
     if (!reg || !imp) return false;
     const { moduleAttrs, bareAttrs, bareFuncs } = referencedSymbols(ir);
     let changed = false;
-    const specFor = async (module) => {
-      let spec = introspectedSpecsRef.current.get(module);
-      if (spec === undefined) {
-        const data = await introspectModule(module, { quiet: true, maxEntries: 3000 });
-        spec = (data && data.spec) ? data.spec : null;
-        introspectedSpecsRef.current.set(module, spec);
-        if (!spec) setLogs((prev) => [...prev, `[Convert] "${module}" isn't installed — its blocks stay generic. Install it in the Library pip field (by package name).`]);
-        if (spec) for (const e of (spec.entries || [])) if (e.kind === 'class') classNamesRef.current.add(e.name);   // Tier-1 type inference
-      }
-      return spec;
-    };
     for (const [module, attrs] of moduleAttrs) {
-      const spec = await specFor(module);
+      const spec = await getSpec(module);
       if (!spec) continue;
       const reduced = (spec.entries || []).filter((e) => {
         const used = attrs.has(e.name) || ((e.kind === 'method' || e.kind === 'property') && bareAttrs.has(e.name));
@@ -209,7 +256,7 @@ export default function App() {
     // Bare from-imports (`from math import sqrt; sqrt(x)`): register a BARE spec (module '') that lowers
     // to `sqrt(...)` and colours the bare call, filed under the source library's tab. Text stays lossless.
     for (const [module, syms] of (bareFuncs || new Map())) {
-      const spec = await specFor(module);
+      const spec = await getSpec(module);
       if (!spec) continue;
       for (const sym of syms) {
         const key = `${module}::bare::${sym}`;
@@ -229,7 +276,7 @@ export default function App() {
   // object's dog.name does NOT colour). `var = Lib.Class(...)`/`Class(...)` -> that class; `var =
   // UserClass(...)` (a class defined in this code) -> '__user__' (suppress). Everything else stays
   // name-based. Mutates `_ownerType` onto Attribute nodes; irToBlockly carries it (display-only).
-  const annotateOwnerTypes = (ir) => {
+  const annotateOwnerTypes = (ir, jediVars) => {
     const userClasses = new Set();
     const walk = (node, fn) => {
       if (!node || typeof node !== 'object') return;
@@ -241,6 +288,8 @@ export default function App() {
     const libClasses = classNamesRef.current;
     const calleeName = (fn) => (!fn ? null : fn.type === 'Name' ? fn.id : fn.type === 'Attribute' ? fn.attr : null);
     const varType = new Map();
+    // Tier-2 (Jedi) is authoritative — it resolves return types/subscripts the heuristic can't (p:ListPortInfo).
+    for (const [name, v] of Object.entries(jediVars || {})) if (v && v.type) varType.set(name, v.type);
     // A method's receiver (`self`) is always an instance of a user-defined class in converted code, so
     // `self.attr` must NOT colour by name (it's the user's own attribute, not a library property).
     walk(ir && ir.body, (n) => {
@@ -255,8 +304,8 @@ export default function App() {
     });
     walk(ir && ir.body, (n) => {
       if (n.type === 'Assign' && Array.isArray(n.targets) && n.targets.length === 1
-          && n.targets[0].type === 'Name' && n.value && n.value.type === 'Call') {
-        const cn = calleeName(n.value.func);
+          && n.targets[0].type === 'Name' && n.value && n.value.type === 'Call' && !varType.has(n.targets[0].id)) {
+        const cn = calleeName(n.value.func);   // fills only what Jedi didn't resolve
         if (cn) {
           if (userClasses.has(cn)) varType.set(n.targets[0].id, '__user__');
           else if (libClasses.has(cn)) varType.set(n.targets[0].id, cn);
@@ -303,8 +352,12 @@ export default function App() {
       // (auto-installing a missing library) BEFORE building blocks, so lib.func()/lib.CONST/obj.attr
       // paint recognized (emerald) on first render and every canvas block has a toolbox home.
       const grew = await autoBlockifyRefs(ir);
-      if (grew) refreshToolboxNow();
-      annotateOwnerTypes(ir);   // Tier-1: tag attribute receivers with their inferred class for precise colouring
+      // Tier-2: Jedi resolves receiver types (incl. return types like p:ListPortInfo); register those
+      // classes' members and use them for precise colouring. Degrades silently if the backend/Jedi is off.
+      const jediVars = await inferTypes(currentCode);
+      const grew2 = await registerInferredClasses(jediVars);
+      if (grew || grew2) refreshToolboxNow();
+      annotateOwnerTypes(ir, jediVars);   // tag attribute receivers with their inferred class for precise colouring
       if (myGen !== syncGenRef.current) return;   // a newer sync started while we awaited introspection/install
       const blocklyJson = window.BlockPyIR.irToBlockly(ir);
       // Library calls stay as the unified ir_call block; ir_call.updateShape_ styles a registered

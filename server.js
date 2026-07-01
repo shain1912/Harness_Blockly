@@ -439,6 +439,23 @@ app.post('/api/deps', (req, res) => {
   });
 });
 
+// Tier-2 receiver-type oracle: Jedi infers the class of each attribute receiver in the code (static,
+// no execution). Feeds the DISPLAY layer only (precise property colouring + registering the resolved
+// class), so a wrong/absent inference is harmless. Degrades to {available:false} without Jedi.
+app.post('/api/infer-types', (req, res) => {
+  const code = (req.body && req.body.code) || '';
+  if (typeof code !== 'string' || !code.trim()) return res.json({ available: true, vars: {} });
+  const f = path.join(genBase(), 'blockpy-gen', 'src', 'introspect', '_infertypes.py');
+  let child;
+  try { child = spawn(PYTHON_CMD, [f], { env: process.env }); }
+  catch (e) { return res.json({ available: false, vars: {} }); }
+  let out = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.on('error', () => res.json({ available: false, vars: {} }));
+  child.on('close', () => { try { res.json(JSON.parse(out)); } catch (_) { res.json({ available: false, vars: {} }); } });
+  try { child.stdin.write(code); child.stdin.end(); } catch (_) { /* child died — 'close' handles it */ }
+});
+
 // ─── 3.6 Abstract library by purpose (LLM curation + macros, grounded) ────────
 // Given an introspected LibrarySpec (ground truth) + a purpose, MiniMax SELECTS a relevant
 // subset, GROUPS + RELABELS it, and proposes composite MACROS — but only references real
