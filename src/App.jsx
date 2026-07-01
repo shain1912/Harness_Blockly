@@ -50,6 +50,7 @@ export default function App() {
 
   // Synced status state
   const [syntaxStatus, setSyntaxStatus] = useState({ valid: true, error: '' });
+  const [isConverting, setIsConverting] = useState(false);   // spinner while Convert introspects + builds blocks
   // Phase 4: desugar-as-feature is OPT-IN. Default OFF -> Convert preserves SUGAR blocks (the
   // "intended coexistence" IR behavior); ON rewrites sugar to elementary loop/conditional blocks.
   const [shouldDesugar, setShouldDesugar] = useState(false);
@@ -70,7 +71,6 @@ export default function App() {
   const syncGenRef = useRef(0);   // monotonic id; only the LATEST sync's workspace load is applied
   const blocklySnapshotRef = useRef(null);
   const introspectedSpecsRef = useRef(new Map());  // dotted module -> cached LibrarySpec (or null) this session
-  const pipAttemptedRef = useRef(new Set());        // modules we've already tried to auto-pip-install (once each)
   const registeredSymRef = useRef(new Set());       // module::kind::owner.name already materialized (convert-time)
   const associatedPythonRef = useRef('');
   const abstractionEngineRef = useRef(null);
@@ -142,18 +142,6 @@ export default function App() {
     return { moduleAttrs, bareAttrs };
   };
 
-  // Stream a `pip install <pkg>` (backend). Returns true on success. Used by both the Library pip
-  // button and convert-time auto-install of a referenced-but-missing library.
-  const pipInstall = async (pkg) => {
-    try {
-      const resp = await fetch('/api/pip-install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ package: pkg }) });
-      if (!resp.ok || !resp.body) return false;
-      const reader = resp.body.getReader(); const dec = new TextDecoder(); let out = '';
-      for (;;) { const { done, value } = await reader.read(); if (done) break; const t = dec.decode(value, { stream: true }); if (t) out += t; }
-      return /successfully installed|already satisfied/i.test(out) && !/no matching distribution|could not find a version/i.test(out);
-    } catch (_) { return false; }
-  };
-
   // Register only SPECIFIC symbols of a library (additive, idempotent — NO removeModules), so a
   // library's toolbox tab GROWS to match what the code actually uses instead of dumping the whole API.
   const registerUsedLibrary = (librarySpec) => {
@@ -176,9 +164,11 @@ export default function App() {
   };
 
   // Convert-time exception rule: every library symbol the code references becomes a recognized block in
-  // its proper toolbox place, on first paint. Introspects each referenced module (cached; auto-pip-installs
-  // it once if missing), then materializes ONLY the used entries (functions/classes/constants by name;
-  // methods/properties by name for local receivers). Returns true if the toolbox grew.
+  // its proper toolbox place, on first paint. Introspects each referenced module that is ALREADY
+  // installed (cached), then materializes ONLY the used entries (functions/classes/constants by name;
+  // methods/properties by name for local receivers). No auto-install: a not-installed library stays a
+  // generic block — install it once via the Library pip field using its PACKAGE name (the single
+  // install path; note the package name may differ from the import, e.g. opencv-python -> cv2).
   const autoBlockifyRefs = async (ir) => {
     const reg = window.BlockPyLibRegistry;
     if (!reg || !window.BlockPyLibImport) return false;
@@ -187,16 +177,10 @@ export default function App() {
     for (const [module, attrs] of moduleAttrs) {
       let spec = introspectedSpecsRef.current.get(module);
       if (spec === undefined) {
-        let data = await introspectModule(module, { quiet: true, maxEntries: 3000 });
-        if ((!data || !data.spec) && !pipAttemptedRef.current.has(module)) {
-          pipAttemptedRef.current.add(module);
-          const top = module.split('.')[0];
-          setLogs((prev) => [...prev, `[pip] Auto-installing "${top}" (referenced in converted code)…`]);
-          if (await pipInstall(top)) data = await introspectModule(module, { quiet: true, maxEntries: 3000 });
-          setLogs((prev) => [...prev, (data && data.spec) ? `[pip] Installed "${top}".` : `[pip] Could not auto-install "${top}" — its calls stay generic.`]);
-        }
+        const data = await introspectModule(module, { quiet: true, maxEntries: 3000 });
         spec = (data && data.spec) ? data.spec : null;
         introspectedSpecsRef.current.set(module, spec);
+        if (!spec) setLogs((prev) => [...prev, `[Convert] "${module}" isn't installed — its blocks stay generic. Install it in the Library pip field (by package name).`]);
       }
       if (!spec) continue;
       const reduced = (spec.entries || []).filter((e) => {
@@ -222,6 +206,7 @@ export default function App() {
 
     isSyncingFromCodeRef.current += 1;
     const myGen = ++syncGenRef.current;
+    setIsConverting(true);
 
     try {
       // Snapshot Recovery Check: unchanged Python since the last block edit restores the saved
@@ -278,6 +263,7 @@ export default function App() {
       setSyntaxStatus({ valid: false, error: err.message });
     } finally {
       isSyncingFromCodeRef.current -= 1;
+      if (myGen === syncGenRef.current) setIsConverting(false);   // only the latest sync clears the spinner
     }
   };
 
@@ -1321,7 +1307,13 @@ for i in range(4):
               </div>
             </div>
             
-            <div className="editor-content-wrapper" style={{ height: 'calc(100% - 48px)' }}>
+            <div className="editor-content-wrapper" style={{ height: 'calc(100% - 48px)', position: 'relative' }}>
+              {isConverting && (
+                <div className="convert-overlay" role="status" aria-live="polite">
+                  <div className="convert-spinner" />
+                  <div className="convert-overlay-text">Converting…<span>introspecting libraries &amp; building blocks</span></div>
+                </div>
+              )}
               <div style={{ display: activeEditorTab === 'blockly' ? 'block' : 'none', height: '100%' }}>
                 <BlocklyEditor
                   onCodeChange={handleBlocklyCodeChange}
