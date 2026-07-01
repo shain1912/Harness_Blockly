@@ -3,11 +3,16 @@ import React, { useState, useMemo, useEffect } from 'react';
 export default function LibraryManager({
   onBlockify,
   onCurate,
+  curationProposal = null,
+  onConfirmCuration,
+  onCancelCuration,
+  onRegenerateCuration,
   onRemoveLibrary,
   onClearLibraries,
   installedBlocks,
   aiThoughts,
   isAbstracting,
+  isCurating = false,
   pipPkg = '',
   onPipPkgChange,
   onPipInstallShell,
@@ -24,6 +29,19 @@ export default function LibraryManager({
   const [curateMod, setCurateMod] = useState('');
   const [curatePurpose, setCuratePurpose] = useState('');
   const [curateLevel, setCurateLevel] = useState('intermediate');   // 초/중/고 abstraction level
+  // Preview draft (edited copy of the AI proposal): per-entry checked/group, per-macro checked, tab label.
+  const [draftChecks, setDraftChecks] = useState([]);
+  const [draftGroups, setDraftGroups] = useState([]);
+  const [draftMacroChecks, setDraftMacroChecks] = useState([]);
+  const [draftTabLabel, setDraftTabLabel] = useState('');
+  useEffect(() => {
+    if (!curationProposal) return;
+    setDraftChecks(curationProposal.selected.map(() => true));
+    setDraftGroups(curationProposal.selected.map((s) => s.group || ''));
+    setDraftMacroChecks(curationProposal.macros.map(() => true));
+    setDraftTabLabel('');
+  }, [curationProposal]);
+  const draftCheckedCount = draftChecks.filter(Boolean).length + draftMacroChecks.filter(Boolean).length;
 
   // AI key config (Curate needs MiniMax). Status comes from the backend; raw keys never returned.
   const [aiCfg, setAiCfg] = useState({ configured: false, count: 0, masked: [], configPath: '' });
@@ -172,8 +190,8 @@ export default function LibraryManager({
               onChange={(e) => setCuratePurpose(e.target.value)}
               placeholder="purpose — e.g. 픽 앤 플레이스: 이동·집기·놓기"
             />
-            <button type="submit" className="btn btn-primary btn-sm" disabled={isAbstracting || !curateMod.trim() || !curatePurpose.trim()}>
-              {isAbstracting ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>} Curate
+            <button type="submit" className="btn btn-primary btn-sm" disabled={isAbstracting || isCurating || !curateMod.trim() || !curatePurpose.trim()}>
+              {isCurating ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>} Curate
             </button>
           </form>
           {/* Abstraction level: same library, different granularity (초=고수준·각도만 … 고=저수준·PWM/타이밍). */}
@@ -191,6 +209,66 @@ export default function LibraryManager({
             ))}
           </div>
           <small className="form-hint">Keeps the full library tab and adds a separate <b>★ curated</b> tab — the AI picks just the blocks (grouped) needed for that goal, at the chosen <b>수준</b>. Needs an AI key (below).</small>
+
+          {/* PREVIEW: the AI proposal — review/edit before the ★ tab is created (LLM proposes, you confirm) */}
+          {curationProposal && (
+            <div className="curate-preview">
+              <div className="curate-preview-head">
+                <span><i className="fa-solid fa-list-check"></i> 미리보기 — <b>{curationProposal.module}</b> · {curationProposal.purpose} · {({ beginner: '초', intermediate: '중', advanced: '고' })[curationProposal.level] || curationProposal.level}</span>
+                <span className="curate-preview-count">{draftCheckedCount} 선택됨</span>
+              </div>
+              <input
+                className="pip-input curate-tablabel"
+                type="text"
+                value={draftTabLabel}
+                onChange={(e) => setDraftTabLabel(e.target.value)}
+                placeholder={`탭 이름 (비우면: ${curationProposal.purpose})`}
+              />
+              <ul className="curate-preview-list">
+                {curationProposal.selected.map((s, i) => (
+                  <li key={s.ref + i} className={`curate-row${draftChecks[i] ? '' : ' unchecked'}`}>
+                    <label className="curate-row-main" title={s.ref}>
+                      <input type="checkbox" checked={!!draftChecks[i]} onChange={() => setDraftChecks((c) => c.map((v, j) => (j === i ? !v : v)))} />
+                      <span className="curate-row-title">{s.realTitle}</span>
+                      <span className={`curate-badge ${s.hasOutput ? 'value' : 'cmd'}`}>{s.hasOutput ? '값' : '실행'}</span>
+                    </label>
+                    <input
+                      className="curate-group-input"
+                      type="text"
+                      value={draftGroups[i] || ''}
+                      onChange={(e) => setDraftGroups((g) => g.map((v, j) => (j === i ? e.target.value : v)))}
+                      placeholder="그룹"
+                      title="toolbox 하위 카테고리 (선택)"
+                    />
+                  </li>
+                ))}
+                {curationProposal.macros.map((m, i) => (
+                  <li key={'m' + i} className={`curate-row curate-macro${draftMacroChecks[i] ? '' : ' unchecked'}`}>
+                    <label className="curate-row-main">
+                      <input type="checkbox" checked={!!draftMacroChecks[i]} onChange={() => setDraftMacroChecks((c) => c.map((v, j) => (j === i ? !v : v)))} />
+                      <span className="curate-row-title">{m.label || m.name}</span>
+                      <span className="curate-badge macro">매크로</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <div className="curate-preview-actions">
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={isCurating || draftCheckedCount === 0}
+                  onClick={() => onConfirmCuration && onConfirmCuration({
+                    tabLabel: draftTabLabel,
+                    entries: curationProposal.selected.map((s, i) => ({ ref: s.ref, group: draftGroups[i], checked: !!draftChecks[i] })),
+                    macros: curationProposal.macros.map((m, i) => ({ ...m, checked: !!draftMacroChecks[i] })),
+                  })}
+                ><i className="fa-solid fa-check"></i> ★ 탭 만들기</button>
+                <button className="btn btn-secondary btn-sm" disabled={isCurating} onClick={() => onRegenerateCuration && onRegenerateCuration()}>
+                  {isCurating ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-rotate"></i>} 다시 생성
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => onCancelCuration && onCancelCuration()}><i className="fa-solid fa-xmark"></i> 취소</button>
+              </div>
+            </div>
+          )}
 
           {/* AI key — saved per-machine (NOT bundled into the build) */}
           <div className="ai-key-box">

@@ -518,6 +518,27 @@ body {
 .curate-level-btn:hover { border-color: #009688; }
 .curate-level-btn.active { background: #009688; border-color: #009688; color: #fff; font-weight: 600; }
 
+/* Curate preview — review/edit the AI proposal before the ★ tab is created. */
+.curate-preview { margin: 8px 0 4px; padding: 8px 10px; border: 1px solid rgba(0, 150, 136, 0.35); border-radius: 8px; background: rgba(0, 150, 136, 0.05); }
+.curate-preview-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+.curate-preview-count { opacity: 0.7; white-space: nowrap; }
+.curate-tablabel { width: 100%; margin-bottom: 6px; }
+.curate-preview-list { list-style: none; margin: 0 0 8px; padding: 0; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+.curate-row { display: flex; align-items: center; gap: 6px; padding: 2px 2px; }
+.curate-row.unchecked { opacity: 0.45; }
+.curate-row-main { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
+.curate-row-main input[type=checkbox] { flex: none; }
+.curate-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.curate-badge { flex: none; font-size: 10px; padding: 1px 6px; border-radius: 999px; opacity: 0.85; }
+.curate-badge.value { background: rgba(0, 150, 136, 0.18); color: #0f766e; }
+.curate-badge.cmd { background: rgba(106, 138, 91, 0.2); color: #4b5d3a; }
+.curate-badge.macro { background: rgba(126, 87, 194, 0.18); color: #6a3fb0; }
+:root.dark .curate-badge.value { color: #5eead4; }
+:root.dark .curate-badge.cmd { color: #b6c99a; }
+:root.dark .curate-badge.macro { color: #c4a7f0; }
+.curate-group-input { flex: none; width: 84px; font-size: 11px; padding: 2px 6px; }
+.curate-preview-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
 /* Convert loading motion — overlays the editor pane while Convert introspects + builds blocks. */
 .convert-overlay {
   position: absolute;

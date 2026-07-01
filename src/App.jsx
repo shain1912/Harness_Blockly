@@ -51,6 +51,9 @@ export default function App() {
   // Synced status state
   const [syntaxStatus, setSyntaxStatus] = useState({ valid: true, error: '' });
   const [isConverting, setIsConverting] = useState(false);   // spinner while Convert introspects + builds blocks
+  const [curationProposal, setCurationProposal] = useState(null);   // Curate preview (null = no pending proposal)
+  const [isCurating, setIsCurating] = useState(false);              // Curate busy flag — separate from isAbstracting (Blockify/pip) so Cancel can't clear Blockify's spinner
+  const curateReqRef = useRef(0);                                    // newest propose wins; stale awaits are dropped
   // Phase 4: desugar-as-feature is OPT-IN. Default OFF -> Convert preserves SUGAR blocks (the
   // "intended coexistence" IR behavior); ON rewrites sugar to elementary loop/conditional blocks.
   const [shouldDesugar, setShouldDesugar] = useState(false);
@@ -245,14 +248,26 @@ export default function App() {
     // used-symbols-only so the toolbox doesn't flood. `whole` is the per-module policy switch.
     const WHOLE_CAP = 100;
     for (const [module, attrs] of moduleAttrs) {
-      const spec = await getSpec(module);
+      let spec = await getSpec(module);
+      let classOnly = null;      // set when `module` was actually parent.ClassName (a from-imported class)
+      if (!spec && module.indexOf('.') >= 0) {
+        // `from datetime import datetime; datetime.now()` — `datetime` is a CLASS, not a submodule, so
+        // `datetime.datetime` doesn't import. Retry the PARENT module and register just that class's
+        // members, so datetime.now() resolves (methodHit) instead of staying a generic call.
+        const dot = module.lastIndexOf('.');
+        const parent = module.slice(0, dot), cls = module.slice(dot + 1);
+        const pspec = await getSpec(parent);
+        if (pspec && (pspec.entries || []).some((e) => e.kind === 'class' && e.name === cls)) { spec = pspec; classOnly = cls; }
+      }
       if (!spec) continue;
       const all = spec.entries || [];
-      const whole = all.length <= WHOLE_CAP;
+      const whole = !classOnly && all.length <= WHOLE_CAP;
       const reduced = all.filter((e) => {
-        const used = whole || attrs.has(e.name) || ((e.kind === 'method' || e.kind === 'property') && bareAttrs.has(e.name));
+        const used = classOnly
+          ? ((e.kind === 'class' && e.name === classOnly) || ((e.kind === 'method' || e.kind === 'property') && e.owner === classOnly))
+          : (whole || attrs.has(e.name) || ((e.kind === 'method' || e.kind === 'property') && bareAttrs.has(e.name)));
         if (!used) return false;
-        const key = `${module}::${e.kind}::${e.owner || ''}.${e.name}`;
+        const key = `${spec.module}::${e.kind}::${e.owner || ''}.${e.name}`;
         if (registeredSymRef.current.has(key)) return false;
         registeredSymRef.current.add(key);
         return true;
@@ -1138,27 +1153,30 @@ for i in range(4):
     }
   };
 
-  // Curate: full-blockify the library (so every block stays available) AND add a SEPARATE, small
-  // purpose-driven tab — a VIEW over those blocks that the AI picks for the stated goal. The full
-  // tab is never wiped; the curated tab shows just a handful, grouped. Falls back gracefully (full
-  // tab only) if the AI backend is unreachable.
-  const handleCurateLibrary = async (moduleName, purpose, level) => {
+  // Curate is a two-step, human-in-the-loop flow: (1) proposeCuration full-blockifies the library
+  // (so every block stays available + the curated view's TYPES exist even on Cancel) and asks the AI
+  // for a purpose-driven selection, then shows a PREVIEW — no ★ tab yet. (2) The user checks/unchecks
+  // and edits the tab name / per-item groups, then Confirm builds the ★ tab (a lossless VIEW over the
+  // already-registered types — check/uncheck only omits a type from the view, never changes lowering).
+  // A monotonic token makes the newest propose win and prevents a stale in-flight result from
+  // resurrecting a proposal after Confirm/Cancel/Regenerate.
+  const proposeCuration = async (moduleName, purpose, level) => {
     const mod = (moduleName || '').trim();
     const want = (purpose || '').trim();
     const lvl = level || 'intermediate';
     if (!mod || !want) return;
+    const reqId = ++curateReqRef.current;
     const reg = window.BlockPyLibRegistry;
     const imp = window.BlockPyLibImport;
-    setIsAbstracting(true);
+    setIsCurating(true);
     setAiThoughts([]);
     setLogs((prev) => [...prev, `[Curate] Introspecting "${mod}", then asking the AI to pick blocks for: "${want}"…`]);
     try {
       const data = await introspectModule(mod);
-      if (!data) return;
+      if (!data || reqId !== curateReqRef.current) return;
       const librarySpec = data.spec;
-      // Full library first (idempotent) so the curated view's types exist and the full tab stays.
-      const { mapped } = registerFullLibrary(librarySpec);
-
+      const { mapped } = registerFullLibrary(librarySpec);   // full tab + TYPES exist even if user Cancels
+      refreshToolboxNow();                                    // show the full tab immediately, before the AI round-trip
       let cres = null;
       try {
         cres = await fetch('/api/abstract-library', {
@@ -1168,42 +1186,72 @@ for i in range(4):
       } catch (_) { cres = null; }
       let cdata = null;
       if (cres && cres.ok) { try { cdata = await cres.json(); } catch (_) { cdata = null; } }
+      if (reqId !== curateReqRef.current) return;             // superseded while we awaited the AI
       if (!cres || !cres.ok || !cdata || !cdata.success) {
         const why = !cres ? 'backend unreachable' : (!cres.ok ? `backend ${cres.status}` : ((cdata && cdata.error) || 'AI failed'));
         setLogs((prev) => [...prev, `[Curate] ${why} — the full "${mod}" tab is available; no curated tab added.`]);
-        refreshToolboxNow();
         return;
       }
-      // Map the AI's selection to EXISTING block types (both forms per entry); skip unknown refs.
-      const cur = imp.curationToRegistrySpecs(librarySpec, cdata.selected || []);
-      const items = [];
-      for (const s of cur.specs) {
-        const type = reg.blockType(s);
-        if (reg.getLibSpec(type)) items.push({ type, label: s.title, group: s.group || '' });
+      // Resolve each AI ref to a REAL, registered block (one preview row per ref). realTitle is the
+      // introspected title shown read-only (the block face); label editing is intentionally NOT offered
+      // because the curated flyout renders the block from the spec, not from stored item labels.
+      const selected = [];
+      for (const sel of (cdata.selected || [])) {
+        if (!sel || !sel.ref) continue;
+        const probe = imp.curationToRegistrySpecs(librarySpec, [{ ref: sel.ref }]);
+        const good = probe.specs.find((s) => reg.getLibSpec(reg.blockType(s)));
+        if (!good) continue;
+        selected.push({ ref: sel.ref, group: sel.group || '', realTitle: good.title, hasOutput: !!good.hasOutput, checked: true });
       }
-      const macros = imp.macrosToRegistry(librarySpec, cdata.macros || []);
-      // include level in the key so 초/중/고 views of the same purpose are distinct tabs.
-      const lvlTag = { beginner: '초', intermediate: '중', advanced: '고' }[cdata.level || lvl] || '';
-      const key = `${librarySpec.module} · ${want}${lvlTag ? ' · ' + lvlTag : ''}`.slice(0, 60);
-      const label = `${want}${lvlTag ? ` (${lvlTag})` : ''}`;
-      const res = reg.addCuration({ key, label, lib: librarySpec.module, items, macros });
-      if (!res.ok) {
-        setLogs((prev) => [...prev, `[Curate] AI returned no usable blocks for "${want}" — the full "${mod}" tab is available.`]);
-        refreshToolboxNow();
-        return;
-      }
-      ensureLibraryImportBlock(librarySpec.module, mapped.alias);
-      refreshToolboxNow();
+      const macros = imp.macrosToRegistry(librarySpec, cdata.macros || []).map((m) => ({ ...m, checked: true }));
+      setCurationProposal({ module: mod, purpose: want, level: cdata.level || lvl, librarySpec, alias: mapped.alias, importStmt: mapped.importStmt, selected, macros, thoughts: cdata.thoughts || [], dropped: cdata.dropped || {} });
       setAiThoughts([...(cdata.thoughts || []),
-        `Curated ${items.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} at ${cdata.level || lvl} level into a new tab "★ ${label}".`,
-        `Add this import to run the blocks: ${mapped.importStmt}`]);
-      setLogs((prev) => [...prev, `[Curate] ✅ New tab "★ ${label}" (${cdata.level || lvl}) — ${items.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} for "${mod}". The full library tab is still available.`]);
+        `Proposed ${selected.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} for "${want}" (${cdata.level || lvl}) — review below, then Confirm to create the ★ tab.`]);
     } catch (err) {
       console.error(err);
       setLogs((prev) => [...prev, `[Curate Error] ${err.message}`]);
     } finally {
-      setIsAbstracting(false);
+      if (reqId === curateReqRef.current) setIsCurating(false);
     }
+  };
+
+  // Confirm: build the ★ tab from the user's EDITED proposal (checked entries + edited groups + tab
+  // label). Re-filters to still-registered types (the library could have been removed mid-preview).
+  const handleConfirmCuration = (edited) => {
+    const p = curationProposal;
+    if (!p) return;
+    const reg = window.BlockPyLibRegistry;
+    const imp = window.BlockPyLibImport;
+    const chosen = (edited.entries || []).filter((e) => e.checked).map((e) => ({ ref: e.ref, group: (e.group || '').trim() }));
+    const chosenMacros = (edited.macros || []).filter((m) => m.checked && m.block);
+    curateReqRef.current++;                                   // any in-flight propose is now stale
+    setCurationProposal(null);
+    if (!chosen.length && !chosenMacros.length) { setLogs((prev) => [...prev, `[Curate] Nothing selected — the full "${p.module}" tab is available.`]); return; }
+    const cur = imp.curationToRegistrySpecs(p.librarySpec, chosen);
+    const items = [];
+    for (const s of cur.specs) { const type = reg.blockType(s); if (reg.getLibSpec(type)) items.push({ type, label: s.title, group: s.group || '' }); }
+    const lvlTag = { beginner: '초', intermediate: '중', advanced: '고' }[p.level] || '';
+    const key = `${p.librarySpec.module} · ${p.purpose}${lvlTag ? ' · ' + lvlTag : ''}`.slice(0, 60);
+    const defLabel = `${p.purpose}${lvlTag ? ` (${lvlTag})` : ''}`;
+    const label = ((edited.tabLabel || '').trim() || defLabel).slice(0, 48);
+    const res = reg.addCuration({ key, label, lib: p.librarySpec.module, items, macros: chosenMacros });
+    if (!res.ok) { setLogs((prev) => [...prev, `[Curate] No usable blocks left — the full "${p.module}" tab is available.`]); refreshToolboxNow(); return; }
+    ensureLibraryImportBlock(p.librarySpec.module, p.alias);
+    refreshToolboxNow();
+    setAiThoughts([`Created "★ ${label}" — ${items.length} block(s)${chosenMacros.length ? ` + ${chosenMacros.length} macro(s)` : ''}.`, `Add this import to run the blocks: ${p.importStmt}`]);
+    setLogs((prev) => [...prev, `[Curate] ✅ New tab "★ ${label}" (${p.level}) — ${items.length} block(s)${chosenMacros.length ? ` + ${chosenMacros.length} macro(s)` : ''} for "${p.module}". The full library tab is still available.`]);
+  };
+
+  const handleCancelCuration = () => {
+    curateReqRef.current++;                                   // invalidate any in-flight propose
+    setCurationProposal(null);
+    setIsCurating(false);                                     // clears ONLY the curate spinner (never Blockify's)
+    setLogs((prev) => [...prev, `[Curate] Cancelled — the full library tab is still available.`]);
+  };
+
+  const handleRegenerateCuration = () => {
+    const p = curationProposal;
+    if (p) proposeCuration(p.module, p.purpose, p.level);     // bumps token, replaces proposal on success
   };
 
   const handleBlocklyCodeChange = (newCode) => {
@@ -1326,12 +1374,17 @@ for i in range(4):
                 <div className="ai-tab-scroll">
                   <LibraryManager
                     onBlockify={handleBlockifyLibrary}
-                    onCurate={handleCurateLibrary}
+                    onCurate={proposeCuration}
+                    curationProposal={curationProposal}
+                    onConfirmCuration={handleConfirmCuration}
+                    onCancelCuration={handleCancelCuration}
+                    onRegenerateCuration={handleRegenerateCuration}
                     onRemoveLibrary={handleRemoveLibrary}
                     onClearLibraries={handleClearLibraries}
                     installedBlocks={installedBlocks}
                     aiThoughts={aiThoughts}
                     isAbstracting={isAbstracting}
+                    isCurating={isCurating}
                     pipPkg={pipPkg}
                     onPipPkgChange={setPipPkg}
                     onPipInstallShell={handlePipInstallShell}
