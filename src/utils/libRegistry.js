@@ -282,6 +282,26 @@ function removeModules(modules) {
   return removed;
 }
 
+// Remove exactly ONE source library's call/const/prop blocks (by its `lib` tag), so a re-Blockify /
+// re-Curate replaces just that library — WITHOUT touching other tabs. Unlike removeModules (which
+// keys on the receiver-alias `module`, a lowercased CLASS NAME shared across libraries — e.g. two
+// libs each with a `Timer`/`Client`/`Serial` class both register under module 'timer', so removing
+// one wiped the other), this scopes strictly to the source library. Leaves macros + curations alone.
+function removeLibrarySpecs(lib) {
+  const B = (typeof window !== 'undefined' ? window : global).Blockly;
+  const removed = [];
+  for (const [type, spec] of [...SPECS]) {
+    if (_libKey(spec) !== lib || spec.builtin) continue;
+    SPECS.delete(type);
+    removed.push(type);
+    if (B && B.Blocks && B.Blocks[type]) { try { delete B.Blocks[type]; } catch (_) { /* keep going */ } }
+  }
+  for (const [d, c] of [...CONSTS]) if (_libKey(c) === lib) CONSTS.delete(d);
+  for (const [k, p] of [...PROPS]) if (_libKey(p) === lib) PROPS.delete(k);
+  persist();
+  return removed;
+}
+
 function removeMacrosBySource(src) {
   for (const [name, m] of [...MACROS]) if ((m.srcModule || '') === src) MACROS.delete(name);
   persistMacros();
@@ -554,7 +574,7 @@ const api = (typeof window !== 'undefined' ? window : global);
 api.BlockPyLibRegistry = {
   registerLibBlock, getLibSpec, findLibCall, listLibBlocks, removeLibrary, clearAll,
   persist, hydrate, validateSpecParse, blockType, staticCheck, specFromDescriptor,
-  removeModules, addMacro, listMacros, removeMacro, removeMacrosBySource, persistMacros, hydrateMacros,
+  removeModules, removeLibrarySpecs, addMacro, listMacros, removeMacro, removeMacrosBySource, persistMacros, hydrateMacros,
   listLibraries, removeLibraryByTab, removeAllUserLibraries,
   addCuration, listCurations, removeCuration, removeCurationsByLib, persistCurations, hydrateCurations,
   registerConst, findConst, listConsts, persistConsts, hydrateConsts,

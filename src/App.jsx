@@ -1195,7 +1195,13 @@ for i in range(4):
     const reg = window.BlockPyLibRegistry;
     const imp = window.BlockPyLibImport;
     const mapped = imp.librarySpecToRegistrySpecs(librarySpec);
-    const removedTypes = reg.removeModules(imp.libraryModules(librarySpec));
+    // Replace ONLY this library's prior blocks, scoped by its `lib` tag. (The old
+    // removeModules(libraryModules) keyed on the receiver-alias module — a shared lowercased class
+    // name — so Blockifying/Curating a library with a common class like `Timer`/`Client` WIPED other
+    // libraries' same-named blocks. removeLibrarySpecs is scoped strictly to the source library.)
+    const removedTypes = reg.removeLibrarySpecs
+      ? reg.removeLibrarySpecs(librarySpec.module)
+      : reg.removeModules(imp.libraryModules(librarySpec));
     const registered = [];
     let rejected = 0;
     for (const spec of mapped.specs) {
