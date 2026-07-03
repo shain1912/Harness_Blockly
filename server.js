@@ -61,6 +61,23 @@ function safeResolve(relPath) {
 
 const PYTHON_CMD = process.env.PYTHON_CMD || (process.platform === 'win32' ? 'python' : 'python3');
 
+// Kill a spawned python AND anything it spawned. On win32 child.kill() only signals the direct
+// process (grandchildren survive), so take down the whole tree with taskkill; elsewhere SIGKILL.
+function killTree(child) {
+  if (!child || child.killed || child.pid == null) return;
+  try {
+    if (process.platform === 'win32') {
+      // no-op 'error' handler: an unhandled ChildProcess 'error' would itself crash the process
+      spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+        .on('error', () => { try { child.kill(); } catch (_) {} });
+    } else {
+      child.kill('SIGKILL');
+    }
+  } catch (_) {
+    try { child.kill(); } catch (_) {}
+  }
+}
+
 // ─── blockpy-gen introspection (ESM, lazy-imported into this CJS server) ───────
 // /api/blockify turns an importable module into a LibrarySpec by importing it in a python
 // subprocess (executes its top-level code) — the SAME trust level the app already grants
@@ -81,7 +98,12 @@ let _introspectPromise = null;
 function getIntrospect() {
   if (!_introspectPromise) {
     const url = pathToFileURL(path.join(genBase(), 'blockpy-gen', 'src', 'introspect', 'introspect.js')).href;
-    _introspectPromise = import(url).then((m) => m.introspectModule);
+    // On rejection, clear the cache and rethrow — otherwise one transient EBUSY/EPERM (antivirus
+    // scan, asar extraction race) would brick /api/blockify until the app restarts.
+    _introspectPromise = import(url).then((m) => m.introspectModule).catch((e) => {
+      _introspectPromise = null;
+      throw e;
+    });
   }
   return _introspectPromise;
 }
@@ -423,7 +445,14 @@ app.post('/api/blockify', async (req, res) => {
     res.json({ success: true, cached: false, spec });
   } catch (e) {
     console.error('[/api/blockify]', e.message);
-    res.status(500).json({ success: false, error: String(e.message || e) });
+    const msg = String(e.message || e);
+    // _inspect.py exits 1 with a "ModuleNotFoundError: No module named '<x>'" traceback on stderr
+    // for a missing module, and introspect.js folds that stderr into the rejection message. 404 lets
+    // the frontend cache "definitively not installed"; anything else stays 500 (transient/broken).
+    if (/ModuleNotFoundError|No module named/i.test(msg)) {
+      return res.status(404).json({ success: false, notFound: true, error: msg });
+    }
+    res.status(500).json({ success: false, error: msg });
   }
 });
 
@@ -435,16 +464,33 @@ app.post('/api/deps', (req, res) => {
   if (!MODULE_PATH_RE.test(moduleName)) return res.status(400).json({ error: 'invalid module name' });
   const f = path.join(genBase(), 'blockpy-gen', 'src', 'introspect', '_deps.py');
   let child;
-  try { child = spawn(PYTHON_CMD, [f, moduleName], { env: process.env }); }
+  // stdin 'ignore' (the script never reads it); UTF-8 env so metadata survives cp949 consoles.
+  try {
+    child = spawn(PYTHON_CMD, [f, moduleName], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+    });
+  }
   catch (e) { return res.status(500).json({ error: String(e.message || e) }); }
+  // Settle-once guard: a failed spawn fires BOTH 'error' AND 'close', and the timeout races with
+  // 'close' — replying twice throws ERR_HTTP_HEADERS_SENT and kills the whole (Electron) process.
+  let responded = false;
+  let timer = null;
+  const reply = (status, body) => {
+    if (responded) return;
+    responded = true;
+    clearTimeout(timer);
+    res.status(status).json(body);
+  };
+  timer = setTimeout(() => { killTree(child); reply(500, { error: 'deps lookup timed out (30s)' }); }, 30000);
   let out = '', err = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { err += d; });
-  child.on('error', (e) => res.status(500).json({ error: String(e.message || e) }));
+  child.on('error', (e) => reply(500, { error: String(e.message || e) }));
   child.on('close', (code) => {
-    if (code !== 0) return res.status(500).json({ error: err.trim() || ('exit ' + code) });
-    try { res.json({ success: true, ...JSON.parse(out) }); }
-    catch (e) { res.status(500).json({ error: 'bad deps output: ' + e.message }); }
+    if (code !== 0) return reply(500, { error: err.trim() || ('exit ' + code) });
+    try { reply(200, { success: true, ...JSON.parse(out) }); }
+    catch (e) { reply(500, { error: 'bad deps output: ' + e.message }); }
   });
 });
 
@@ -456,12 +502,26 @@ app.post('/api/infer-types', (req, res) => {
   if (typeof code !== 'string' || !code.trim()) return res.json({ available: true, vars: {} });
   const f = path.join(genBase(), 'blockpy-gen', 'src', 'introspect', '_infertypes.py');
   let child;
-  try { child = spawn(PYTHON_CMD, [f], { env: process.env }); }
+  // stdin stays a pipe — _infertypes.py reads the code from it (written + ended below). UTF-8 env
+  // so Korean source doesn't mojibake through cp949 and silently empty the Jedi oracle.
+  try { child = spawn(PYTHON_CMD, [f], { env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } }); }
   catch (e) { return res.json({ available: false, vars: {} }); }
+  // Settle-once guard (see /api/deps): 'error' + 'close' both fire on a failed spawn, and the
+  // timeout races with 'close' — exactly one JSON reply ever goes out.
+  let responded = false;
+  let timer = null;
+  const reply = (body) => {
+    if (responded) return;
+    responded = true;
+    clearTimeout(timer);
+    res.json(body);
+  };
+  timer = setTimeout(() => { killTree(child); reply({ available: false, vars: {} }); }, 15000);
   let out = '';
   child.stdout.on('data', (d) => { out += d; });
-  child.on('error', () => res.json({ available: false, vars: {} }));
-  child.on('close', () => { try { res.json(JSON.parse(out)); } catch (_) { res.json({ available: false, vars: {} }); } });
+  child.stderr.on('data', () => {}); // drain — an undrained pipe deadlocks the child past ~64KB of warnings
+  child.on('error', () => reply({ available: false, vars: {} }));
+  child.on('close', () => { try { reply(JSON.parse(out)); } catch (_) { reply({ available: false, vars: {} }); } });
   try { child.stdin.write(code); child.stdin.end(); } catch (_) { /* child died — 'close' handles it */ }
 });
 
@@ -591,10 +651,14 @@ Rules:
     ].slice(0, 8);
 
     // Deterministic cap: enforce the level's size limit even if the model over-selects, so the
-    // beginner view stays genuinely small (the LLM's count is only guidance).
+    // beginner view stays genuinely small (the LLM's count is only guidance). Macros get their own
+    // cap — the beginner prompt actively encourages them, so uncapped they could flood the smallest
+    // palette right past the entry limit.
     const capped = selected.slice(0, limit);
+    const macroLimit = Math.max(2, Math.floor(limit / 2));
+    const cappedMacros = macros.slice(0, macroLimit);
 
-    res.json({ success: true, module: spec.module, level: lvl, selected: capped, macros, thoughts, dropped: { selected: droppedSel + (selected.length - capped.length), macros: droppedMac } });
+    res.json({ success: true, module: spec.module, level: lvl, selected: capped, macros: cappedMacros, thoughts, dropped: { selected: droppedSel + (selected.length - capped.length), macros: droppedMac + (macros.length - cappedMacros.length) } });
   } catch (err) {
     console.error('[/api/abstract-library]', err.message);
     res.status(500).json({ success: false, error: err.message });
