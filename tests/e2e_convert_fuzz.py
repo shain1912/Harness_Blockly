@@ -7,8 +7,13 @@ For each of a set of diverse, real-library Python programs it:
   2. switches to the Visual Blocks tab, renders, and SCREENSHOTS the created blocks,
   3. render check: every model block is actually rendered (SVG present), no gray/broken/warned block,
   4. round-trip AST fidelity: ast.dump(original) == ast.dump(regenerated) (structural, no drift),
-  5. TOOLBOX check: for every module-qualified call it deep-walks the built toolbox, OPENS the
-     block's category, and confirms the block is in the flyout ("scroll the toolbox and check").
+  5. TOOLBOX check: for every recognized library block on the canvas — module-qualified ir_call
+     (textwrap.fill), REGISTERED folded method ir_call (h.hexdigest — gated via
+     BlockPyLibRegistry.findLibCall so unregistered user calls are exempt), and REGISTERED
+     dotted ir_attribute constants (string.ascii_uppercase — findConst/findAttr) — it deep-walks
+     the built toolbox to the category that directly holds the block, OPENS that category
+     (asserting `opened`), and confirms a matching entry is actually present in the flyout
+     ("scroll the toolbox and check", for real).
 
 Only pure Python (requests + websocket-client via the blockpy-desktop-e2e CDP harness). No Playwright.
 
@@ -63,19 +68,35 @@ def click(cdp, s): return ev(cdp, "(()=>{const e=document.querySelector(%s);if(!
 def set_code(cdp, code):
     ev(cdp, "(()=>{const el=document.querySelector('#python-code');el.focus();const set=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value');set.set.call(el,%s);el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));return true;})()" % json.dumps(code))
 
-# Deep-walk the built toolbox to find the block's category, OPEN it, and read the flyout (real UI).
+# Deep-walk the built toolbox JSON for the category that DIRECTLY holds the block, OPEN that
+# (possibly nested) category in the real UI, and read the flyout's block identities. Matches
+# module-function ir_call entries (extraState.funcName), method entries (extraState.method),
+# constant reporters (ir_attribute extraState.dotted) and property reporters (extraState.attr).
 TOOLBOX_CHECK = r"""
-(fn, leaf)=>{const tj=window.BlockPyBuildIrToolbox();let topCat=null;
-  for(const cat of (tj.contents||[])){ if(cat.kind!=='category')continue; let hit=false;
-    (function walk(n){ if(!n||!n.contents)return; for(const c of n.contents){
-      if(c.kind==='block'){ const es=c.extraState||{}; const f=es.funcName||es.dotted||''; const m=es.method||'';
-        if(f===fn||(f&&f.split('.').pop()===leaf)||(m&&m===leaf)) hit=true; } walk(c);}})(cat);
-    if(hit){ topCat=cat.name; break; } }
-  if(topCat===null) return {found:false};
+(fn, leaf)=>{const tj=window.BlockPyBuildIrToolbox();let path=null;
+  (function walk(n, names){ if(path||!n||!n.contents)return; for(const c of n.contents){ if(path)return;
+    if(c.kind==='category'){ walk(c, names.concat(c.name)); }
+    else if(c.kind==='block'){ const es=c.extraState||{}; const f=es.funcName||es.dotted||''; const m=es.method||''; const a=es.attr||'';
+      if(f===fn||(f&&f.split('.').pop()===leaf)||(m&&m===leaf)||(a&&a===leaf)) path=names; } } })(tj, []);
+  if(!path||!path.length) return {found:false};
   const ws=window.__blocklyWorkspace; const tb=ws&&ws.getToolbox&&ws.getToolbox(); let opened=false, flyout=[];
-  if(tb){ let target=null;(function w(items){for(const it of (items||[])){try{if(it.getName&&it.getName()===topCat){target=it;return;}}catch(e){} if(it.getChildToolboxItems)w(it.getChildToolboxItems());}})(tb.getToolboxItems());
-    if(target){ try{ tb.setSelectedItem(target); opened=true; const fw=ws.getFlyout&&ws.getFlyout()&&ws.getFlyout().getWorkspace(); if(fw) flyout=fw.getAllBlocks(false).map(b=>b.funcName_||(b.method_?('.'+b.method_):(b.dotted_||b.type))); }catch(e){} } }
-  return {found:true, category:topCat, opened, flyout};}
+  if(tb){
+    // Descend the toolbox item tree along the category-name path (deepest category first
+    // holds the block directly — constants/properties live in nested sub-categories).
+    let target=null;
+    (function find(items, depth){ for(const it of (items||[])){ if(target)return; try{
+      if(it.getName&&it.getName()===path[depth]){
+        if(depth===path.length-1){ target=it; return; }
+        try{ if(it.setExpanded)it.setExpanded(true); }catch(e){}
+        find(it.getChildToolboxItems?it.getChildToolboxItems():[], depth+1);
+        if(target)return;
+      } }catch(e){} } })(tb.getToolboxItems(), 0);
+    if(target){ try{
+      tb.setSelectedItem(target); opened=true;
+      const fl=ws.getFlyout&&ws.getFlyout(); const fw=fl&&fl.getWorkspace&&fl.getWorkspace();
+      if(fw) flyout=fw.getAllBlocks(false).map(b=>b.funcName_||(b.method_?('.'+b.method_):(b.dotted_||(b.attr_?('.'+b.attr_):b.type))));
+    }catch(e){} } }
+  return {found:true, category:path.join(' > '), opened, flyout};}
 """
 
 def check(cdp, name, code):
@@ -97,8 +118,27 @@ def check(cdp, name, code):
       const blocks=ws?ws.getAllBlocks(false):[]; const gray=blocks.filter(b=>b.type==='raw_statement'||b.type==='raw_expression').length;
       let unrendered=0, warned=0;
       for(const b of blocks){ try{ if(!b.getSvgRoot||!b.getSvgRoot())unrendered++; if(b.warning||(b.getWarningText&&b.getWarningText()))warned++; }catch(e){} }
-      const calls=[]; for(const b of blocks){ if(b.type==='ir_call'){const fn=b.funcName_;
-        if(fn&&String(fn).indexOf('.')>=0) calls.push(String(fn)); } }
+      // Toolbox-home candidates: every recognized library block on the canvas must be draggable
+      // from the toolbox too. (1) module-qualified ir_call (funcName 'textwrap.fill') — always
+      // required; (2) folded method ir_call (extraState.method, e.g. h.hexdigest) — required only
+      // when the registry knows it (findLibCall), since unregistered user-defined calls have no
+      // toolbox home by design; (3) dotted ir_attribute (module constant, e.g.
+      // string.ascii_uppercase) — required when findConst (or a name-matched findAttr) knows it.
+      const calls=[]; const seen=new Set();
+      const push=(fn,leaf)=>{ const k=fn+'|'+leaf; if(!seen.has(k)){ seen.add(k); calls.push({fn:fn,leaf:leaf}); } };
+      for(const b of blocks){
+        if(b.type==='ir_call'){
+          const fn=b.funcName_;
+          if(fn&&String(fn).indexOf('.')>=0){ push(String(fn), String(fn).split('.').pop()); continue; }
+          if(b.method_!=null&&reg&&reg.findLibCall){
+            let recv=null; try{ const f=b.getField&&b.getField('RECV'); if(f&&f.getText)recv=f.getText(); }catch(e){}
+            if(reg.findLibCall(recv, String(b.method_))) push((recv||'obj')+'.'+String(b.method_), String(b.method_));
+          }
+        } else if(b.type==='ir_attribute'&&b.dotted_){
+          const d=String(b.dotted_); const leaf=d.split('.').pop();
+          if(reg&&((reg.findConst&&reg.findConst(d))||(reg.findAttr&&reg.findAttr(leaf)))) push(d, leaf);
+        }
+      }
       return JSON.stringify({nblocks:blocks.length,gray,unrendered,warned,calls});})()"""))
     regen = ev(cdp, """(async()=>{const ws=window.__blocklyWorkspace;if(!ws||ws.getAllBlocks(false).length===0)return null;
       const snap=window.Blockly.serialization.workspaces.save(ws);const ir=window.BlockPyIR.blocklyToIr(snap);
@@ -113,13 +153,26 @@ def check(cdp, name, code):
         try:
             if norm(code) != norm(regen): fails.append("round-trip AST mismatch")
         except SyntaxError as e: fails.append("regen invalid Python: " + str(e))
-    for fn in info["calls"]:
-        leaf = fn.split(".")[-1]
+    for cand in info["calls"]:
+        fn, leaf = cand["fn"], cand["leaf"]
         tb = ev(cdp, "(" + TOOLBOX_CHECK + ")(%s, %s)" % (json.dumps(fn), json.dumps(leaf)))
         if isinstance(tb, str):
             try: tb = json.loads(tb)
             except Exception: tb = None
-        if not (tb and tb.get("found")): fails.append("NOT in toolbox: " + fn)
+        if not (tb and tb.get("found")):
+            fails.append("NOT in toolbox: " + fn)
+            continue
+        # The docstring's promise, enforced: the category must actually OPEN, and the block
+        # must be present in the opened flyout (flyout entries are 'mod.func' for module
+        # functions, '.method' for method blocks, 'mod.CONST' for constants, '.attr' for
+        # properties — all of which leaf-match on the segment after the last dot).
+        if not tb.get("opened"):
+            fails.append("toolbox category did not open: %s (category: %s)" % (fn, tb.get("category")))
+            continue
+        flyout = [e for e in (tb.get("flyout") or []) if isinstance(e, str)]
+        if not any(e == fn or e.split(".")[-1] == leaf for e in flyout):
+            fails.append("NOT in opened flyout: %s (category: %s, flyout: %s)"
+                         % (fn, tb.get("category"), ", ".join(flyout[:12]) or "<empty>"))
     return fails
 
 def main():

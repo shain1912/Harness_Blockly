@@ -22,11 +22,16 @@ test.describe('IR pipeline app integration', () => {
     await page.locator('#btn-sync-to-blocks').click();
 
     // Python -> blocks: the live workspace now holds only ir_* blocks (legacy parser retired).
+    // Wait for THIS program's blocks, not just "any ir_* blocks": the startup main.py/demo
+    // conversion already fills the workspace with ir_* blocks, so a generic check passes before
+    // the async Convert lands and the next steps read the STARTUP workspace (a race, not a bug —
+    // the `ir_if` is unique to this program).
     await page.waitForFunction(() => {
       const ws = window.__blocklyWorkspace;
       const saved = window.Blockly.serialization.workspaces.save(ws);
       const tops = (saved.blocks && saved.blocks.blocks) || [];
-      return tops.length > 0 && tops.every((b) => b.type.startsWith('ir_'));
+      return tops.length > 0 && tops.every((b) => b.type.startsWith('ir_'))
+        && ws.getAllBlocks(false).some((b) => b.type === 'ir_if');
     }, null, { timeout: 60000 });
 
     // block -> Python via the same pipeline the change listener uses, on the live workspace.

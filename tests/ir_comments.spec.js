@@ -294,10 +294,13 @@ test.describe('comment extraction (browser)', () => {
       const Blockly = window.Blockly;
       const ws = window.__blocklyWorkspace;
       ws.clear();
-      // a bare ir_call dropped from the toolbox (NOT wrapped in ir_exprstmt), with a comment bubble
+      // a bare ir_call dropped from the toolbox (NOT wrapped in ir_exprstmt), with a comment bubble.
+      // Use the FULL variable descriptor {id,name}: a bare string is looked up as a variable ID, and
+      // when the workspace carries startup variables (main.py/demo conversion) the failed lookup
+      // falls back to an existing variable ("i") instead of creating "greet" — nondeterministic.
       Blockly.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [
         { type: 'ir_call', extraState: { nargs: 0, kw: [] },
-          inputs: { FUNC: { shadow: { type: 'ir_name', fields: { ID: 'greet' } } } },
+          inputs: { FUNC: { shadow: { type: 'ir_name', fields: { ID: { id: 'greet-var', name: 'greet', type: '' } } } } },
           icons: { comment: { text: 'call it', pinned: false, height: 80, width: 160 } } },
       ] } }, ws);
       const saved = Blockly.serialization.workspaces.save(ws);

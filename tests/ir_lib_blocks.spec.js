@@ -157,12 +157,18 @@ test.describe('lib spec-from-descriptor (node)', () => {
     expect(ir.body[0].value.func).toMatchObject({ type: 'Attribute', attr: 'plot', value: { type: 'Name', id: 'plt' } });
   });
 
-  test('demotes a multi-dot receiver title instead of mis-lowering (matplotlib.pyplot.plot)', () => {
+  test('a multi-dot receiver registers as a DOTTED spec that can never mis-lower (matplotlib.pyplot.plot)', () => {
     const spec = REG.specFromDescriptor({ func: 'plot', args: ['x'], hasOutput: false, title: 'matplotlib.pyplot.plot' }, 'matplotlib');
     expect(spec.module).toBe('matplotlib.pyplot');   // derived from title, NOT libName
+    // Dotted modules are now first-class: the spec registers (so the toolbox can offer the exact
+    // dotted ir_call the converter emits — `import urllib.parse` / np.linalg coverage), but NO
+    // lib_* Blockly type is defined for it, so nothing can ever lower `matplotlib.pyplot` as a
+    // single Name — the mis-lowering this test originally guarded against stays impossible.
     const r = REG.registerLibBlock(spec);
-    expect(r.ok).toBe(false);                          // staticCheck rejects the dotted module -> demote
-    expect(REG.getLibSpec('lib_matplotlib.pyplot_plot')).toBeUndefined();
+    expect(r.ok).toBe(true);
+    expect(REG.getLibSpec(r.type)).toMatchObject({ module: 'matplotlib.pyplot', func: 'plot' });
+    // precise recognition: the dotted receiver matches exactly (no loose func-name fallback needed)
+    expect(REG.findLibCall('matplotlib.pyplot', 'plot')).toMatchObject({ isModule: true, params: ['x'] });
   });
 
   test('pandas df.describe preset lowers to df.describe() with no redundant receiver arg', () => {

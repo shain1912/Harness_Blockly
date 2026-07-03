@@ -40,10 +40,13 @@ test('Blockify UI: introspect html.parser → Library blocks, method round-trips
 
   const proof = await page.evaluate(() => {
     const reg = window.BlockPyLibRegistry;
-    // toolbox carries a populated Library category
+    // toolbox carries a populated PER-LIBRARY category (one tab per library — there is no single
+    // lumped "Library" category anymore), with group/Constants/Properties sub-categories inside.
     const tb = window.BlockPyBuildIrToolbox();
-    const lib = tb.contents.find((c) => c.name === 'Library');
-    const libCount = lib ? lib.contents.filter((x) => x.kind === 'block').length : 0;
+    const countBlocks = (c) => (c.contents || []).reduce(
+      (n, x) => n + (x.kind === 'block' ? 1 : (x.kind === 'category' ? countBlocks(x) : 0)), 0);
+    const lib = tb.contents.find((c) => c.kind === 'category' && c.name === 'html.parser');
+    const libCount = lib ? countBlocks(lib) : 0;
 
     // pick any registered instance-method block and lower it: receiver = ARG0's value
     let lowered = null;
@@ -63,7 +66,8 @@ test('Blockify UI: introspect html.parser → Library blocks, method round-trips
     return { libCount, lowered };
   });
 
-  expect(proof.libCount).toBeGreaterThan(before);
+  // the blockified library's own tab exists in the toolbox and actually offers blocks
+  expect(proof.libCount).toBeGreaterThan(0);
   // a method lowers to `recv.<method>(...)` — receiver is ARG0's value (a Name), not a duplicated literal
   expect(proof.lowered).not.toBeNull();
   expect(proof.lowered.recvType).toBe('Name');
