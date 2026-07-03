@@ -75,6 +75,9 @@ export default function LibraryManager({
   const handleCurateClick = () => {
     if (onCurate && curateMod.trim() && curatePurpose.trim()) onCurate(curateMod.trim(), curatePurpose.trim(), curateLevel);
   };
+  const handleOfflineCurateClick = () => {
+    if (onCurate && curateMod.trim() && curatePurpose.trim()) onCurate(curateMod.trim(), curatePurpose.trim(), curateLevel, { offline: true });
+  };
 
   return (
     <div className="library-card">
@@ -205,6 +208,11 @@ export default function LibraryManager({
             />
             <button type="submit" className="btn btn-primary btn-sm" disabled={isAbstracting || isCurating || !curateMod.trim() || !curatePurpose.trim()}>
               {isCurating ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>} Curate
+            </button>
+            {/* No-AI path: deterministic heuristic curation. Works fully offline / with no key —
+                the AI Curate above also falls back to this automatically if the key/backend is down. */}
+            <button type="button" className="btn btn-secondary btn-sm" title="AI 없이 규칙 기반으로 선별 (오프라인)" disabled={isAbstracting || isCurating || !curateMod.trim() || !curatePurpose.trim()} onClick={handleOfflineCurateClick}>
+              <i className="fa-solid fa-bolt"></i> AI 없이
             </button>
             {/* First-curate escape hatch: before a proposal exists there is no preview panel (and thus
                 no 취소 button), so a slow/wedged AI round-trip had no way out short of a reload. */}

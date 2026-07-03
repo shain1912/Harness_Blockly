@@ -21,6 +21,7 @@ import './utils/desugarer.js';
 import './utils/libraryAbstraction.js';
 import './utils/libRegistry.js';   // Phase 5: window.BlockPyLibRegistry (load before irToolbox.js)
 import './utils/libImport.js';     // Phase B: window.BlockPyLibImport (blockpy-gen LibrarySpec -> libRegistry)
+import './utils/curateHeuristic.js'; // deterministic no-AI curation (offline fallback for /api/abstract-library)
 import './utils/pyAstBridge.js';
 import './utils/irToBlockly.js';
 import './utils/blocklyToIr.js';

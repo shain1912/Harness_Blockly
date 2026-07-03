@@ -1342,7 +1342,7 @@ for i in range(4):
   // already-registered types — check/uncheck only omits a type from the view, never changes lowering).
   // A monotonic token makes the newest propose win and prevents a stale in-flight result from
   // resurrecting a proposal after Confirm/Cancel/Regenerate.
-  const proposeCuration = async (moduleName, purpose, level) => {
+  const proposeCuration = async (moduleName, purpose, level, opts = {}) => {
     const mod = (moduleName || '').trim();
     const want = (purpose || '').trim();
     const lvl = level || 'intermediate';
@@ -1350,29 +1350,46 @@ for i in range(4):
     const reqId = ++curateReqRef.current;
     const reg = window.BlockPyLibRegistry;
     const imp = window.BlockPyLibImport;
+    const heur = window.BlockPyCurateHeuristic;
     setIsCurating(true);
     setAiThoughts([]);
-    setLogs((prev) => [...prev, `[Curate] Introspecting "${mod}", then asking the AI to pick blocks for: "${want}"…`]);
+    setLogs((prev) => [...prev, opts.offline
+      ? `[Curate] Introspecting "${mod}", then picking blocks for "${want}" without AI (heuristic)…`
+      : `[Curate] Introspecting "${mod}", then asking the AI to pick blocks for: "${want}"…`]);
     try {
       const data = await introspectModule(mod, { maxEntries: 3000 });   // keep in step with Convert/Blockify
       if (!data || reqId !== curateReqRef.current) return;
       const librarySpec = data.spec;
       const { mapped } = registerFullLibrary(librarySpec);   // full tab + TYPES exist even if user Cancels
       refreshToolboxNow();                                    // show the full tab immediately, before the AI round-trip
-      let cres = null;
-      try {
-        cres = await fetch('/api/abstract-library', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ spec: librarySpec, purpose: want, level: lvl }),
-          signal: AbortSignal.timeout(90000),   // a wedged AI backend must not pin isCurating forever
-        });
-      } catch (_) { cres = null; }
       let cdata = null;
-      if (cres && cres.ok) { try { cdata = await cres.json(); } catch (_) { cdata = null; } }
-      if (reqId !== curateReqRef.current) return;             // superseded while we awaited the AI
-      if (!cres || !cres.ok || !cdata || !cdata.success) {
-        const why = !cres ? 'backend unreachable' : (!cres.ok ? `backend ${cres.status}` : ((cdata && cdata.error) || 'AI failed'));
-        setLogs((prev) => [...prev, `[Curate] ${why} — the full "${mod}" tab is available; no curated tab added.`]);
+      // opts.offline forces the deterministic path (the "빠른 큐레이트" button). Otherwise try the AI;
+      // if it's unavailable (no key / backend down / error / bad JSON), FALL BACK to the heuristic so
+      // Curate still works offline instead of adding no tab at all.
+      if (!opts.offline) {
+        let cres = null;
+        try {
+          cres = await fetch('/api/abstract-library', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ spec: librarySpec, purpose: want, level: lvl }),
+            signal: AbortSignal.timeout(90000),   // a wedged AI backend must not pin isCurating forever
+          });
+        } catch (_) { cres = null; }
+        if (cres && cres.ok) { try { cdata = await cres.json(); } catch (_) { cdata = null; } }
+        if (reqId !== curateReqRef.current) return;           // superseded while we awaited the AI
+        if (!cdata || !cdata.success) {
+          const why = !cres ? 'backend unreachable' : (!cres.ok ? `backend ${cres.status}` : 'AI unavailable');
+          if (heur && typeof heur.curate === 'function') {
+            setLogs((prev) => [...prev, `[Curate] ${why} — curating "${mod}" without AI (heuristic).`]);
+            cdata = heur.curate(librarySpec, { purpose: want, level: lvl });
+          }
+        }
+      } else if (heur && typeof heur.curate === 'function') {
+        cdata = heur.curate(librarySpec, { purpose: want, level: lvl });
+      }
+      if (reqId !== curateReqRef.current) return;
+      if (!cdata || !cdata.success) {
+        setLogs((prev) => [...prev, `[Curate] Couldn't curate "${mod}" — the full tab is available; no curated tab added.`]);
         return;
       }
       // Resolve each AI ref to a REAL, registered block (one preview row per ref). realTitle is the
@@ -1387,7 +1404,7 @@ for i in range(4):
         selected.push({ ref: sel.ref, group: sel.group || '', tier: sel.tier === 'more' ? 'more' : 'core', realTitle: good.title, hasOutput: !!good.hasOutput, checked: true });
       }
       const macros = imp.macrosToRegistry(librarySpec, cdata.macros || []).map((m) => ({ ...m, checked: true }));
-      setCurationProposal({ module: mod, purpose: want, level: cdata.level || lvl, librarySpec, alias: mapped.alias, importStmt: mapped.importStmt, selected, macros, thoughts: cdata.thoughts || [], dropped: cdata.dropped || {} });
+      setCurationProposal({ module: mod, purpose: want, level: cdata.level || lvl, librarySpec, alias: mapped.alias, importStmt: mapped.importStmt, selected, macros, thoughts: cdata.thoughts || [], dropped: cdata.dropped || {}, heuristic: !!cdata.heuristic });
       setAiThoughts([...(cdata.thoughts || []),
         `Proposed ${selected.length} block(s)${macros.length ? ` + ${macros.length} macro(s)` : ''} for "${want}" (${cdata.level || lvl}) — review below, then Confirm to create the ★ tab.`]);
     } catch (err) {
@@ -1436,7 +1453,7 @@ for i in range(4):
   // regenerating with the OLD proposal's level silently discarded a changed selection.
   const handleRegenerateCuration = (level) => {
     const p = curationProposal;
-    if (p) proposeCuration(p.module, p.purpose, level || p.level);   // bumps token, replaces proposal on success
+    if (p) proposeCuration(p.module, p.purpose, level || p.level, { offline: p.heuristic });   // keep AI/heuristic mode
   };
 
   // User typing in the Python editor: update the mirror ref SYNCHRONOUSLY (React batches the state
