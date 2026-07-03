@@ -1195,7 +1195,12 @@ body.theme-dark .highlight-layer .token.boolean             { color: #86efac !im
   display: flex;
   gap: 0.4rem;
   align-items: center;
+  flex-wrap: wrap;   /* the two-input Curate form wraps its button into view instead of clipping it off the right edge in a narrow panel */
 }
+/* Keep each control usable when the row wraps: inputs shrink to a readable min, the action
+   button never shrinks (so "Curate"/"Install" stays fully visible). */
+.pip-form .pip-input { min-width: 8rem; }
+.pip-form .btn { flex: 0 0 auto; white-space: nowrap; }
 .pip-input {
   flex: 1;
   background: rgba(0,0,0,0.3);
