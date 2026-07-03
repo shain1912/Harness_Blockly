@@ -236,8 +236,9 @@ const SUBCAT = {
 // Hues deliberately steer clear of the semantic sub-category colours (amber/indigo/purple/teal)
 // so a library tab never blends into its own Constants/Properties/Macros sub-category.
 const LIB_PALETTE = ['#3f7fd0', '#0f9d58', '#c94f7c', '#c94f4f', '#4f9ec9', '#7cb342', '#00acc1', '#e0662b', '#0288d1', '#43a047', '#d81b60', '#6d8b3a'];
+function topPkg(libKey) { return String(libKey || '').replace(/^★\s*/, '').split('.')[0] || 'Library'; }
 function libColour(libKey) {
-  const top = String(libKey || '').split('.')[0];
+  const top = topPkg(libKey);
   let h = 0;
   for (let i = 0; i < top.length; i++) h = (h * 31 + top.charCodeAt(i)) >>> 0;
   return LIB_PALETTE[h % LIB_PALETTE.length];
@@ -352,17 +353,17 @@ function libraryCategories() {
     }
     if (propCat) contents = [...contents, propCat];                     // Properties + Constants sub-categories after the calls
     if (constCat) contents = [...contents, constCat];
-    cats.push({ kind: 'category', name: libKey, colour: libColour(libKey), contents });
+    cats.push({ kind: 'category', name: libKey, colour: libColour(libKey), contents, _pkg: topPkg(libKey) });
   }
   // libraries whose curation produced only macros (no plain blocks)
   for (const [libKey, entries] of macrosByLib) {
-    if (!byLib.has(libKey)) cats.push({ kind: 'category', name: libKey, colour: libColour(libKey), contents: [{ kind: 'category', name: 'Macros', colour: SUBCAT.macros, contents: entries }] });
+    if (!byLib.has(libKey)) cats.push({ kind: 'category', name: libKey, colour: libColour(libKey), contents: [{ kind: 'category', name: 'Macros', colour: SUBCAT.macros, contents: entries }], _pkg: topPkg(libKey) });
   }
   // libraries that produced ONLY value blocks (constants and/or properties) still get a tab
   for (const libKey of new Set([...constsByLib.keys(), ...propsByLib.keys()])) {
     if (cats.some((c) => c.name === libKey)) continue;
     const extra = [propSubcategory(propsByLib.get(libKey)), constSubcategory(constsByLib.get(libKey))].filter(Boolean);
-    if (extra.length) cats.push({ kind: 'category', name: libKey, colour: libColour(libKey), contents: extra });
+    if (extra.length) cats.push({ kind: 'category', name: libKey, colour: libColour(libKey), contents: extra, _pkg: topPkg(libKey) });
   }
 
   // Curated tabs (Phase C3): one extra category per curation, a purpose-driven subset that references
@@ -402,9 +403,40 @@ function libraryCategories() {
     if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: SUBCAT.macros, contents: macroEntries });
     const moreContents = flatten(moreG);
     if (moreContents.length) contents.push({ kind: 'category', name: '더 보기', colour: SUBCAT.more, contents: moreContents });
-    if (contents.length) cats.push({ kind: 'category', name: `★ ${cur.label || cur.key}`, colour: '#00796b', contents });
+    if (contents.length) cats.push({ kind: 'category', name: `★ ${cur.label || cur.key}`, colour: '#00796b', contents, _pkg: topPkg(cur.lib || cur.key) });
   }
-  return cats;
+  return nestByPackage(cats);
+}
+
+// Group top-level library categories by their TOP package so a whole-package Blockify
+// (serial + serial.tools.list_ports + serial.threaded + …, plus any ★ curation of serial) is ONE
+// "serial" tab with the members as sub-categories — not 19+ parallel top-level tabs. A package with
+// a single category (cv2, math, html.parser) stays a flat top-level tab. Display-only nesting.
+function nestByPackage(cats) {
+  const byPkg = new Map();
+  const order = [];
+  for (const c of cats) {
+    const pkg = c._pkg || topPkg(c.name);
+    if (!byPkg.has(pkg)) { byPkg.set(pkg, []); order.push(pkg); }
+    byPkg.get(pkg).push(c);
+  }
+  const strip = (c) => { const { _pkg, ...rest } = c; return rest; };
+  const out = [];
+  for (const pkg of order) {
+    const group = byPkg.get(pkg);
+    if (group.length === 1) { out.push(strip(group[0])); continue; }
+    // Sort members: ★ curated views first (the "default face"), then the top module itself, then
+    // submodules alphabetically. Rename members so the nested labels read cleanly.
+    const rank = (c) => (c.name.startsWith('★') ? 0 : c.name === pkg ? 1 : 2);
+    const members = group.slice().sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((c) => {
+      const cc = strip(c);
+      if (cc.name === pkg) cc.name = `${pkg} (기본)`;                        // top module vs the parent's own name
+      else if (!cc.name.startsWith('★') && cc.name.startsWith(pkg + '.')) cc.name = cc.name.slice(pkg.length + 1);  // serial.tools.list_ports -> tools.list_ports
+      return cc;
+    });
+    out.push({ kind: 'category', name: pkg, colour: libColour(pkg), contents: members });
+  }
+  return out;
 }
 
 // Compile the table to a Blockly categoryToolbox JSON object (+ a dynamic Library category).
