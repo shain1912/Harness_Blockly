@@ -19,8 +19,15 @@ function pyConstValue(t) {
   if (s === 'True' || s === 'true') return true;
   if (s === 'False' || s === 'false') return false;
   if (/^-?\d+$/.test(s)) return parseInt(s, 10);
-  if (/^-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?$/.test(s)) return parseFloat(s);
-  try { return JSON.parse(s); } catch (_) { return s; }   // {__py__:…} bytes/complex, or a bare token
+  if (/^-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?$/.test(s)) {
+    const f = parseFloat(s);
+    // An integral-valued float face (1.0, -0.0, 1e10) must stay a FLOAT — carry it as a tag so it
+    // doesn't collapse to an int through JS/JSON on the way back to Python (1.0 would become 1).
+    if (Number.isInteger(f) && (s.indexOf('.') >= 0 || /[eE]/.test(s))) return { __py__: 'float', repr: s };
+    if (Object.is(f, -0)) return { __py__: 'float', repr: '-0.0' };
+    return f;
+  }
+  try { return JSON.parse(s); } catch (_) { return s; }   // {__py__:…} bytes/complex/float(inf), or a bare token
 }
 
 // block -> a collection of element expressions (List/Tuple/Set).

@@ -54,6 +54,7 @@ SNIPPETS = [
   ("comprehension-mix", "import math\nangles = [30, 45, 60, 90]\nrads = [math.radians(a) for a in angles]\nfor r in rads:\n    print(round(math.cos(r), 3))\n"),
   ("main-guard", "def main() -> None:\n    x = True\n    y = None\n    print(x, y)\n\nif __name__ == '__main__':\n    main()\n"),
   ("bool-none-flags", "ok = True\nempty = None\nvals = [True, False, None]\nif ok and empty is None:\n    print(len(vals))\n"),
+  ("floats-lossless", "a = 1.0\nb = [2.0, 3.5, 10.0]\nc = -0.0\nratio = 22.0 / 7\nprint(a, b, c, ratio)\n"),
 ]
 
 def norm(code): return ast.dump(ast.parse(code))

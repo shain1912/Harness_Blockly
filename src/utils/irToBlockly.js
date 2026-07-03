@@ -238,6 +238,12 @@ function pyConstText(v) {
   if (v === true) return 'True';
   if (v === false) return 'False';
   if (typeof v === 'number') return String(v);
+  // A tagged float (integral 1.0, or inf/-inf/nan). Show the repr for integral floats ("1.0"); keep
+  // the non-finite ones as JSON so blocklyToIr recovers them (inf/nan aren't plain-number faces).
+  if (v && typeof v === 'object' && v.__py__ === 'float') {
+    const r = String(v.repr);
+    return (r === 'inf' || r === '-inf' || r === 'nan') ? JSON.stringify(v) : r;
+  }
   return JSON.stringify(v);
 }
 

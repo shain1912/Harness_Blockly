@@ -24,8 +24,10 @@ const PY_AST_TO_JSON = `
 import ast, json, base64, tokenize, io
 _SAFE_INT = 2**53 - 1  # JS Number.MAX_SAFE_INTEGER; ints beyond this lose precision in JSON.parse
 def _enc_float(x):
-    # inf / nan are not valid JSON tokens for the JS parser -> tag them
-    if x != x or x in (float('inf'), float('-inf')):
+    # inf / nan are not valid JSON tokens for the JS parser -> tag them. Also tag INTEGRAL-valued floats
+    # (1.0, -0.0, 1e10): JS has no int/float distinction and JSON.stringify(1.0)=="1", so an untagged
+    # integral float would silently round-trip back to an int (1.0 -> 1), breaking losslessness.
+    if x != x or x in (float('inf'), float('-inf')) or x.is_integer():
         return {"__py__": "float", "repr": repr(x)}
     return x
 def _enc_prim(v):
