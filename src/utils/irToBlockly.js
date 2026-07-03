@@ -259,10 +259,16 @@ function exprToDotted(e) {
 const EXPR_HANDLERS = {
   Name:     (n) => { if (_varNames) _varNames.add(n.id); return blk('ir_name', { ID: { id: n.id } }); },
   // A string -> the rounded ir_str text block (content typed directly); everything else (numbers,
-  // bool, None, …) stays the JSON-encoded ir_const.
-  Constant: (n) => (typeof n.value === 'string'
-    ? blk('ir_str', { TEXT: n.value })
-    : blk('ir_const', { VALUE: pyConstText(n.value) })),
+  // bool, None, …) stays the JSON-encoded ir_const. A non-null `kind` (the `u''` prefix — the only
+  // kind CPython emits) rides in extraState so ast.dump stays identical; blocklyToIr restores it.
+  Constant: (n) => {
+    if (typeof n.value === 'string') {
+      const b = blk('ir_str', { TEXT: n.value });
+      if (n.kind !== null && n.kind !== undefined) b.extraState = { kind: n.kind };
+      return b;
+    }
+    return blk('ir_const', { VALUE: pyConstText(n.value) });
+  },
   List:  eltsBlock('ir_list'),
   Tuple: eltsBlock('ir_tuple'),
   // Python has no empty set literal (Set([]) unparses to the unroundtrippable "{*()}").
@@ -639,7 +645,13 @@ function irToBlockly(ir) {
   const variables = [..._varNames].map((name) => ({ name, id: name }));
   _varNames = null;
   _modules = null;
-  return { blocks: { languageVersion: 0, blocks: top.length ? [top[0]] : [] }, variables };
+  const out = { blocks: { languageVersion: 0, blocks: top.length ? [top[0]] : [] }, variables };
+  // Module-level comments (pyAstBridge anchors a comment-only module's comments on the Module
+  // node itself). Blocks can't hold them — no statement exists — so thread them through the
+  // workspace JSON under `blockpyModule`; the serializer plugin in irBlocks.js keeps the key
+  // alive across a real Blockly load/save, and blocklyToIr restores `_comments` from it.
+  if (ir._comments) out.blockpyModule = { comments: ir._comments };
+  return out;
 }
 
 // Imported module binding names from top-level `import` statements (asname, else the top package).

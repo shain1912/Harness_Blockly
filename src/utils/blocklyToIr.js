@@ -4,7 +4,9 @@
  * rebuilds and unparses. Intentionally NOT carried (ast.unparse, our only consumer,
  * ignores them; they are recomputable or irrelevant to emitted text):
  *   - Name/expr `ctx` (Load/Store/Del) — fully determined by position (target vs value)
- *   - `_loc`, Constant `kind`, `type_comment` — formatting/locations, not semantics
+ *   - `_loc`, `type_comment` — formatting/locations, not semantics
+ * Constant `kind` (the `u''` prefix) IS semantics at the ast.dump level, so ir_str carries it
+ * in extraState and this module restores it (see the ir_str handler).
  * Comments ARE carried (Phase 3, Option 3): a statement block's comment is restored from its
  * `block.data` (and live comment bubble) into `_comments` by readBlockComments; pyAstBridge's
  * _CommentUnparser re-emits it. The bubble is the source of truth (a deleted bubble => no comment).
@@ -27,8 +29,21 @@ function pyConstValue(t) {
     if (Object.is(f, -0)) return { __py__: 'float', repr: '-0.0' };
     return f;
   }
-  try { return JSON.parse(s); } catch (_) { return s; }   // {__py__:…} bytes/complex/float(inf), or a bare token
+  // {__py__:…} tags (bytes/complex/float(inf)/big int) and legacy JSON faces parse here. A bare
+  // token that is none of the above (a student typing `speed` or `inf`) is NOT silently a string —
+  // fail loud rather than emit the wrong constant.
+  try { return JSON.parse(s); } catch (_) {
+    throw new Error('blocklyToIr: ir_const has an unrecognized literal "' + s
+      + '" — numbers/None/True/False only; use the string block for text');
+  }
 }
+
+// A single Python identifier. \p{L}/\p{N} keeps PEP-3131 Unicode identifiers (Korean names,
+// which the 초/중/고 audience uses) valid; keywords are out of scope (ast.unparse never checks).
+const IDENT_RE = /^[\p{L}_][\p{L}\p{N}_]*$/u;
+function isIdent(s) { return typeof s === 'string' && IDENT_RE.test(s); }
+// A dotted module path (os.path): every segment an identifier.
+function isDottedName(s) { return String(s).split('.').every(isIdent); }
 
 // block -> a collection of element expressions (List/Tuple/Set).
 function eltsToExpr(astType) {
@@ -62,8 +77,13 @@ const BLOCK_TO_EXPR = {
     return { type: 'Name', id };
   },
   ir_const: (b) => ({ type: 'Constant', value: pyConstValue(b.fields.VALUE) }),
-  // The rounded string block: its TEXT field is the raw content (no JSON quoting).
-  ir_str: (b) => ({ type: 'Constant', value: b.fields.TEXT == null ? '' : String(b.fields.TEXT) }),
+  // The rounded string block: its TEXT field is the raw content (no JSON quoting). A u-string
+  // prefix (Constant kind='u') is carried in extraState so `u'abc'` stays ast.dump-identical.
+  ir_str: (b) => {
+    const node = { type: 'Constant', value: b.fields.TEXT == null ? '' : String(b.fields.TEXT) };
+    if (b.extraState && b.extraState.kind) node.kind = b.extraState.kind;
+    return node;
+  },
   ir_list:  eltsToExpr('List'),
   ir_tuple: eltsToExpr('Tuple'),
   ir_set:   eltsToExpr('Set'),
@@ -121,9 +141,24 @@ const BLOCK_TO_EXPR = {
     const kw = (b.extraState && b.extraState.kw) || [];
     const args = [];
     for (let i = 0; i < nargs; i++) args.push(blockToExpr(b.inputs['ARG' + i].block));
-    const keywords = kw.map((name, i) => ({
-      type: 'keyword', arg: name, value: blockToExpr(b.inputs['KW' + i].block),
-    }));
+    // Keyword names are user-editable text (KWNAME fields): a non-identifier (`f(a b=1)`) or a
+    // repeated name (`f(x=1, x=2)`) is a SyntaxError, so guard rather than emit invalid IR.
+    // null entries (** unpacking) are exempt — `f(**a, **b)` is valid Python.
+    const seenKw = new Set();
+    const keywords = kw.map((name, i) => {
+      if (name !== null && name !== undefined) {
+        if (!isIdent(name)) {
+          throw new Error('blocklyToIr: ir_call keyword name "' + name
+            + '" is not a valid Python identifier');
+        }
+        if (seenKw.has(name)) {
+          throw new Error('blocklyToIr: ir_call repeats keyword argument "' + name
+            + '" (keyword argument repeated is invalid Python)');
+        }
+        seenKw.add(name);
+      }
+      return { type: 'keyword', arg: name, value: blockToExpr(b.inputs['KW' + i].block) };
+    });
     // Callee shapes: extraState.funcName -> a bare Name (plain id) or rebuilt Attribute chain
     // (dotted module, cv2.imread); extraState.method -> <RECV variable>.method (folded var-method);
     // otherwise the FUNC input expression.
@@ -272,7 +307,7 @@ const BLOCK_TO_STMT = {
     const keywords = kw.map((name, i) => ({
       type: 'keyword', arg: name, value: blockToExpr(b.inputs['KW' + i].block),
     }));
-    return { type: 'ClassDef', name: b.fields.NAME,
+    return { type: 'ClassDef', name: checkName('ir_classdef', b.fields.NAME),
       bases, keywords,
       body: stmtListOrPass(b.inputs.BODY),
       decorator_list,
@@ -280,26 +315,88 @@ const BLOCK_TO_STMT = {
   },
   ir_return: (b) => ({ type: 'Return', value: b.inputs.VALUE ? blockToExpr(b.inputs.VALUE.block) : null }),
   ir_typealias: (b) => ({ type: 'TypeAlias',
-    name: { type: 'Name', id: b.fields.NAME },
+    name: { type: 'Name', id: checkName('ir_typealias', b.fields.NAME) },
     type_params: fragmentToTparams((b.extraState && b.extraState.tparams) || [], b.inputs),
     value: blockToExpr(b.inputs.VALUE.block) }),
-  ir_global: (b) => ({ type: 'Global', names: b.fields.NAMES.split(', ') }),
-  ir_nonlocal: (b) => ({ type: 'Nonlocal', names: b.fields.NAMES.split(', ') }),
-  ir_import: (b) => ({ type: 'Import', names: fieldToAliases(b.fields.NAMES) }),
+  ir_global: (b) => ({ type: 'Global', names: fieldToNames(b.fields.NAMES, 'ir_global') }),
+  ir_nonlocal: (b) => ({ type: 'Nonlocal', names: fieldToNames(b.fields.NAMES, 'ir_nonlocal') }),
+  ir_import: (b) => ({ type: 'Import', names: fieldToAliases(b.fields.NAMES, 'ir_import') }),
   ir_importfrom: (b) => {
-    const raw = b.fields.MODULE || '';
+    const raw = String(b.fields.MODULE == null ? '' : b.fields.MODULE).trim();
     const level = raw.match(/^\.*/)[0].length;     // leading dots = relative-import depth
     const module = raw.slice(level) || null;       // remainder is the module ('' -> None)
-    return { type: 'ImportFrom', module, names: fieldToAliases(b.fields.NAMES), level };
+    // MODULE is free text: `from  import x` (no module, no dots) and `from a;b import x` are
+    // SyntaxErrors — fail loud rather than lower them verbatim. Leading dots stay legal
+    // (`from ..pkg import x` keeps round-tripping).
+    if (module === null && level === 0) {
+      throw new Error('blocklyToIr: ir_importfrom MODULE is empty — need a module name '
+        + 'or leading dots for a relative import');
+    }
+    if (module !== null && !isDottedName(module)) {
+      throw new Error('blocklyToIr: ir_importfrom MODULE "' + raw
+        + '" is not a valid (dotted) module name');
+    }
+    return { type: 'ImportFrom', module, names: fieldToAliases(b.fields.NAMES, 'ir_importfrom'), level };
   },
 };
 
-// Decode the comma-joined NAMES field back into alias HELPER nodes (inverse of
-// aliasesToField). Each clause is "name" or "name as asname"; `*` is a valid name.
-function fieldToAliases(s) {
-  return (s || '').split(',').map((p) => p.trim()).filter(Boolean).map((part) => {
+// Guard an editable definition-name field (def/class/type). `def my func():` and `class a;b:`
+// are SyntaxErrors ast.unparse will happily emit — fail loud at lowering instead.
+function checkName(blockType, name) {
+  if (!isIdent(name)) {
+    throw new Error('blocklyToIr: ' + blockType + ' NAME "' + name
+      + '" is not a valid Python identifier');
+  }
+  return name;
+}
+
+// Decode a global/nonlocal NAMES field: comma-separated identifiers, no empties. Free text
+// lowered verbatim could inject structure (`x; boom()`) or emit `global x,` — fail loud.
+function fieldToNames(s, blockType) {
+  const raw = String(s == null ? '' : s);
+  const parts = raw.split(',').map((p) => p.trim());
+  if (parts.length === 1 && parts[0] === '') {
+    throw new Error('blocklyToIr: ' + blockType + ' NAMES is empty — list at least one variable name');
+  }
+  return parts.map((p) => {
+    if (!isIdent(p)) {
+      throw new Error('blocklyToIr: ' + blockType + ' NAMES contains "' + p
+        + '" — each entry must be a single identifier (comma-separated)');
+    }
+    return p;
+  });
+}
+
+// Decode the comma-joined NAMES field back into alias HELPER nodes (inverse of aliasesToField).
+// Each clause is "name" or "name as asname". ir_import allows dotted names (import os.path);
+// ir_importfrom allows plain identifiers, or a lone `*`. Anything else (a `;`, an emptied
+// field, a stray comma) would be lowered verbatim into broken/injected code — fail loud.
+function fieldToAliases(s, blockType) {
+  const raw = String(s == null ? '' : s);
+  const isImport = blockType === 'ir_import';
+  const parts = raw.split(',').map((p) => p.trim());
+  if (parts.length === 1 && parts[0] === '') {
+    throw new Error('blocklyToIr: ' + blockType + ' NAMES is empty — list at least one name');
+  }
+  return parts.map((part) => {
+    const bad = (why) => new Error('blocklyToIr: ' + blockType + ' NAMES contains "' + part
+      + '" — ' + why);
+    if (part === '') throw bad('empty entry (stray comma?)');
     const m = part.split(/\s+as\s+/);
-    return { type: 'alias', name: m[0].trim(), asname: m.length > 1 ? m[1].trim() : null };
+    if (m.length > 2) throw bad('more than one "as"');
+    const name = m[0].trim();
+    const asname = m.length > 1 ? m[1].trim() : null;
+    if (name === '*') {
+      // `from x import *` is one lone alias: import * / * as y / *, y are all SyntaxErrors.
+      if (isImport) throw bad('`import *` is not valid Python');
+      if (asname !== null) throw bad('`* as name` is not valid Python');
+      if (parts.length > 1) throw bad('`*` cannot be combined with other names');
+    } else if (isImport ? !isDottedName(name) : !isIdent(name)) {
+      throw bad(isImport ? 'expected a (dotted) module name, optionally "as <name>"'
+        : 'expected an identifier, optionally "as <name>"');
+    }
+    if (asname !== null && !isIdent(asname)) throw bad('"as ' + asname + '" is not a valid identifier');
+    return { type: 'alias', name, asname };
   });
 }
 
@@ -357,7 +454,7 @@ function funcDefToIr(typeName, b) {
   const ndec = (b.extraState && b.extraState.ndec) || 0;
   const decorator_list = [];
   for (let i = 0; i < ndec; i++) decorator_list.push(blockToExpr(b.inputs['DEC' + i].block));
-  return { type: typeName, name: b.fields.NAME,
+  return { type: typeName, name: checkName(b.type, b.fields.NAME),
     args: fragmentToArgs(params, b.inputs),
     body: stmtListOrPass(b.inputs.BODY),
     decorator_list,
@@ -593,9 +690,15 @@ function blocklyToIr(ws) {
   }
   // type_ignores is a sequence field ast.unparse iterates over; it must be [] not None.
   // Each node handler likewise emits the structural list fields its ast node requires.
-  return { type: 'Module', body, type_ignores: [] };
+  const mod = { type: 'Module', body, type_ignores: [] };
+  // Module-level comments (a comment-only program has no statement to anchor them to). The
+  // inverse irToBlockly carries them under the top-level `blockpyModule` workspace key (kept
+  // across a real Blockly save by the serializer plugin registered in irBlocks.js).
+  const mc = ws && ws.blockpyModule && ws.blockpyModule.comments;
+  if (mc) mod._comments = mc;
+  return mod;
 }
 
 const api = (typeof window !== 'undefined' ? window : global);
-api.BlockPyIR = Object.assign(api.BlockPyIR || {}, { blocklyToIr, blockToExpr });
+api.BlockPyIR = Object.assign(api.BlockPyIR || {}, { blocklyToIr, blockToExpr, isIdent });
 if (typeof module !== 'undefined') module.exports = api.BlockPyIR;

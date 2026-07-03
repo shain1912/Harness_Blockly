@@ -11,6 +11,55 @@ const ARITY_MINUS_SVG = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3d
 const ARITY_PLUS_SVG = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCI+PGNpcmNsZSBjeD0iOSIgY3k9IjkiIHI9IjgiIGZpbGw9IiNmZmYiIHN0cm9rZT0iI2NjYyIvPjxyZWN0IHg9IjQuNSIgeT0iOCIgd2lkdGg9IjkiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiM1NzVFNzUiLz48cmVjdCB4PSI4IiB5PSI0LjUiIHdpZHRoPSIyIiBoZWlnaHQ9IjkiIHJ4PSIxIiBmaWxsPSIjNTc1RTc1Ii8+PC9zdmc+';
 const ARITY_KW_SVG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="26" height="16"><rect x="0.5" y="0.5" width="25" height="15" rx="7.5" fill="#fff" stroke="#ccc"/><text x="13" y="11.5" font-size="9" font-family="sans-serif" text-anchor="middle" fill="#575E75">+kw</text></svg>');
 
+// ── field validators (UX layer) ──────────────────────────────────────────────────────────
+// These mirror blocklyToIr's lowering guards (the safety net that throws): a validator
+// returning null rejects the edit, reverting the field to its last valid value, so a user
+// can't even COMMIT `os; os.system('boom')` into an import field. Kept as a minimal local
+// copy of blocklyToIr's isIdent (same regex) to avoid load-order coupling in Node.
+const IDENT_RE = /^[\p{L}_][\p{L}\p{N}_]*$/u;           // PEP-3131: Korean identifiers stay valid
+const isIdent = (s) => typeof s === 'string' && IDENT_RE.test(s);
+const isDottedName = (s) => String(s).split('.').every(isIdent);
+// def/class/type NAME and call keyword names: one bare identifier.
+const identValidator = (v) => (isIdent(v) ? v : null);
+// global/nonlocal NAMES: comma-separated identifiers, no empties.
+const nameListValidator = (v) => (
+  String(v).split(',').map((p) => p.trim()).every(isIdent) ? v : null);
+// One "name [as ident]" clause; star handled by the callers that allow it.
+const aliasClauseOk = (part, nameOk) => {
+  if (part === '') return false;
+  const m = part.split(/\s+as\s+/);
+  if (m.length > 2) return false;
+  return nameOk(m[0]) && (m.length === 1 || isIdent(m[1]));
+};
+// import NAMES: comma-separated "dotted.name [as ident]" clauses (no `*`).
+const importNamesValidator = (v) => (
+  String(v).split(',').map((p) => p.trim()).every((p) => aliasClauseOk(p, isDottedName)) ? v : null);
+// from-import NAMES: "ident [as ident]" clauses, or exactly one lone `*`.
+const fromNamesValidator = (v) => {
+  const parts = String(v).split(',').map((p) => p.trim());
+  if (parts.length === 1 && parts[0] === '*') return v;
+  return parts.every((p) => aliasClauseOk(p, isIdent)) ? v : null;
+};
+// from-import MODULE: leading dots (relative level) + optional dotted name; not empty.
+const moduleValidator = (v) => {
+  const t = String(v).trim();
+  const level = t.match(/^\.*/)[0].length;
+  const rest = t.slice(level);
+  if (level === 0 && rest === '') return null;
+  return (rest === '' || isDottedName(rest)) ? v : null;
+};
+// ir_const VALUE: exactly what blocklyToIr.pyConstValue accepts without throwing —
+// None/True/False (or legacy null/true/false), int/float faces, and JSON ({__py__:…} tags).
+const constFaceOk = (s) => {
+  const t = String(s == null ? '' : s).trim();
+  if (t === '' || t === 'None' || t === 'null' || t === 'True' || t === 'true'
+      || t === 'False' || t === 'false') return true;
+  if (/^-?\d+$/.test(t)) return true;
+  if (/^-?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][+-]?\d+)?$/.test(t)) return true;
+  try { JSON.parse(t); return true; } catch (_) { return false; }
+};
+const constValidator = (v) => (constFaceOk(v) ? v : null);
+
 if (Blockly) {
   Blockly.Blocks['ir_name'] = {
     init() {
@@ -24,7 +73,7 @@ if (Blockly) {
   };
   Blockly.Blocks['ir_const'] = {
     init() {
-      this.appendDummyInput().appendField(new Blockly.FieldTextInput('1'), 'VALUE');
+      this.appendDummyInput().appendField(new Blockly.FieldTextInput('1', constValidator), 'VALUE');
       this.setOutput(true);
       this.setColour('#a55b80');
       this.setTooltip('Constant literal (number / None / True / False)');
@@ -34,7 +83,9 @@ if (Blockly) {
   // Round-trips to a string Constant. This is the block users plug into string args (filenames,
   // labels, modes) instead of typing "gray" into the generic const.
   Blockly.Blocks['ir_str'] = {
+    kind_: null,
     init() {
+      this.kind_ = null;
       this.appendDummyInput()
         .appendField('“')
         .appendField(new Blockly.FieldTextInput(''), 'TEXT')
@@ -43,6 +94,10 @@ if (Blockly) {
       this.setColour('#5ba55b');
       this.setTooltip('Text string');
     },
+    // Constant `kind` (the `u''` prefix) — persisted only when present so plain strings
+    // (the overwhelming majority) don't grow their serialization.
+    saveExtraState() { return this.kind_ ? { kind: this.kind_ } : null; },
+    loadExtraState(state) { this.kind_ = (state && state.kind) || null; },
   };
   // Assignment with variable target arity (a = b = 1). itemCount_ targets are rebuilt
   // from extraState on load (BEFORE Blockly restores input connections), so every target
@@ -461,7 +516,13 @@ if (Blockly) {
             this.appendValueInput('KW' + t).appendField(lead + '**');
           } else {
             const idx = t;
-            const f = new Blockly.FieldTextInput(String(name), (v) => { self.kw_[idx] = v; return v; });
+            // Identifier-only (reject the edit otherwise): `f(a b=1)` is a SyntaxError.
+            // blocklyToIr re-checks (incl. duplicates) and throws as the safety net.
+            const f = new Blockly.FieldTextInput(String(name), (v) => {
+              if (!isIdent(v)) return null;
+              self.kw_[idx] = v;
+              return v;
+            });
             this.appendValueInput('KW' + t).appendField(lead).appendField(f, 'KWNAME' + t).appendField('=');
           }
         }
@@ -497,7 +558,11 @@ if (Blockly) {
       this.reshapePreserving_();
     },
     addKw_() {
-      this.kw_ = this.kw_.concat(['name']);
+      // Unique default (kw1, kw2, …): two [+kw] clicks must not both insert the same name —
+      // `f(name=…, name=…)` is 'keyword argument repeated', which blocklyToIr rejects.
+      let n = 1;
+      while (this.kw_.indexOf('kw' + n) >= 0) n++;
+      this.kw_ = this.kw_.concat(['kw' + n]);
       this.reshapePreserving_();
     },
     // Rebuild the shape while keeping user-attached blocks; new empty value slots get an ir_name shadow.
@@ -861,7 +926,7 @@ if (Blockly) {
     init() {
       this.params_ = []; this.tparams_ = []; this.ndec_ = 0; this.ret_ = false;
       this.appendDummyInput('NAMEROW').appendField(isAsync ? 'async def' : 'def')
-        .appendField(new Blockly.FieldTextInput('f'), 'NAME');
+        .appendField(new Blockly.FieldTextInput('f', identValidator), 'NAME');
       this.updateShape_();
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
@@ -906,7 +971,7 @@ if (Blockly) {
     init() {
       this.nbases_ = 0; this.kw_ = []; this.tparams_ = []; this.ndec_ = 0;
       this.appendDummyInput('NAMEROW').appendField('class')
-        .appendField(new Blockly.FieldTextInput('C'), 'NAME');
+        .appendField(new Blockly.FieldTextInput('C', identValidator), 'NAME');
       this.updateShape_();
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
@@ -975,7 +1040,7 @@ if (Blockly) {
   Blockly.Blocks['ir_global'] = {
     init() {
       this.appendDummyInput().appendField('global')
-        .appendField(new Blockly.FieldTextInput('x'), 'NAMES');
+        .appendField(new Blockly.FieldTextInput('x', nameListValidator), 'NAMES');
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour('#888888');
@@ -988,7 +1053,7 @@ if (Blockly) {
     init() {
       this.tparams_ = [];
       this.appendDummyInput('NAMEROW').appendField('type')
-        .appendField(new Blockly.FieldTextInput('X'), 'NAME');
+        .appendField(new Blockly.FieldTextInput('X', identValidator), 'NAME');
       this.updateShape_();
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
@@ -1012,7 +1077,7 @@ if (Blockly) {
   Blockly.Blocks['ir_nonlocal'] = {
     init() {
       this.appendDummyInput().appendField('nonlocal')
-        .appendField(new Blockly.FieldTextInput('x'), 'NAMES');
+        .appendField(new Blockly.FieldTextInput('x', nameListValidator), 'NAMES');
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour('#888888');
@@ -1022,7 +1087,7 @@ if (Blockly) {
   Blockly.Blocks['ir_import'] = {
     init() {
       this.appendDummyInput().appendField('import')
-        .appendField(new Blockly.FieldTextInput('os'), 'NAMES');
+        .appendField(new Blockly.FieldTextInput('os', importNamesValidator), 'NAMES');
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour('#888888');
@@ -1032,14 +1097,33 @@ if (Blockly) {
   Blockly.Blocks['ir_importfrom'] = {
     init() {
       this.appendDummyInput().appendField('from')
-        .appendField(new Blockly.FieldTextInput('os'), 'MODULE')
+        .appendField(new Blockly.FieldTextInput('os', moduleValidator), 'MODULE')
         .appendField('import')
-        .appendField(new Blockly.FieldTextInput('path'), 'NAMES');
+        .appendField(new Blockly.FieldTextInput('path', fromNamesValidator), 'NAMES');
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour('#888888');
     },
   };
+}
+
+if (Blockly && Blockly.serialization && Blockly.serialization.registry) {
+  // Workspace-level state carrier for Module comments (a comment-only program): irToBlockly
+  // emits a top-level `blockpyModule` key in the workspace JSON. Blockly's workspaces.save()
+  // only re-emits keys owned by a REGISTERED serializer (load() silently ignores unknown keys),
+  // so without this plugin the comments would vanish on the first save->blocklyToIr regeneration.
+  // State lives on the workspace object; load() clears all serializers first, so a subsequent
+  // load without the key also clears any stale ws.__blockpyModule.
+  try {
+    Blockly.serialization.registry.register('blockpyModule', {
+      priority: 0,   // after blocks/variables — order is irrelevant for an independent key
+      save(ws) { return ws.__blockpyModule || null; },
+      load(state, ws) { ws.__blockpyModule = state; },
+      clear(ws) { delete ws.__blockpyModule; },
+    });
+  } catch (_) {
+    // already registered (module re-evaluated, e.g. Vite HMR) — the existing plugin is identical
+  }
 }
 
 if (typeof module !== 'undefined') module.exports = {};
