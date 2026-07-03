@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const Anthropic = require('@anthropic-ai/sdk');
 const { spawn } = require('child_process');
 const os = require('os');
@@ -11,7 +10,17 @@ const BlockPyDesugarer = require('./src/utils/desugarer');
 const BlockPyAbstraction = require('./src/utils/libraryAbstraction');
 
 const app = express();
-app.use(cors());
+// This server exposes LOCAL-ONLY, unauthenticated, powerful endpoints (run arbitrary Python, pip,
+// read/write files). It must never be reachable cross-origin or off-box. Instead of wide-open CORS,
+// require the Host header to be loopback — blocks DNS-rebinding (Host=attacker.com) and, together with
+// the 127.0.0.1 bind below, direct LAN access (Host=<lan-ip>). The renderer is same-origin (packaged:
+// 127.0.0.1:<port>; dev: Vite proxies with changeOrigin so Host=localhost), so no CORS header is needed.
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+app.use((req, res, next) => {
+  const host = String(req.headers.host || '').replace(/:\d+$/, '').toLowerCase();
+  if (LOOPBACK_HOSTS.has(host)) return next();
+  return res.status(403).json({ error: 'forbidden: local-only server' });
+});
 app.use(express.json({ limit: '30mb' })); // allow base64 image uploads
 
 // ─── Static frontend serving (Electron / packaged desktop build) ────────────────
@@ -695,6 +704,11 @@ app.post('/api/pip-install', (req, res) => {
   if (!/^[A-Za-z0-9._\-=<>!\[\],~+ ]+$/.test(pkg)) {
     res.status(400).json({ error: 'invalid package spec' }); return;
   }
+  // Reject pip FLAGS (whitespace-split tokens starting with '-') — a bare charset check still lets
+  // "pkg --target=… --pre" through, redirecting where/what pip installs. Only package specs allowed.
+  if (pkg.split(/\s+/).some((t) => t.startsWith('-'))) {
+    res.status(400).json({ error: 'flags are not allowed in the package spec' }); return;
+  }
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('X-Accel-Buffering', 'no');
@@ -846,9 +860,11 @@ if (STATIC_DIR && fs.existsSync(STATIC_DIR)) {
 
 function start(port = process.env.PORT || 3001) {
   return new Promise((resolve) => {
-    const server = app.listen(port, () => {
+    // Bind LOOPBACK ONLY (127.0.0.1) — never all interfaces. Prevents any other host on the LAN from
+    // reaching the run-python/pip/blockify/fs endpoints (unauthenticated RCE + file access otherwise).
+    const server = app.listen(port, '127.0.0.1', () => {
       const actual = server.address().port;
-      console.log(`\n🚀 BlockPy Express Server  →  http://localhost:${actual}`);
+      console.log(`\n🚀 BlockPy Express Server  →  http://127.0.0.1:${actual}`);
       console.log(`🤖 AI Engine: MiniMax-M2.7  (via Anthropic SDK)`);
       console.log(`🔑 Key pool: ${MINIMAX_KEYS.length} key(s) loaded (round-robin)`);
       console.log(`📁 Workspace (file explorer + run cwd): ${WORKSPACE_DIR}\n`);
