@@ -402,6 +402,19 @@ body {
 .ast-controls-row .toggle-group input { margin: 0; cursor: pointer; }
 .ast-controls-row .theme-btn { padding: 0.35rem 0.55rem; }
 
+/* "서브모듈 포함" opt-in under the Blockify field */
+.toggle-group.blockify-recursive {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-muted, #6b6b6b);
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-group.blockify-recursive input { margin: 0; cursor: pointer; }
+
 /* Layout Grid Structure — full height now that the top header bar is gone. */
 .dashboard-grid, .app-grid {
   display: grid;

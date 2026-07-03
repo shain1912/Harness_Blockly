@@ -494,6 +494,43 @@ app.post('/api/deps', (req, res) => {
   });
 });
 
+// Importable SUBMODULES of a package (serial -> serial.tools.list_ports, serial.threaded, ...), so
+// the app can OPT IN to blockifying a whole package tree. Enumeration only NAMES leaf modules; the
+// frontend introspects each. Metadata + pkgutil only — no arbitrary import beyond sub-PACKAGE __init__.
+app.post('/api/submodules', (req, res) => {
+  const moduleName = ((req.body && req.body.module) || '').trim();
+  const max = Math.min(Number((req.body && req.body.max) || 60) || 60, 300);
+  if (!moduleName) return res.status(400).json({ error: 'module is required' });
+  if (!MODULE_PATH_RE.test(moduleName)) return res.status(400).json({ error: 'invalid module name' });
+  const f = path.join(genBase(), 'blockpy-gen', 'src', 'introspect', '_submodules.py');
+  let child;
+  try {
+    child = spawn(PYTHON_CMD, [f, moduleName, `--max=${max}`], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
+    });
+  }
+  catch (e) { return res.status(500).json({ error: String(e.message || e) }); }
+  let responded = false;
+  let timer = null;
+  const reply = (status, body) => {
+    if (responded) return;
+    responded = true;
+    clearTimeout(timer);
+    res.status(status).json(body);
+  };
+  timer = setTimeout(() => { killTree(child); reply(500, { error: 'submodule enumeration timed out (30s)' }); }, 30000);
+  let out = '', err = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { err += d; });
+  child.on('error', (e) => reply(500, { error: String(e.message || e) }));
+  child.on('close', (code) => {
+    if (code !== 0) return reply(500, { error: err.trim() || ('exit ' + code) });
+    try { reply(200, { success: true, ...JSON.parse(out) }); }
+    catch (e) { reply(500, { error: 'bad submodules output: ' + e.message }); }
+  });
+});
+
 // Tier-2 receiver-type oracle: Jedi infers the class of each attribute receiver in the code (static,
 // no execution). Feeds the DISPLAY layer only (precise property colouring + registering the resolved
 // class), so a wrong/absent inference is harmless. Degrades to {available:false} without Jedi.

@@ -26,6 +26,7 @@ export default function LibraryManager({
   const userLibCount = libraries.filter((l) => !l.builtin).length;
 
   const [blockifyMod, setBlockifyMod] = useState('pydobot');
+  const [blockifyRecursive, setBlockifyRecursive] = useState(false);   // opt-in: whole-package (all submodules)
   const [curateMod, setCurateMod] = useState('');
   const [curatePurpose, setCuratePurpose] = useState('');
   const [curateLevel, setCurateLevel] = useState('intermediate');   // 초/중/고 abstraction level
@@ -69,7 +70,7 @@ export default function LibraryManager({
   };
 
   const handleBlockifyClick = () => {
-    if (onBlockify && blockifyMod.trim()) onBlockify(blockifyMod.trim());
+    if (onBlockify && blockifyMod.trim()) onBlockify(blockifyMod.trim(), { recursive: blockifyRecursive });
   };
   const handleCurateClick = () => {
     if (onCurate && curateMod.trim() && curatePurpose.trim()) onCurate(curateMod.trim(), curatePurpose.trim(), curateLevel);
@@ -164,6 +165,18 @@ export default function LibraryManager({
               {isAbstracting ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-cubes"></i>} Blockify
             </button>
           </form>
+          {/* Opt-in: blockify the WHOLE package tree (every importable submodule), not just the one
+              module. Off by default so a single Blockify stays small; on, one action covers e.g. all
+              of serial (serial.tools.list_ports, serial.threaded, …). */}
+          <label className="toggle-group blockify-recursive" htmlFor="blockify-recursive" title="모든 하위 모듈을 각각 탭으로 생성 (툴박스가 커집니다)">
+            <input
+              id="blockify-recursive"
+              type="checkbox"
+              checked={blockifyRecursive}
+              onChange={(e) => setBlockifyRecursive(e.target.checked)}
+            />
+            <span>서브모듈 포함 (전체 패키지)</span>
+          </label>
         </div>
 
         {/* ── 2) Curate → a small, purpose-driven subset in a NEW tab ──── */}

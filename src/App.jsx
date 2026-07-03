@@ -174,11 +174,12 @@ export default function App() {
       const stored = reg.getLibSpec(res.type) || spec;
       registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames, colour: stored.colour });
     }
-    if (reg.registerConst) for (const c of (mapped.consts || [])) { const had = reg.findConst && reg.findConst(c.dotted); if (!had || !had.builtin) reg.registerConst(c); }
-    if (reg.registerProp) for (const p of (mapped.props || [])) reg.registerProp(p);
+    let constCount = 0, propCount = 0;
+    if (reg.registerConst) for (const c of (mapped.consts || [])) { const had = reg.findConst && reg.findConst(c.dotted); if ((!had || !had.builtin) && reg.registerConst(c).ok) constCount++; }
+    if (reg.registerProp) for (const p of (mapped.props || [])) { if (reg.registerProp(p).ok) propCount++; }
     reg.persist();
     setInstalledBlocks((prev) => { const have = new Set(prev.map((p) => p.type)); return [...prev, ...registered.filter((r) => !have.has(r.type))]; });
-    return { registered };
+    return { registered, constCount, propCount };
   };
 
   // Convert-time exception rule: every library symbol the code references becomes a recognized block in
@@ -1238,11 +1239,64 @@ for i in range(4):
     }
   };
 
+  // Blockify (recursive/whole-package, OPT-IN): enumerate a package's importable submodules
+  // (serial → serial.tools.list_ports, serial.threaded, …) and blockify EACH into its own tab, so
+  // one action covers the whole library tree instead of just the module the code references. Bounded
+  // by the backend's submodule cap; submodules that don't import here (platform-specific ones, e.g.
+  // serialposix on Windows) are skipped silently and counted. Sequential — one spinner, one summary.
+  const handleBlockifyPackage = async (rootModule) => {
+    const root = (rootModule || '').trim();
+    if (!root) return;
+    setIsAbstracting(true);
+    setAiThoughts([]);
+    setLogs((prev) => [...prev, `[Blockify] Enumerating submodules of "${root}" (whole-package)…`]);
+    try {
+      let subs = [];
+      let truncated = false, total = 0;
+      try {
+        const r = await fetch('/api/submodules', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ module: root }), signal: AbortSignal.timeout(35000),
+        });
+        if (r.ok) { const d = await r.json(); subs = (d && d.submodules) || []; truncated = !!(d && d.truncated); total = (d && d.total) || 0; }
+        else { const d = await r.json().catch(() => null); setLogs((prev) => [...prev, `[Blockify] Couldn't list submodules of "${root}"${d && d.error ? ' — ' + d.error : ''}. Blockifying just the top module.`]); }
+      } catch (_) { setLogs((prev) => [...prev, `[Blockify] Submodule listing unavailable — blockifying just the top module.`]); }
+      if (!subs.length) subs = [root];
+      setLogs((prev) => [...prev, `[Blockify] ${subs.length} submodule(s)${truncated ? ` of ${total} (capped)` : ''} — generating blocks (this can take a bit)…`]);
+      let okCount = 0, skipped = 0, totalBlocks = 0, lastAlias = '';
+      for (const sub of subs) {
+        const data = await introspectModule(sub, { maxEntries: 3000, quiet: true });
+        if (!data || !data.spec) { skipped++; continue; }
+        // ADDITIVE (registerUsedLibrary, not registerFullLibrary): several submodules re-export the
+        // same class (serial.rfc2217/threaded all expose `Serial`), whose method-receiver alias
+        // collides — registerFullLibrary's removeModules would let a later submodule WIPE the earlier
+        // top `serial` tab. Additive/first-wins keeps every submodule's unique API without clobbering.
+        const { registered, constCount, propCount } = registerUsedLibrary(data.spec);
+        if (registered.length || constCount || propCount) { okCount++; totalBlocks += registered.length + constCount + propCount; lastAlias = data.spec.module; }
+        else skipped++;
+      }
+      refreshToolboxNow();
+      setAiThoughts([
+        `Whole-package Blockify of "${root}": ${okCount} module(s) → ${totalBlocks} block(s).`,
+        skipped ? `${skipped} submodule(s) skipped (empty or not importable on this platform).` : `All submodules blockified.`,
+        `Each submodule is its own toolbox tab (e.g. "${lastAlias || root}"). Add the matching import to run its blocks.`,
+      ]);
+      setLogs((prev) => [...prev, `[Blockify] ✅ Whole-package "${root}": ${okCount} tab(s), ${totalBlocks} block(s)${skipped ? `, ${skipped} skipped` : ''}.`]);
+    } catch (err) {
+      console.error(err);
+      setLogs((prev) => [...prev, `[Blockify Error] ${err.message}`]);
+    } finally {
+      setIsAbstracting(false);
+    }
+  };
+
   // Blockify (full): introspect a module and put EVERY API call into its own Library palette tab.
   // No AI cost. Used by the Blockify field and automatically right after a `pip install`.
-  const handleBlockifyLibrary = async (moduleName) => {
+  // opts.recursive → blockify the whole package tree (delegates to handleBlockifyPackage).
+  const handleBlockifyLibrary = async (moduleName, opts = {}) => {
     const mod = (moduleName || '').trim();
     if (!mod) return;
+    if (opts.recursive) return handleBlockifyPackage(mod);
     setIsAbstracting(true);
     setAiThoughts([]);
     setLogs((prev) => [...prev, `[Blockify] Introspecting "${mod}" (real Python)...`]);
