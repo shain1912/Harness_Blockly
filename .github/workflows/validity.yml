@@ -1,8 +1,17 @@
-# P4 validity harness — the 1:1 lossless contract is a merge gate.
+# CI gates for the LIVE conversion pipeline (CPython-3.12 ast IR).
 #
-# Runs the pure-Node round-trip corpora (Layer 1: Invariant-1) plus the macro template
-# and idempotence checks (Layers 2-3) on every push / PR. These specs don't navigate a
-# page, so they need only the Playwright runner + a browser binary — no backend, no AI keys.
+# REQUIRED merge gates:
+#   * ir-validity — tests/ir_*.spec.js (15 specs): the IR bridge round-trip, irToBlockly/
+#     blocklyToIr parity, NODE_POLICY coverage (raw=0), toolbox completeness, block UX,
+#     library blockify/import, comments, desugar. Browser specs against the real app —
+#     Playwright auto-starts Vite; Blockly + Pyodide are VENDORED from node_modules into
+#     public/vendor (gitignored) by `npm run vendor`, so no CDN is needed. The Express
+#     backend is started for ir_blockify_app.spec.js (/api/blockify, keyless).
+#   * gen-tests — blockpy-gen introspection engine (node --test; spawns a local python).
+#
+# NON-GATING:
+#   * legacy-validity — the pre-IR hand-written parser corpora. That path is FROZEN
+#     (retired from conversion); the job is informational only (continue-on-error).
 name: validity
 
 on:
@@ -11,8 +20,56 @@ on:
   pull_request:
 
 jobs:
-  validity:
+  ir-validity:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      # index.html loads Blockly from /vendor/blockly (no CDN); pyAstBridge/pyodideRunner
+      # prefer /vendor/pyodide (CDN only as fallback). public/vendor is gitignored —
+      # reproduce it from the installed npm packages.
+      - run: npm run vendor
+      - run: npx playwright install --with-deps chromium
+      # ir_blockify_app.spec.js needs the Express backend (/api/blockify introspects
+      # stdlib html.parser via a python subprocess — no AI keys required).
+      - name: Start backend (Express :3001)
+        run: |
+          npm run server &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3001/api/health && break
+            sleep 1
+          done
+      - name: Live IR pipeline gate (tests/ir_*.spec.js)
+        run: npm run test:ir -- --reporter=line
+
+  gen-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - name: blockpy-gen unit tests (node --test)
+        run: npm run test:gen
+
+  # Legacy parser corpora — pins the FROZEN pre-IR path (src/utils/parser.js et al.),
+  # which is loaded for side effects only and retired from conversion. Informational,
+  # NOT a merge gate: continue-on-error keeps it from blocking merges.
+  legacy-validity:
+    runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,5 +78,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - name: 1:1 validity gate (core corpora + macro layers)
+      - name: Legacy 1:1 validity corpora (frozen path, non-gating)
         run: npm run test:validity -- --reporter=line --workers=4
