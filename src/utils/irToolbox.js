@@ -217,6 +217,31 @@ function libCallEntry(reg, type) {
   return entry;
 }
 
+// Sub-category colours — DISTINCT per semantic KIND so, inside a library, "Constants" / "Properties"
+// / "Macros" / a curation group are visually separable at a glance (they used to all be one teal).
+// Display-only (a category colour never affects a block's lowering).
+const SUBCAT = {
+  group:     '#00897b',   // curation semantic group (teal)
+  other:     '#00897b',   // ungrouped calls (same family as groups)
+  constants: '#5c6bc0',   // module constants — indigo
+  property:  '#c9822e',   // class properties — amber
+  macros:    '#7e57c2',   // composed workflows — purple
+};
+
+// Top-level library category colour, keyed by the TOP package so a whole-package Blockify keeps its
+// submodules a visual family (all serial.* share one hue; cv2 / math / numpy each get their own),
+// while the tab NAME still distinguishes members. Deterministic (no Math.random) → stable across
+// rebuilds. Curated ★ tabs keep their own fixed accent below.
+// Hues deliberately steer clear of the semantic sub-category colours (amber/indigo/purple/teal)
+// so a library tab never blends into its own Constants/Properties/Macros sub-category.
+const LIB_PALETTE = ['#3f7fd0', '#0f9d58', '#c94f7c', '#c94f4f', '#4f9ec9', '#7cb342', '#00acc1', '#e0662b', '#0288d1', '#43a047', '#d81b60', '#6d8b3a'];
+function libColour(libKey) {
+  const top = String(libKey || '').split('.')[0];
+  let h = 0;
+  for (let i = 0; i < top.length; i++) h = (h * 31 + top.charCodeAt(i)) >>> 0;
+  return LIB_PALETTE[h % LIB_PALETTE.length];
+}
+
 // One toolbox category PER LIBRARY (named by the library, e.g. cv2 / pathlib / PIL.Image), instead
 // of one lumped "Library". A library's blocks are bucketed by its source-library tag (lib, else the
 // block's module for built-ins); a curated library nests one sub-category per semantic group
@@ -242,11 +267,11 @@ function constSubcategory(consts) {
   }
   const contents = [];
   for (const [p, list] of [...byPrefix].sort((a, b) => a[0].localeCompare(b[0]))) {
-    if (list.length >= 2) contents.push({ kind: 'category', name: p, colour: '#00897b', contents: list.map(constEntry) });
+    if (list.length >= 2) contents.push({ kind: 'category', name: p, colour: SUBCAT.constants, contents: list.map(constEntry) });
     else singles.push(...list);                          // a lone prefixed const isn't worth its own sub-category
   }
   for (const c of singles.sort((a, b) => a.name.localeCompare(b.name))) contents.push(constEntry(c));
-  return contents.length ? { kind: 'category', name: 'Constants', colour: '#00897b', contents } : null;
+  return contents.length ? { kind: 'category', name: 'Constants', colour: SUBCAT.constants, contents } : null;
 }
 
 // A class property renders as an ir_attribute attr-form (`<recv>.device`) with an ir_name receiver
@@ -263,10 +288,10 @@ function propSubcategory(props) {
   } else {
     contents = [];
     for (const [o, list] of [...byOwner].sort((a, b) => a[0].localeCompare(b[0]))) {
-      contents.push({ kind: 'category', name: o || 'Other', colour: '#00897b', contents: list.sort((a, b) => a.attr.localeCompare(b.attr)).map(propEntry) });
+      contents.push({ kind: 'category', name: o || 'Other', colour: SUBCAT.property, contents: list.sort((a, b) => a.attr.localeCompare(b.attr)).map(propEntry) });
     }
   }
-  return contents.length ? { kind: 'category', name: 'Properties', colour: '#00897b', contents } : null;
+  return contents.length ? { kind: 'category', name: 'Properties', colour: SUBCAT.property, contents } : null;
 }
 
 function libraryCategories() {
@@ -320,23 +345,23 @@ function libraryCategories() {
       contents = [...L.groups.values()].flat();                         // flat library
     } else {
       contents = [];
-      for (const [g, entries] of L.groups) if (g) contents.push({ kind: 'category', name: g, colour: '#00897b', contents: entries });
-      if (L.groups.has('') && L.groups.get('').length) contents.push({ kind: 'category', name: 'Other', colour: '#009688', contents: L.groups.get('') });
-      if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: macroEntries });
+      for (const [g, entries] of L.groups) if (g) contents.push({ kind: 'category', name: g, colour: SUBCAT.group, contents: entries });
+      if (L.groups.has('') && L.groups.get('').length) contents.push({ kind: 'category', name: 'Other', colour: SUBCAT.other, contents: L.groups.get('') });
+      if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: SUBCAT.macros, contents: macroEntries });
     }
     if (propCat) contents = [...contents, propCat];                     // Properties + Constants sub-categories after the calls
     if (constCat) contents = [...contents, constCat];
-    cats.push({ kind: 'category', name: libKey, colour: '#009688', contents });
+    cats.push({ kind: 'category', name: libKey, colour: libColour(libKey), contents });
   }
   // libraries whose curation produced only macros (no plain blocks)
   for (const [libKey, entries] of macrosByLib) {
-    if (!byLib.has(libKey)) cats.push({ kind: 'category', name: libKey, colour: '#009688', contents: [{ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: entries }] });
+    if (!byLib.has(libKey)) cats.push({ kind: 'category', name: libKey, colour: libColour(libKey), contents: [{ kind: 'category', name: 'Macros', colour: SUBCAT.macros, contents: entries }] });
   }
   // libraries that produced ONLY value blocks (constants and/or properties) still get a tab
   for (const libKey of new Set([...constsByLib.keys(), ...propsByLib.keys()])) {
     if (cats.some((c) => c.name === libKey)) continue;
     const extra = [propSubcategory(propsByLib.get(libKey)), constSubcategory(constsByLib.get(libKey))].filter(Boolean);
-    if (extra.length) cats.push({ kind: 'category', name: libKey, colour: '#009688', contents: extra });
+    if (extra.length) cats.push({ kind: 'category', name: libKey, colour: libColour(libKey), contents: extra });
   }
 
   // Curated tabs (Phase C3): one extra category per curation, a purpose-driven subset that references
@@ -359,9 +384,9 @@ function libraryCategories() {
       contents = [...byGroup.values()].flat();
     } else {
       contents = [];
-      for (const [g, entries] of byGroup) if (g) contents.push({ kind: 'category', name: g, colour: '#00897b', contents: entries });
-      if (byGroup.has('') && byGroup.get('').length) contents.push({ kind: 'category', name: 'Other', colour: '#009688', contents: byGroup.get('') });
-      if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: '#7e57c2', contents: macroEntries });
+      for (const [g, entries] of byGroup) if (g) contents.push({ kind: 'category', name: g, colour: SUBCAT.group, contents: entries });
+      if (byGroup.has('') && byGroup.get('').length) contents.push({ kind: 'category', name: 'Other', colour: SUBCAT.other, contents: byGroup.get('') });
+      if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: SUBCAT.macros, contents: macroEntries });
     }
     if (contents.length) cats.push({ kind: 'category', name: `★ ${cur.label || cur.key}`, colour: '#00796b', contents });
   }
