@@ -76,18 +76,12 @@ export default function App() {
   const introspectedSpecsRef = useRef(new Map());  // dotted module -> cached LibrarySpec (or null) this session
   const registeredSymRef = useRef(new Set());       // module::kind::owner.name already materialized (convert-time)
   const classNamesRef = useRef(new Set());          // library class names seen (Tier-1 receiver-type inference)
+  const convertBindingsRef = useRef(new Map());     // dotted module -> the LOCAL name this program binds it to (np)
+  const latestCodeRef = useRef('');                 // mirrors `code` for async callbacks (startup-load clobber guard)
   const associatedPythonRef = useRef('');
   const abstractionEngineRef = useRef(null);
   const shellAbortRef = useRef(null);
   const desugarToggleMountRef = useRef(true);   // skip the toggle re-Convert on initial mount
-
-  // Structural script equivalence helper
-  const arePythonScriptsEquivalent = (codeA, codeB) => {
-    const clean = (c) => c.replace(/#.*$/gm, '')
-                          .replace(/\s+/g, ' ')
-                          .trim();
-    return clean(codeA) === clean(codeB);
-  };
 
   // Which library SYMBOLS a program actually references, so Convert can materialize exactly those
   // (used-symbols-only) into the toolbox in their proper category. Resolves imported module aliases:
@@ -100,7 +94,7 @@ export default function App() {
   // symbol (`from math import sqrt; sqrt(x)`) stays a generic block (no module prefix) — a known limit.
   const referencedSymbols = (ir) => {
     const IDT = /^[A-Za-z_][A-Za-z0-9_]*$/;
-    const alias = new Map();     // local binding -> dotted module
+    const alias = new Map();     // local binding -> dotted module (or dotted symbol for from-imports)
     const collect = (node) => {
       if (!node || typeof node !== 'object') return;
       if (Array.isArray(node)) { node.forEach(collect); return; }
@@ -144,29 +138,43 @@ export default function App() {
         // `from math import sqrt; sqrt(x)` — a bare call of a from-imported symbol. alias resolves the
         // binding (sqrt -> math.sqrt); split into module + symbol so autoBlockifyRefs can recognize it.
         const dotted = alias.get(node.func.id); const d = dotted.lastIndexOf('.');
-        if (d > 0) { const m = dotted.slice(0, d), s = dotted.slice(d + 1); if (!bareFuncs.has(m)) bareFuncs.set(m, new Set()); bareFuncs.get(m).add(s); }
+        // key = the LOCAL binding (honors `from math import sqrt as s` — the program only binds `s`),
+        // value = the source symbol name to look up in the introspected spec.
+        if (d > 0) { const m = dotted.slice(0, d), s = dotted.slice(d + 1); if (!bareFuncs.has(m)) bareFuncs.set(m, new Map()); bareFuncs.get(m).set(node.func.id, s); }
       }
       for (const k in node) if (k !== 'type') visit(node[k]);
     };
     visit(ir && ir.body);
-    return { moduleAttrs, bareAttrs, bareFuncs };
+    // Invert the alias map: dotted module -> the name THIS program binds it to. Materialized blocks
+    // must lower to that binding (np.mean under `import numpy as np`), or dragging them NameErrors.
+    const bindings = new Map();
+    for (const [bind, dotted] of alias) if (!bindings.has(dotted)) bindings.set(dotted, bind);
+    return { moduleAttrs, bareAttrs, bareFuncs, bindings };
   };
 
   // Register only SPECIFIC symbols of a library (additive, idempotent — NO removeModules), so a
   // library's toolbox tab GROWS to match what the code actually uses instead of dumping the whole API.
-  const registerUsedLibrary = (librarySpec) => {
+  const registerUsedLibrary = (librarySpec, opts = {}) => {
     const reg = window.BlockPyLibRegistry;
     const imp = window.BlockPyLibImport;
     if (!reg || !imp) return { registered: [] };
-    const mapped = imp.librarySpecToRegistrySpecs(librarySpec);
+    const mapped = imp.librarySpecToRegistrySpecs(librarySpec, { bindings: opts.bindings });
     const registered = [];
     for (const spec of mapped.specs) {
+      // A builtin stdlib tab (math, random, …) already covers this call in its curated single form.
+      // Re-registering the convert-time twin (the _stmt/value double) would double the palette and
+      // flip the protected tab user-deletable — skip when EITHER form is already builtin.
+      if (typeof reg.blockType === 'function') {
+        const cur = reg.getLibSpec(reg.blockType(spec));
+        const alt = reg.getLibSpec(reg.blockType({ ...spec, hasOutput: !spec.hasOutput }));
+        if ((cur && cur.builtin) || (alt && alt.builtin)) continue;
+      }
       const res = reg.registerLibBlock(spec);
       if (!res.ok) continue;
       const stored = reg.getLibSpec(res.type) || spec;
       registered.push({ type: res.type, title: stored.title, hasOutput: stored.hasOutput, func: stored.func, args: stored.argNames, colour: stored.colour });
     }
-    if (reg.registerConst) for (const c of (mapped.consts || [])) reg.registerConst(c);
+    if (reg.registerConst) for (const c of (mapped.consts || [])) { const had = reg.findConst && reg.findConst(c.dotted); if (!had || !had.builtin) reg.registerConst(c); }
     if (reg.registerProp) for (const p of (mapped.props || [])) reg.registerProp(p);
     reg.persist();
     setInstalledBlocks((prev) => { const have = new Set(prev.map((p) => p.type)); return [...prev, ...registered.filter((r) => !have.has(r.type))]; });
@@ -186,9 +194,12 @@ export default function App() {
     if (spec === undefined) {
       const data = await introspectModule(module, { quiet: true, maxEntries: 3000 });
       spec = (data && data.spec) ? data.spec : null;
-      introspectedSpecsRef.current.set(module, spec);
+      // Cache only DEFINITIVE answers: a real spec, or the backend's explicit 404 "no such module".
+      // A transient failure (backend down/wedged/5xx/timeout) must NOT poison the whole session —
+      // the next Convert retries. (pip install clears this cache so fresh modules re-probe.)
+      if (spec || (data && data.notFound)) introspectedSpecsRef.current.set(module, spec);
       if (spec) { for (const e of (spec.entries || [])) if (e.kind === 'class') classNamesRef.current.add(e.name); }
-      else setLogs((prev) => [...prev, `[Convert] "${module}" isn't installed — its blocks stay generic. Install it in the Library pip field (by package name).`]);
+      else if (data && data.notFound) setLogs((prev) => [...prev, `[Convert] "${module}" isn't installed — its blocks stay generic. Install it in the Library pip field (by package name).`]);
     }
     return spec;
   };
@@ -198,7 +209,7 @@ export default function App() {
   // library blocks). Returns { name: {type, module} }.
   const inferTypes = async (code) => {
     try {
-      const r = await fetch('/api/infer-types', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+      const r = await fetch('/api/infer-types', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }), signal: AbortSignal.timeout(12000) });
       if (!r.ok) return {};
       const d = await r.json();
       const out = {};
@@ -232,7 +243,7 @@ export default function App() {
         registeredSymRef.current.add(key);
         return true;
       });
-      if (fresh.length) { registerUsedLibrary({ ...spec, entries: fresh }); changed = true; }
+      if (fresh.length) { registerUsedLibrary({ ...spec, entries: fresh }, { bindings: convertBindingsRef.current }); changed = true; }
     }
     return changed;
   };
@@ -241,7 +252,8 @@ export default function App() {
     const reg = window.BlockPyLibRegistry;
     const imp = window.BlockPyLibImport;
     if (!reg || !imp) return false;
-    const { moduleAttrs, bareAttrs, bareFuncs } = referencedSymbols(ir);
+    const { moduleAttrs, bareAttrs, bareFuncs, bindings } = referencedSymbols(ir);
+    convertBindingsRef.current = bindings;   // registerInferredClasses (Tier-2) reuses the same program bindings
     let changed = false;
     // A small/cohesive module (a submodule like serial.tools.list_ports) → materialize ALL its members
     // so the whole sub-library is available (the user expects "전부 다"). A large library (numpy) →
@@ -272,23 +284,27 @@ export default function App() {
         registeredSymRef.current.add(key);
         return true;
       });
-      if (reduced.length) { registerUsedLibrary({ ...spec, entries: reduced }); changed = true; }
+      if (reduced.length) { registerUsedLibrary({ ...spec, entries: reduced }, { bindings }); changed = true; }
     }
     // Bare from-imports (`from math import sqrt; sqrt(x)`): register a BARE spec (module '') that lowers
-    // to `sqrt(...)` and colours the bare call, filed under the source library's tab. Text stays lossless.
+    // to the LOCAL binding (`sqrt(...)`, or `s(...)` for `import sqrt as s`) and colours the bare call,
+    // filed under the source library's tab. Text stays lossless.
     for (const [module, syms] of (bareFuncs || new Map())) {
       const spec = await getSpec(module);
       if (!spec) continue;
-      for (const sym of syms) {
-        const key = `${module}::bare::${sym}`;
+      for (const [binding, sym] of syms) {
+        const key = `${module}::bare::${binding}`;
         if (registeredSymRef.current.has(key)) continue;
         const entry = (spec.entries || []).find((e) => e.name === sym && (e.kind === 'function' || e.kind === 'class'));
         if (!entry) continue;
         registeredSymRef.current.add(key);
-        const res = reg.registerLibBlock({ module: '', func: sym, argNames: imp.requiredParamNames(entry), colour: '#009688', title: sym, lib: module, hasOutput: entry.returns !== false });
+        const res = reg.registerLibBlock({ module: '', func: binding, argNames: imp.requiredParamNames(entry), colour: '#009688', title: binding, lib: module, hasOutput: entry.returns !== false });
         if (res.ok) changed = true;
       }
     }
+    // Bare specs above register directly (not via registerUsedLibrary), so persist here — otherwise
+    // whether they survive a reload depends on some LATER unrelated action happening to call persist().
+    if (changed && typeof reg.persist === 'function') reg.persist();
     return changed;
   };
 
@@ -352,9 +368,9 @@ export default function App() {
     setIsConverting(true);
 
     try {
-      // Snapshot Recovery Check: unchanged Python since the last block edit restores the saved
-      // workspace JSON verbatim (no re-parse, no block drift).
-      if (blocklySnapshotRef.current && arePythonScriptsEquivalent(currentCode, associatedPythonRef.current)) {
+      // Snapshot Recovery fast path: BYTE-IDENTICAL Python since the last block edit restores the
+      // saved workspace JSON verbatim (no re-parse, no block drift).
+      if (blocklySnapshotRef.current && currentCode === associatedPythonRef.current) {
         window.Blockly.serialization.workspaces.load(blocklySnapshotRef.current, workspaceRef.current);
         setLogs(prev => [...prev, '[Sync-Engine] Python matches active snapshot. Restored layout without block drift.']);
         setSyntaxStatus({ valid: true, error: '' });
@@ -363,6 +379,25 @@ export default function App() {
 
       const pyodide = await window.BlockPyAstBridge.getPyodide();
       let ir = await window.BlockPyAstBridge.pythonToIR(pyodide, currentCode);
+      // Snapshot Recovery slow path: the text changed, but if it parses to the IDENTICAL IR
+      // (including the _comments channel) the edit was formatting-only — keep the layout. This
+      // replaces the old regex-normalized string compare, which collapsed ALL whitespace and
+      // stripped comments, so a re-indented line (semantic in Python!), an edit inside a string
+      // literal, or a comment change was silently REVERTED to the old blocks. AST identity can
+      // never mistake a semantic or comment edit for "unchanged".
+      if (blocklySnapshotRef.current && associatedPythonRef.current) {
+        try {
+          const prevIr = await window.BlockPyAstBridge.pythonToIR(pyodide, associatedPythonRef.current);
+          if (JSON.stringify(prevIr) === JSON.stringify(ir)) {
+            if (myGen !== syncGenRef.current) return;
+            window.Blockly.serialization.workspaces.load(blocklySnapshotRef.current, workspaceRef.current);
+            associatedPythonRef.current = currentCode;
+            setLogs(prev => [...prev, '[Sync-Engine] Formatting-only change (same AST + comments). Restored layout without block drift.']);
+            setSyntaxStatus({ valid: true, error: '' });
+            return;
+          }
+        } catch (_) { /* previous text no longer parses — fall through to a full convert */ }
+      }
       // Phase 4 (opt-in): rewrite sugar (comprehensions/ternary/chained compare) to elementary
       // loop/conditional/boolean IR in provably-safe positions; SUGAR is preserved elsewhere. The
       // pass emits only existing IR nodes, so irToBlockly consumes it unchanged.
@@ -370,15 +405,27 @@ export default function App() {
         ir = window.BlockPyIrDesugar.desugarIr(ir);
       }
       // Convert-time exception rule: materialize every referenced library symbol into the toolbox
-      // (auto-installing a missing library) BEFORE building blocks, so lib.func()/lib.CONST/obj.attr
-      // paint recognized (emerald) on first render and every canvas block has a toolbox home.
-      const grew = await autoBlockifyRefs(ir);
-      // Tier-2: Jedi resolves receiver types (incl. return types like p:ListPortInfo); register those
-      // classes' members and use them for precise colouring. Degrades silently if the backend/Jedi is off.
-      const jediVars = await inferTypes(currentCode);
-      const grew2 = await registerInferredClasses(jediVars);
-      if (grew || grew2) refreshToolboxNow();
-      annotateOwnerTypes(ir, jediVars);   // tag attribute receivers with their inferred class for precise colouring
+      // BEFORE building blocks, so lib.func()/lib.CONST/obj.attr paint recognized (emerald) on first
+      // render and every canvas block has a toolbox home — but on a TIME BUDGET. Recognition is
+      // display-only (a wrong/absent oracle can only mis-colour, never change lowering), so a wedged
+      // backend must degrade to generic styling instead of freezing Convert forever.
+      const ORACLE_BUDGET_MS = 15000;
+      const oracles = (async () => {
+        const grew = await autoBlockifyRefs(ir);
+        // Tier-2: Jedi resolves receiver types (incl. return types like p:ListPortInfo); register those
+        // classes' members and use them for precise colouring. Degrades silently if the backend/Jedi is off.
+        const jediVars = await inferTypes(currentCode);
+        const grew2 = await registerInferredClasses(jediVars);
+        return { grew: grew || grew2, jediVars };
+      })();
+      let oracle = await Promise.race([oracles, new Promise((res) => setTimeout(() => res(null), ORACLE_BUDGET_MS))]);
+      if (!oracle) {
+        setLogs((prev) => [...prev, '[Convert] Library recognition timed out — blocks render generic this time (round-trip is unaffected; Convert again once the backend responds).']);
+        oracles.then((late) => { if (late && late.grew) refreshToolboxNow(); }).catch(() => {});   // late toolbox growth still lands
+        oracle = { grew: false, jediVars: {} };
+      }
+      if (oracle.grew) refreshToolboxNow();
+      annotateOwnerTypes(ir, oracle.jediVars);   // tag attribute receivers with their inferred class for precise colouring
       if (myGen !== syncGenRef.current) return;   // a newer sync started while we awaited introspection/install
       const blocklyJson = window.BlockPyIR.irToBlockly(ir);
       // Library calls stay as the unified ir_call block; ir_call.updateShape_ styles a registered
@@ -549,22 +596,43 @@ export default function App() {
     }
 
     // Open the workspace's main.py on startup if present; otherwise fall back to the demo.
+    // Clobber guard: this fetch races the user (a slow backend can resolve AFTER they started
+    // typing/converting) — never overwrite an editor that is no longer pristine, and only fire
+    // the deferred sync if the editor still shows exactly what we loaded.
     (async () => {
+      const pristine = () => !latestCodeRef.current || !latestCodeRef.current.trim();
       try {
         const r = await fetch('/api/fs/file?path=main.py');
         if (r.ok) {
           const j = await r.json();
           if (j.kind === 'text') {
-            setActiveFile('main.py');
-            setCode(j.content || '');
-            setTimeout(() => syncCodeToBlocks(j.content || ''), 80);
+            if (!pristine()) return;                       // user got there first — keep their code
+            const content = j.content || '';
+            // Atomic apply: the functional updater re-checks against the LATEST state, so an edit
+            // that lands in the same React batch can never be overwritten.
+            let applied = false;
+            latestCodeRef.current = content;               // eager: don't depend on a render before the timer
+            setCode((prev) => {
+              if (prev && prev.trim()) { latestCodeRef.current = prev; return prev; }
+              applied = true;
+              return content;
+            });
+            setTimeout(() => {
+              if (applied && latestCodeRef.current === content) {
+                setActiveFile('main.py');
+                syncCodeToBlocks(content);
+              }
+            }, 80);
             return;
           }
         }
       } catch (_) { /* backend not up — use the demo */ }
-      loadDemoScript('star');
+      if (pristine()) loadDemoScript('star');
     })();
   }, []);
+
+  // Keep the ref in lockstep with the editor state (used by the startup-load guard above).
+  useEffect(() => { latestCodeRef.current = code; }, [code]);
 
   // Pre-warm the Python environment (Pyodide + real opencv-python + sample images) in the
   // background as soon as the app loads, so the first Run is instant rather than waiting
@@ -689,12 +757,15 @@ for i in range(4):
         break;
     }
 
+    latestCodeRef.current = demoCode;   // eager: don't depend on a render before the deferred sync
     setCode(demoCode);
     setHighlightedLine(null);
     setLogs([`[System] Demo script "${type}" loaded into workspace.`]);
 
     setTimeout(() => {
-      syncCodeToBlocks(demoCode);
+      // Deferred sync fires only if the editor still shows this demo — a user who replaced the
+      // content within the delay window must not have their code's blocks clobbered.
+      if (latestCodeRef.current === demoCode) syncCodeToBlocks(demoCode);
     }, 100);
   };
 
@@ -789,6 +860,10 @@ for i in range(4):
         return;
       }
       const pkgName = pkgBaseName(pkg);
+      // New modules exist now — drop the convert-time session caches so modules previously cached
+      // as "not installed" re-probe, and their symbols materialize freely on the next Convert.
+      introspectedSpecsRef.current.clear();
+      registeredSymRef.current.clear();
       setLogs((prev) => [...prev, `[pip] Installed. Generating blocks for "${pkgName}" → toolbox…`]);
       await handleBlockifyLibrary(pkgName);
       // Also blockify the installed dependencies pip just pulled in, so transitive libraries
@@ -1003,6 +1078,9 @@ for i in range(4):
     const reg = window.BlockPyLibRegistry;
     if (!reg || typeof reg.removeLibraryByTab !== 'function') return;
     const removed = reg.removeLibraryByTab(libKey);
+    // The convert-time "already materialized" cache must follow the registry: stale keys would make
+    // a re-Convert skip every symbol of the deleted tab, so it could never come back this session.
+    registeredSymRef.current.clear();
     setInstalledBlocks((prev) => prev.filter((p) => !removed.includes(p.type)));
     refreshToolboxNow();
     setLogs((prev) => [...prev, `[Library] Removed "${libKey}" — ${removed.length} block(s) + its toolbox tab.`]);
@@ -1014,6 +1092,7 @@ for i in range(4):
     if (!reg || typeof reg.removeAllUserLibraries !== 'function') return;
     if (!window.confirm('Remove ALL added libraries and their toolbox tabs?\n(Built-in preset blocks stay.)')) return;
     const removed = reg.removeAllUserLibraries();
+    registeredSymRef.current.clear();   // same invalidation as single-tab removal
     setInstalledBlocks((prev) => prev.filter((p) => !removed.includes(p.type)));
     refreshToolboxNow();
     setLogs((prev) => [...prev, `[Library] Cleared all added libraries — ${removed.length} block(s).`]);
@@ -1050,16 +1129,21 @@ for i in range(4):
       response = await fetch('/api/blockify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ module: mod, ...(opts.maxEntries ? { maxEntries: opts.maxEntries } : {}) }),
+        signal: AbortSignal.timeout(90000),   // backstop; the backend kills a blocking import at ~60s
       });
     } catch (_) { response = null; }
     let data = null;
-    if (response && response.ok) { try { data = await response.json(); } catch (_) { data = null; } }
+    if (response) { try { data = await response.json(); } catch (_) { data = null; } }
     if (!response || !response.ok || !data || !data.success || !data.spec) {
+      // DEFINITIVE "no such module" (backend 404 / allowlist 403) vs TRANSIENT failure (backend
+      // down/5xx/timeout): callers cache the former but must retry the latter (getSpec).
+      const notFound = !!(response && (response.status === 404 || response.status === 403 || (data && data.notFound)));
       // Convert-time auto-blockify probes candidate submodules that may not be modules at all
       // (`from math import sqrt` → "math.sqrt"); a failed probe is expected, so stay silent.
-      if (opts.quiet) return null;
+      if (opts.quiet) return notFound ? { notFound: true } : null;
       const why = !response ? 'backend unreachable (is the Express server running?)'
-        : (!response.ok ? `backend ${response.status}` : ((data && data.error) || 'introspection failed'));
+        : (notFound ? `"${mod}" is not an importable module (not installed?)`
+          : (!response.ok ? `backend ${response.status}${(data && data.error) ? ' — ' + data.error : ''}` : ((data && data.error) || 'introspection failed')));
       setLogs((prev) => [...prev, `[Blockify] ${why} for "${mod}".`]);
       return null;
     }
@@ -1127,7 +1211,9 @@ for i in range(4):
     setAiThoughts([]);
     setLogs((prev) => [...prev, `[Blockify] Introspecting "${mod}" (real Python)...`]);
     try {
-      const data = await introspectModule(mod);
+      // Same maxEntries as Convert's getSpec: a smaller default here would removeModules-delete
+      // convert-registered symbols in the 1000..3000 range and never re-add them.
+      const data = await introspectModule(mod, { maxEntries: 3000 });
       if (!data) return;
       const librarySpec = data.spec;
       const { mapped, registered, rejected, constCount, propCount } = registerFullLibrary(librarySpec);
@@ -1172,7 +1258,7 @@ for i in range(4):
     setAiThoughts([]);
     setLogs((prev) => [...prev, `[Curate] Introspecting "${mod}", then asking the AI to pick blocks for: "${want}"…`]);
     try {
-      const data = await introspectModule(mod);
+      const data = await introspectModule(mod, { maxEntries: 3000 });   // keep in step with Convert/Blockify
       if (!data || reqId !== curateReqRef.current) return;
       const librarySpec = data.spec;
       const { mapped } = registerFullLibrary(librarySpec);   // full tab + TYPES exist even if user Cancels
@@ -1182,6 +1268,7 @@ for i in range(4):
         cres = await fetch('/api/abstract-library', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ spec: librarySpec, purpose: want, level: lvl }),
+          signal: AbortSignal.timeout(90000),   // a wedged AI backend must not pin isCurating forever
         });
       } catch (_) { cres = null; }
       let cdata = null;
@@ -1249,12 +1336,22 @@ for i in range(4):
     setLogs((prev) => [...prev, `[Curate] Cancelled — the full library tab is still available.`]);
   };
 
-  const handleRegenerateCuration = () => {
+  // Regenerate honors the LIVE 수준 selector (the radios stay clickable above the preview) —
+  // regenerating with the OLD proposal's level silently discarded a changed selection.
+  const handleRegenerateCuration = (level) => {
     const p = curationProposal;
-    if (p) proposeCuration(p.module, p.purpose, p.level);     // bumps token, replaces proposal on success
+    if (p) proposeCuration(p.module, p.purpose, level || p.level);   // bumps token, replaces proposal on success
+  };
+
+  // User typing in the Python editor: update the mirror ref SYNCHRONOUSLY (React batches the state
+  // update) so the startup-load clobber guard sees the edit the instant it happens.
+  const handleUserCodeChange = (newCode) => {
+    latestCodeRef.current = newCode;
+    setCode(newCode);
   };
 
   const handleBlocklyCodeChange = (newCode) => {
+    latestCodeRef.current = newCode;
     setCode(newCode);
     associatedPythonRef.current = newCode;
   };
@@ -1516,7 +1613,7 @@ for i in range(4):
               <div style={{ display: activeEditorTab === 'python' ? 'block' : 'none', height: '100%' }}>
                 <PythonEditor
                   code={code}
-                  onCodeChange={setCode}
+                  onCodeChange={handleUserCodeChange}
                   onSyncToBlocks={handleSyncToBlocksClick}
                   syntaxStatus={syntaxStatus}
                   highlightedLine={highlightedLine}

@@ -46,9 +46,13 @@ function isMethodSpec(spec) {
 }
 
 // Synchronous half of the round-trip oracle (no Pyodide). Returns an error string or null (ok).
+// A DOTTED module (urllib.parse, np.linalg) is legal: the program references the submodule through
+// its import chain, the toolbox renders it as the SAME dotted ir_call the converter emits (exact
+// lowering via the funcName attribute-chain rebuild), and no lib_* canvas block is ever defined for
+// it (registerLibBlock skips defineBlock), so nothing can lower it as a single Name.
 function staticCheck(spec) {
   if (!spec || typeof spec.func !== 'string' || !IDENT.test(spec.func)) return 'func is not a valid Python identifier';
-  if (spec.module && !IDENT.test(spec.module)) return 'module is not a valid Python identifier';
+  if (spec.module && !String(spec.module).split('.').every((seg) => IDENT.test(seg))) return 'module is not a valid (dotted) Python identifier';
   const args = spec.argNames || [];
   if (!Array.isArray(args)) return 'argNames must be an array';
   const seen = new Set();
@@ -144,7 +148,10 @@ function registerLibBlock(spec) {
     return { ok: false, reason: 'block type collision: ' + type };
   }
   SPECS.set(type, stored);
-  defineBlock(type, stored);
+  // A dotted-module spec gets NO lib_* Blockly type: the toolbox offers it as the unified ir_call
+  // (identical to the converted canvas block), which is also what keeps its lowering exact — a
+  // lib_* block would need module to be a single Name.
+  if (String(stored.module).indexOf('.') < 0) defineBlock(type, stored);
   return { ok: true, type };
 }
 

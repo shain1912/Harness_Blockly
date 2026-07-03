@@ -36,6 +36,31 @@ function entryModuleAlias(entry) {
   return IMP_IDENT.test(leaf) ? leaf : '';
 }
 
+// Convert-time: rewrite an entry's dotted module through the PROGRAM'S import bindings so the block
+// lowers to the name the user's code actually binds — `import numpy as np` renders numpy.mean under
+// `np` (not `numpy`, which would NameError when dragged), `import matplotlib.pyplot as plt` renders
+// pyplot under `plt` (not the unbound leaf `pyplot`). Longest bound dotted prefix wins.
+// Returns the rewritten reference prefix — possibly DOTTED (`import urllib.parse` → urllib.parse;
+// np.linalg) — which libRegistry accepts as a dotted-module spec (toolbox renders the exact dotted
+// ir_call; no lib_* canvas type). undefined when bindings carry no info (caller falls back to the
+// leaf-alias default).
+function bindingAlias(entry, bindings) {
+  const m = (entry && typeof entry.module === 'string') ? entry.module : '';
+  if (!m || !bindings) return undefined;
+  const get = (k) => (typeof bindings.get === 'function' ? bindings.get(k) : bindings[k]);
+  let probe = m;
+  for (;;) {
+    const b = get(probe);
+    if (b) {
+      const rewritten = b + m.slice(probe.length);
+      return rewritten.split('.').every((seg) => IMP_IDENT.test(seg)) ? rewritten : undefined;
+    }
+    const i = probe.lastIndexOf('.');
+    if (i < 0) return undefined;
+    probe = probe.slice(0, i);
+  }
+}
+
 // positional/keyword params without a default = the essential, representable signature.
 function requiredParamNames(entry) {
   return (entry.params || [])
@@ -73,7 +98,9 @@ function entryToSpec(entry, alias, colour, opts = {}) {
   } else {
     // function or class: module-rooted call under its OWN module's leaf alias (a submodule keeps its
     // own receiver, e.g. list_ports.comports), falling back to the top-package alias for top entries.
-    const ownAlias = entryModuleAlias(entry) || alias;
+    // Convert-time bindings override the leaf with what the PROGRAM binds — possibly dotted
+    // (urllib.parse.quote under `import urllib.parse`); libRegistry handles dotted modules.
+    const ownAlias = bindingAlias(entry, opts.bindings) || entryModuleAlias(entry) || alias;
     base = { module: ownAlias, func: entry.name, argNames: reqd, colour, title: `${ownAlias}.${entry.name}` };
   }
 
@@ -87,10 +114,12 @@ function entryToSpec(entry, alias, colour, opts = {}) {
 // reporter that lowers to the EXACT dotted reference (never the literal value), so round-trip is
 // lossless. The receiver alias is the entry's own module leaf (list_ports for a submodule constant,
 // cv2 for a top constant) — matching how the code references it, exactly like functions.
-function entryToConst(entry, alias, colour) {
+function entryToConst(entry, alias, colour, opts = {}) {
   if (!entry || entry.kind !== 'constant' || typeof entry.name !== 'string' || !IMP_IDENT.test(entry.name)) return null;
-  const ownAlias = entryModuleAlias(entry) || alias;
-  if (!IMP_IDENT.test(ownAlias)) return null;
+  // May be dotted under convert-time bindings (urllib.parse.MAX_CACHE) — the const block is a
+  // pre-filled ir_attribute{dotted}, which lowers a chain of any depth losslessly.
+  const ownAlias = bindingAlias(entry, opts.bindings) || entryModuleAlias(entry) || alias;
+  if (!ownAlias.split('.').every((seg) => IMP_IDENT.test(seg))) return null;
   return {
     name: entry.name,
     module: ownAlias,
@@ -157,8 +186,8 @@ function librarySpecToRegistrySpecs(librarySpec, opts = {}) {
   const consts = [];
   const props = [];
   for (const e of entries) {
-    for (const s of entryToSpec(e, alias, colour, { both: opts.both })) { s.lib = moduleDotted; specs.push(s); }   // tag source library -> its own toolbox category
-    const c = entryToConst(e, alias, colour);
+    for (const s of entryToSpec(e, alias, colour, { both: opts.both, bindings: opts.bindings })) { s.lib = moduleDotted; specs.push(s); }   // tag source library -> its own toolbox category
+    const c = entryToConst(e, alias, colour, { bindings: opts.bindings });
     if (c) { c.lib = moduleDotted; consts.push(c); }
     const p = entryToProp(e, alias, colour);
     if (p) { p.lib = moduleDotted; props.push(p); }
@@ -283,6 +312,6 @@ const impApi = (typeof window !== 'undefined' ? window : global);
 impApi.BlockPyLibImport = {
   librarySpecToRegistrySpecs, curationToRegistrySpecs, macrosToRegistry, libraryModules,
   entryQualName, requiredParamNames, importStatement, importBlockJson, argToIr, splitTopArgs,
-  entryToConst, entryToProp, entryModuleAlias,
+  entryToConst, entryToProp, entryModuleAlias, bindingAlias,
 };
 if (typeof module !== 'undefined') module.exports = impApi.BlockPyLibImport;

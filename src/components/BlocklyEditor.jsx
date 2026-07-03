@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 export default function BlocklyEditor({
   onCodeChange,
@@ -8,6 +8,9 @@ export default function BlocklyEditor({
   workspaceRef,
 }) {
   const containerRef = useRef(null);
+  // Block→Python regeneration failure (e.g. a required input emptied by detaching its child) —
+  // shown on the sync badge; the badge used to be hardcoded "Synchronized" even while sync stalled.
+  const [syncError, setSyncError] = useState('');
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -118,10 +121,13 @@ export default function BlocklyEditor({
         if (isSyncingFromCode.current) return; // a code->block sync may have started during await
         onCodeChange(code);
         onSnapshotChange(snapshot);
+        setSyncError('');
       } catch (err) {
-        // A block outside the IR vocabulary (e.g. a legacy toolbox block) makes blocklyToIr
-        // throw; surface it without crashing the editor. Toolbox alignment is future work.
+        // A block outside the IR vocabulary, or an invalid block state (detached required child,
+        // bad identifier field), makes blocklyToIr throw. Surface it on the badge instead of
+        // silently stalling sync while the badge claims "Synchronized".
         console.error('Error generating code on workspace change (IR path):', err);
+        setSyncError(err && err.message ? err.message : String(err));
       }
     };
 
@@ -161,8 +167,13 @@ export default function BlocklyEditor({
           <i className="fa-solid fa-cubes icon-purple"></i>
           <h3>Visual Block Workspace</h3>
         </div>
-        <div id="sync-indicator" className="badge badge-success" title="Block ↔ Python synced">
-          <i className="fa-solid fa-rotate"></i> Synchronized
+        <div
+          id="sync-indicator"
+          className={`badge ${syncError ? 'badge-error' : 'badge-success'}`}
+          title={syncError ? `Block → Python sync failed: ${syncError}` : 'Block ↔ Python synced'}
+        >
+          <i className={`fa-solid ${syncError ? 'fa-triangle-exclamation' : 'fa-rotate'}`}></i>
+          {' '}{syncError ? 'Sync error — fix the highlighted block' : 'Synchronized'}
         </div>
       </div>
       <div 

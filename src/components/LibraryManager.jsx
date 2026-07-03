@@ -193,6 +193,13 @@ export default function LibraryManager({
             <button type="submit" className="btn btn-primary btn-sm" disabled={isAbstracting || isCurating || !curateMod.trim() || !curatePurpose.trim()}>
               {isCurating ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>} Curate
             </button>
+            {/* First-curate escape hatch: before a proposal exists there is no preview panel (and thus
+                no 취소 button), so a slow/wedged AI round-trip had no way out short of a reload. */}
+            {isCurating && !curationProposal && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => onCancelCuration && onCancelCuration()}>
+                <i className="fa-solid fa-xmark"></i> 취소
+              </button>
+            )}
           </form>
           {/* Abstraction level: same library, different granularity (초=고수준·각도만 … 고=저수준·PWM/타이밍). */}
           <div className="curate-level" role="radiogroup" aria-label="Abstraction level">
@@ -262,7 +269,7 @@ export default function LibraryManager({
                     macros: curationProposal.macros.map((m, i) => ({ ...m, checked: !!draftMacroChecks[i] })),
                   })}
                 ><i className="fa-solid fa-check"></i> ★ 탭 만들기</button>
-                <button className="btn btn-secondary btn-sm" disabled={isCurating} onClick={() => onRegenerateCuration && onRegenerateCuration()}>
+                <button className="btn btn-secondary btn-sm" disabled={isCurating} onClick={() => onRegenerateCuration && onRegenerateCuration(curateLevel)}>
                   {isCurating ? <i className="fa-solid fa-gear fa-spin"></i> : <i className="fa-solid fa-rotate"></i>} 다시 생성
                 </button>
                 <button className="btn btn-secondary btn-sm" onClick={() => onCancelCuration && onCancelCuration()}><i className="fa-solid fa-xmark"></i> 취소</button>
