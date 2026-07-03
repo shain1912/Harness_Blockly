@@ -199,7 +199,13 @@ export default function App() {
       // the next Convert retries. (pip install clears this cache so fresh modules re-probe.)
       if (spec || (data && data.notFound)) introspectedSpecsRef.current.set(module, spec);
       if (spec) { for (const e of (spec.entries || [])) if (e.kind === 'class') classNamesRef.current.add(e.name); }
-      else if (data && data.notFound) setLogs((prev) => [...prev, `[Convert] "${module}" isn't installed — its blocks stay generic. Install it in the Library pip field (by package name).`]);
+      else if (data && data.notFound) {
+        // Name the ROOT package to pip-install (the import name often differs, e.g. serial→pyserial,
+        // cv2→opencv-python, PIL→pillow). We can't know the exact distribution, but the top-level
+        // import name is the right starting point and far more actionable than the dotted submodule.
+        const root = String(module).split('.')[0];
+        setLogs((prev) => [...prev, `[Convert] "${module}" isn't installed — its blocks stay generic. Install it in the Library "pip install" field (try "${root}"; the package name can differ from the import, e.g. serial→pyserial, cv2→opencv-python).`]);
+      }
     }
     return spec;
   };
@@ -420,8 +426,14 @@ export default function App() {
       })();
       let oracle = await Promise.race([oracles, new Promise((res) => setTimeout(() => res(null), ORACLE_BUDGET_MS))]);
       if (!oracle) {
-        setLogs((prev) => [...prev, '[Convert] Library recognition timed out — blocks render generic this time (round-trip is unaffected; Convert again once the backend responds).']);
-        oracles.then((late) => { if (late && late.grew) refreshToolboxNow(); }).catch(() => {});   // late toolbox growth still lands
+        setLogs((prev) => [...prev, '[Convert] Library recognition is slow — blocks render generic for now and will recolour automatically when it finishes (round-trip is unaffected).']);
+        // Self-heal: when the oracle finally lands, grow the toolbox AND recolour the on-canvas calls
+        // so a recognised library call turns emerald without the user re-converting.
+        oracles.then((late) => {
+          if (myGen !== syncGenRef.current) return;   // a newer convert now owns colouring
+          if (late && late.grew) refreshToolboxNow();
+          recolorLibBlocks(workspaceRef.current);
+        }).catch(() => {});
         oracle = { grew: false, jediVars: {} };
       }
       if (oracle.grew) refreshToolboxNow();
@@ -1070,6 +1082,30 @@ for i in range(4):
     const ws = workspaceRef.current;
     if (ws && typeof window.BlockPyBuildIrToolbox === 'function') {
       try { ws.updateToolbox(window.BlockPyBuildIrToolbox()); } catch (_) { /* non-fatal */ }
+    }
+  };
+
+  // Self-heal recognition on the canvas AFTER a late-completing oracle: re-run each library-callable
+  // block's shape so a now-registered call turns emerald (with param labels) without a full re-convert.
+  // Colour/labels are display-only, so this never changes the lowered Python — hence guarded by the
+  // sync counter (no redundant block→code regen). ir_call keeps its children (reshapePreserving_);
+  // only DOTTED ir_attribute (constants — no receiver child) is re-shaped, since re-running a
+  // property's updateShape_ would drop its receiver input (that case recolours on the next convert).
+  const recolorLibBlocks = (ws) => {
+    if (!ws || typeof ws.getAllBlocks !== 'function') return;
+    isSyncingFromCodeRef.current += 1;
+    try {
+      for (const b of ws.getAllBlocks(false)) {
+        try {
+          if (b.type === 'ir_call' && typeof b.reshapePreserving_ === 'function') b.reshapePreserving_();
+          else if (b.type === 'ir_attribute' && b.dotted_ && typeof b.updateShape_ === 'function') {
+            b.updateShape_();
+            if (b.rendered && typeof b.render === 'function') b.render();
+          }
+        } catch (_) { /* one block failing must not stall the rest */ }
+      }
+    } finally {
+      isSyncingFromCodeRef.current -= 1;
     }
   };
 
