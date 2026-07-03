@@ -251,6 +251,7 @@ export default function LibraryManager({
                       <input type="checkbox" checked={!!draftChecks[i]} onChange={() => setDraftChecks((c) => c.map((v, j) => (j === i ? !v : v)))} />
                       <span className="curate-row-title">{s.realTitle}</span>
                       <span className={`curate-badge ${s.hasOutput ? 'value' : 'cmd'}`}>{s.hasOutput ? '값' : '실행'}</span>
+                      {s.tier === 'more' && <span className="curate-badge more" title="탭의 '더 보기' 하위 카테고리로 들어감">더보기</span>}
                     </label>
                     <input
                       className="curate-group-input"
@@ -278,7 +279,7 @@ export default function LibraryManager({
                   disabled={isCurating || draftCheckedCount === 0}
                   onClick={() => onConfirmCuration && onConfirmCuration({
                     tabLabel: draftTabLabel,
-                    entries: curationProposal.selected.map((s, i) => ({ ref: s.ref, group: draftGroups[i], checked: !!draftChecks[i] })),
+                    entries: curationProposal.selected.map((s, i) => ({ ref: s.ref, group: draftGroups[i], tier: s.tier, checked: !!draftChecks[i] })),
                     macros: curationProposal.macros.map((m, i) => ({ ...m, checked: !!draftMacroChecks[i] })),
                   })}
                 ><i className="fa-solid fa-check"></i> ★ 탭 만들기</button>

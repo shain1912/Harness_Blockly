@@ -634,9 +634,9 @@ Respond in STRICT JSON only — no markdown. Reference every API item by its int
 
 Rules:
 - "i" MUST be an integer index shown in the list. Do not invent.
-- Select ONLY operations relevant to the PURPOSE; at most ${limit} entries total across groups.
-- Group into 2-5 intuitive categories. Write labels in the SAME LANGUAGE as the purpose.
-- Macros chain 2-4 real calls into one task; a step's args count must fit that call's parameters; later steps may use earlier "assign" vars.`;
+- Select operations relevant to the PURPOSE. Put the ${limit} MOST ESSENTIAL ones FIRST (they become the always-visible "core"); you MAY list up to ${limit * 2} more useful-but-secondary ones after those — they go under a collapsed "더 보기 / more" shelf, so nothing essential is lost to a hard cut. Order matters: most important first.
+- Group into 2-5 intuitive categories. Write labels in the SAME LANGUAGE as the purpose, as SHORT task-oriented phrases (≤3 words, a verb + object like "포트 열기" / "open port" — never a full signature).
+- Macros chain 2-4 real calls into one task; a step's args count must fit that call's parameters; later steps may use earlier "assign" vars.${lvl === 'beginner' ? '\n- BEGINNER: prefer MACROS — most of the core view should be whole-task macros (one block = one goal), with only a few primitives.' : ''}`;
   const userContent = `Library module: ${spec.module}\nPurpose: ${String(purpose).trim()}\nLevel: ${lvl}\n\nREAL API (reference by index "i"):\n${apiText}`;
 
   // technique D: retry once if the model returns unparseable JSON.
@@ -687,15 +687,22 @@ Rules:
       ...(parsed.thoughts || []),
     ].slice(0, 8);
 
-    // Deterministic cap: enforce the level's size limit even if the model over-selects, so the
-    // beginner view stays genuinely small (the LLM's count is only guidance). Macros get their own
-    // cap — the beginner prompt actively encourages them, so uncapped they could flood the smallest
-    // palette right past the entry limit.
-    const capped = selected.slice(0, limit);
-    const macroLimit = Math.max(2, Math.floor(limit / 2));
+    // Two-tier progressive disclosure (technique: MakeCode advanced=true / Resnick wide-walls):
+    // instead of SLICING the tail away, keep it and TAG it. The first `limit` (by the model's rank)
+    // are "core" (always visible); the rest up to a ceiling are "more" (a collapsed "더 보기" shelf in
+    // the same tab). Nothing essential is silently dropped — the beginner view stays small but the
+    // needed-but-9th op is one click away, not gone.
+    const MORE_CEIL = Math.min(limit * 3, 40);
+    const kept = selected.slice(0, MORE_CEIL);
+    const tiered = kept.map((s, idx) => ({ ...s, tier: idx < limit ? 'core' : 'more' }));
+    // Macro budget by level: beginner FAVORS macros (one block = one whole task), advanced prefers
+    // primitives so learners compose. Macros still count toward keeping the smallest view sane.
+    const macroLimit = lvl === 'beginner' ? Math.max(4, limit)
+      : lvl === 'advanced' ? Math.min(3, macros.length)
+        : Math.max(2, Math.floor(limit / 2));
     const cappedMacros = macros.slice(0, macroLimit);
 
-    res.json({ success: true, module: spec.module, level: lvl, selected: capped, macros: cappedMacros, thoughts, dropped: { selected: droppedSel + (selected.length - capped.length), macros: droppedMac + (macros.length - cappedMacros.length) } });
+    res.json({ success: true, module: spec.module, level: lvl, selected: tiered, macros: cappedMacros, thoughts, dropped: { selected: droppedSel + (selected.length - kept.length), macros: droppedMac + (macros.length - cappedMacros.length) } });
   } catch (err) {
     console.error('[/api/abstract-library]', err.message);
     res.status(500).json({ success: false, error: err.message });

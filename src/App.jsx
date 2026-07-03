@@ -1384,7 +1384,7 @@ for i in range(4):
         const probe = imp.curationToRegistrySpecs(librarySpec, [{ ref: sel.ref }]);
         const good = probe.specs.find((s) => reg.getLibSpec(reg.blockType(s)));
         if (!good) continue;
-        selected.push({ ref: sel.ref, group: sel.group || '', realTitle: good.title, hasOutput: !!good.hasOutput, checked: true });
+        selected.push({ ref: sel.ref, group: sel.group || '', tier: sel.tier === 'more' ? 'more' : 'core', realTitle: good.title, hasOutput: !!good.hasOutput, checked: true });
       }
       const macros = imp.macrosToRegistry(librarySpec, cdata.macros || []).map((m) => ({ ...m, checked: true }));
       setCurationProposal({ module: mod, purpose: want, level: cdata.level || lvl, librarySpec, alias: mapped.alias, importStmt: mapped.importStmt, selected, macros, thoughts: cdata.thoughts || [], dropped: cdata.dropped || {} });
@@ -1405,14 +1405,14 @@ for i in range(4):
     if (!p) return;
     const reg = window.BlockPyLibRegistry;
     const imp = window.BlockPyLibImport;
-    const chosen = (edited.entries || []).filter((e) => e.checked).map((e) => ({ ref: e.ref, group: (e.group || '').trim() }));
+    const chosen = (edited.entries || []).filter((e) => e.checked).map((e) => ({ ref: e.ref, group: (e.group || '').trim(), tier: e.tier === 'more' ? 'more' : 'core' }));
     const chosenMacros = (edited.macros || []).filter((m) => m.checked && m.block);
     curateReqRef.current++;                                   // any in-flight propose is now stale
     setCurationProposal(null);
     if (!chosen.length && !chosenMacros.length) { setLogs((prev) => [...prev, `[Curate] Nothing selected — the full "${p.module}" tab is available.`]); return; }
     const cur = imp.curationToRegistrySpecs(p.librarySpec, chosen);
     const items = [];
-    for (const s of cur.specs) { const type = reg.blockType(s); if (reg.getLibSpec(type)) items.push({ type, label: s.title, group: s.group || '' }); }
+    for (const s of cur.specs) { const type = reg.blockType(s); if (reg.getLibSpec(type)) items.push({ type, label: s.title, group: s.group || '', tier: s.tier || 'core' }); }
     const lvlTag = { beginner: '초', intermediate: '중', advanced: '고' }[p.level] || '';
     const key = `${p.librarySpec.module} · ${p.purpose}${lvlTag ? ' · ' + lvlTag : ''}`.slice(0, 60);
     const defLabel = `${p.purpose}${lvlTag ? ` (${lvlTag})` : ''}`;

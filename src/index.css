@@ -546,6 +546,7 @@ body {
 .curate-badge.value { background: rgba(0, 150, 136, 0.18); color: #0f766e; }
 .curate-badge.cmd { background: rgba(106, 138, 91, 0.2); color: #4b5d3a; }
 .curate-badge.macro { background: rgba(126, 87, 194, 0.18); color: #6a3fb0; }
+.curate-badge.more { background: rgba(158, 158, 158, 0.22); color: #616161; }
 :root.dark .curate-badge.value { color: #5eead4; }
 :root.dark .curate-badge.cmd { color: #b6c99a; }
 :root.dark .curate-badge.macro { color: #c4a7f0; }

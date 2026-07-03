@@ -327,7 +327,7 @@ function removeMacro(name) { MACROS.delete(name); persistMacros(); }
 function addCuration(c) {
   if (!c || typeof c.key !== 'string' || !Array.isArray(c.items)) return { ok: false, reason: 'curation needs {key, items[]}' };
   const items = c.items.filter((it) => it && typeof it.type === 'string')
-    .map((it) => ({ type: it.type, label: it.label || '', group: it.group || '' }));
+    .map((it) => ({ type: it.type, label: it.label || '', group: it.group || '', tier: it.tier === 'more' ? 'more' : 'core' }));
   const macros = (Array.isArray(c.macros) ? c.macros : [])
     .filter((m) => m && m.block).map((m) => ({ label: m.label || m.name || '', group: m.group || '', block: m.block }));
   if (!items.length && !macros.length) return { ok: false, reason: 'curation is empty' };

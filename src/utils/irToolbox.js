@@ -226,6 +226,7 @@ const SUBCAT = {
   constants: '#5c6bc0',   // module constants — indigo
   property:  '#c9822e',   // class properties — amber
   macros:    '#7e57c2',   // composed workflows — purple
+  more:      '#9e9e9e',   // "더 보기" secondary shelf — muted grey (reads as "extra/advanced")
 };
 
 // Top-level library category colour, keyed by the TOP package so a whole-package Blockify keeps its
@@ -369,25 +370,38 @@ function libraryCategories() {
   // carries semantic groups; a ★ name marks it as the curated view, distinct from the full library.
   const curations = (typeof reg.listCurations === 'function' ? reg.listCurations() : []) || [];
   for (const cur of curations) {
-    const byGroup = new Map();
-    (cur.items || []).forEach((it) => {
-      const entry = typeBlockEntry(reg, it.type);
-      if (!entry) return;                                  // type was removed -> skip stale ref
-      const g = it.group || '';
-      if (!byGroup.has(g)) byGroup.set(g, []);
-      byGroup.get(g).push(entry);
-    });
+    // Progressive disclosure: CORE items render up front; MORE items are folded into a single
+    // collapsed "더 보기" shelf in the SAME tab — so the curated view stays small but nothing the
+    // curation picked is lost to a hard cut (MakeCode advanced=true / Resnick wide-walls).
+    const groupsOf = (items) => {
+      const byGroup = new Map();
+      (items || []).forEach((it) => {
+        const entry = typeBlockEntry(reg, it.type);
+        if (!entry) return;                                // type was removed -> skip stale ref
+        const g = it.group || '';
+        if (!byGroup.has(g)) byGroup.set(g, []);
+        byGroup.get(g).push(entry);
+      });
+      return byGroup;
+    };
+    const items = cur.items || [];
+    const coreG = groupsOf(items.filter((it) => (it.tier || 'core') !== 'more'));
+    const moreG = groupsOf(items.filter((it) => it.tier === 'more'));
     const macroEntries = (cur.macros || []).map((m) => ({ kind: 'block', ...m.block }));
-    const anyGroup = [...byGroup.keys()].some((g) => g);
-    let contents;
-    if (!anyGroup && !macroEntries.length) {
-      contents = [...byGroup.values()].flat();
-    } else {
-      contents = [];
-      for (const [g, entries] of byGroup) if (g) contents.push({ kind: 'category', name: g, colour: SUBCAT.group, contents: entries });
-      if (byGroup.has('') && byGroup.get('').length) contents.push({ kind: 'category', name: 'Other', colour: SUBCAT.other, contents: byGroup.get('') });
-      if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: SUBCAT.macros, contents: macroEntries });
-    }
+
+    const flatten = (byGroup) => {
+      const anyGroup = [...byGroup.keys()].some((g) => g);
+      if (!anyGroup) return [...byGroup.values()].flat();
+      const out = [];
+      for (const [g, entries] of byGroup) if (g) out.push({ kind: 'category', name: g, colour: SUBCAT.group, contents: entries });
+      if (byGroup.has('') && byGroup.get('').length) out.push({ kind: 'category', name: 'Other', colour: SUBCAT.other, contents: byGroup.get('') });
+      return out;
+    };
+
+    let contents = flatten(coreG);
+    if (macroEntries.length) contents.push({ kind: 'category', name: 'Macros', colour: SUBCAT.macros, contents: macroEntries });
+    const moreContents = flatten(moreG);
+    if (moreContents.length) contents.push({ kind: 'category', name: '더 보기', colour: SUBCAT.more, contents: moreContents });
     if (contents.length) cats.push({ kind: 'category', name: `★ ${cur.label || cur.key}`, colour: '#00796b', contents });
   }
   return cats;

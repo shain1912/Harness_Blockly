@@ -223,6 +223,7 @@ function curationToRegistrySpecs(librarySpec, selected, opts = {}) {
     for (const base of variants) {
       if (sel.label) base.title = String(sel.label);    // display-only; lowering uses module/func
       if (sel.group) base.group = String(sel.group);
+      if (sel.tier) base.tier = sel.tier;               // 'core' | 'more' -> progressive-disclosure shelf
       base.lib = moduleDotted;                            // source library -> its own toolbox category
       specs.push(base);
     }
