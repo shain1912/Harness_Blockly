@@ -4,7 +4,6 @@ const APP_URL = 'http://localhost:' + (process.env.PORT || '3000') + '/';
 // ── Node-level (no browser) ─────────────────────────────────────────────────
 require('../src/utils/libRegistry.js');
 const REG = global.BlockPyLibRegistry;
-const ABS = require('../src/utils/libraryAbstraction.js');
 
 test.describe('lib registry (node)', () => {
   test.beforeEach(() => REG.clearAll());
@@ -171,10 +170,11 @@ test.describe('lib spec-from-descriptor (node)', () => {
     expect(REG.findLibCall('matplotlib.pyplot', 'plot')).toMatchObject({ isModule: true, params: ['x'] });
   });
 
-  test('pandas df.describe preset lowers to df.describe() with no redundant receiver arg', () => {
-    const preset = ABS.AI_PRESETS.pandas.blocks.find((b) => b.title === 'df.describe');
-    expect(preset.args).toEqual([]);                                  // preset data is coherent
-    const spec = REG.specFromDescriptor(preset, 'pandas');
+  test('a df.describe descriptor lowers to df.describe() with no redundant receiver arg', () => {
+    // specFromDescriptor derives module+func from the dotted title, so a receiver-method title
+    // (df.describe) lowers to <df>.describe() rather than df.describe(df, ...).
+    const descriptor = { func: 'describe', args: [], hasOutput: true, title: 'df.describe' };
+    const spec = REG.specFromDescriptor(descriptor, 'pandas');
     expect(spec).toMatchObject({ module: 'df', func: 'describe', argNames: [] });
     const r = REG.registerLibBlock(spec);
     expect(r.ok).toBe(true);

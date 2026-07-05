@@ -42,6 +42,17 @@ const HAND = [
     fn('time', 'monotonic', [], true), fn('time', 'perf_counter', [], true),
     fn('time', 'localtime', [], true), fn('time', 'strftime', ['format'], true),
   ] },
+  // cv2 (opencv-python) essentials. cv2's functions are C-level and expose NO introspectable
+  // signature (inspect sees zero params), so — exactly like random/time above — the argument
+  // names are hand-authored here. Replaces the old AI_PRESETS['cv2'] hardcoded block table.
+  { module: 'cv2', entries: [
+    fn('cv2', 'imread', ['filename'], true),
+    fn('cv2', 'imshow', ['winname', 'mat'], false),
+    { kind: 'class', name: 'VideoCapture', qualName: 'cv2.VideoCapture', returns: true,
+      params: [{ name: 'device_index', kind: 'positional', hasDefault: false }] },
+    fn('cv2', 'waitKey', ['delay'], true),
+    fn('cv2', 'destroyAllWindows', [], false),
+  ] },
 ];
 
 function introspect(mod) {

@@ -16,7 +16,6 @@ import '@fontsource/jetbrains-mono/500.css';
 import './index.css';
 
 // Import compiler utilities so they are bundled by Vite and register globally
-import './utils/libraryAbstraction.js';
 import './utils/libRegistry.js';   // Phase 5: window.BlockPyLibRegistry (load before irToolbox.js)
 import './utils/libImport.js';     // Phase B: window.BlockPyLibImport (blockpy-gen LibrarySpec -> libRegistry)
 import './utils/curateHeuristic.js'; // deterministic no-AI curation (offline fallback for /api/abstract-library)

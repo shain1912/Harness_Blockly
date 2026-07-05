@@ -5,6 +5,7 @@
    {
     "kind": "function",
     "name": "acos",
+    "module": "math",
     "qualName": "math.acos",
     "params": [
      {
@@ -19,6 +20,7 @@
    {
     "kind": "function",
     "name": "acosh",
+    "module": "math",
     "qualName": "math.acosh",
     "params": [
      {
@@ -33,6 +35,7 @@
    {
     "kind": "function",
     "name": "asin",
+    "module": "math",
     "qualName": "math.asin",
     "params": [
      {
@@ -47,6 +50,7 @@
    {
     "kind": "function",
     "name": "asinh",
+    "module": "math",
     "qualName": "math.asinh",
     "params": [
      {
@@ -61,6 +65,7 @@
    {
     "kind": "function",
     "name": "atan",
+    "module": "math",
     "qualName": "math.atan",
     "params": [
      {
@@ -75,6 +80,7 @@
    {
     "kind": "function",
     "name": "atan2",
+    "module": "math",
     "qualName": "math.atan2",
     "params": [
      {
@@ -94,6 +100,7 @@
    {
     "kind": "function",
     "name": "atanh",
+    "module": "math",
     "qualName": "math.atanh",
     "params": [
      {
@@ -108,6 +115,7 @@
    {
     "kind": "function",
     "name": "cbrt",
+    "module": "math",
     "qualName": "math.cbrt",
     "params": [
      {
@@ -122,6 +130,7 @@
    {
     "kind": "function",
     "name": "ceil",
+    "module": "math",
     "qualName": "math.ceil",
     "params": [
      {
@@ -136,6 +145,7 @@
    {
     "kind": "function",
     "name": "comb",
+    "module": "math",
     "qualName": "math.comb",
     "params": [
      {
@@ -155,6 +165,7 @@
    {
     "kind": "function",
     "name": "copysign",
+    "module": "math",
     "qualName": "math.copysign",
     "params": [
      {
@@ -174,6 +185,7 @@
    {
     "kind": "function",
     "name": "cos",
+    "module": "math",
     "qualName": "math.cos",
     "params": [
      {
@@ -188,6 +200,7 @@
    {
     "kind": "function",
     "name": "cosh",
+    "module": "math",
     "qualName": "math.cosh",
     "params": [
      {
@@ -202,6 +215,7 @@
    {
     "kind": "function",
     "name": "degrees",
+    "module": "math",
     "qualName": "math.degrees",
     "params": [
      {
@@ -216,6 +230,7 @@
    {
     "kind": "function",
     "name": "dist",
+    "module": "math",
     "qualName": "math.dist",
     "params": [
      {
@@ -235,6 +250,7 @@
    {
     "kind": "function",
     "name": "erf",
+    "module": "math",
     "qualName": "math.erf",
     "params": [
      {
@@ -249,6 +265,7 @@
    {
     "kind": "function",
     "name": "erfc",
+    "module": "math",
     "qualName": "math.erfc",
     "params": [
      {
@@ -263,6 +280,7 @@
    {
     "kind": "function",
     "name": "exp",
+    "module": "math",
     "qualName": "math.exp",
     "params": [
      {
@@ -277,6 +295,7 @@
    {
     "kind": "function",
     "name": "exp2",
+    "module": "math",
     "qualName": "math.exp2",
     "params": [
      {
@@ -291,6 +310,7 @@
    {
     "kind": "function",
     "name": "expm1",
+    "module": "math",
     "qualName": "math.expm1",
     "params": [
      {
@@ -305,6 +325,7 @@
    {
     "kind": "function",
     "name": "fabs",
+    "module": "math",
     "qualName": "math.fabs",
     "params": [
      {
@@ -319,6 +340,7 @@
    {
     "kind": "function",
     "name": "factorial",
+    "module": "math",
     "qualName": "math.factorial",
     "params": [
      {
@@ -333,6 +355,7 @@
    {
     "kind": "function",
     "name": "floor",
+    "module": "math",
     "qualName": "math.floor",
     "params": [
      {
@@ -347,6 +370,7 @@
    {
     "kind": "function",
     "name": "fmod",
+    "module": "math",
     "qualName": "math.fmod",
     "params": [
      {
@@ -366,6 +390,7 @@
    {
     "kind": "function",
     "name": "frexp",
+    "module": "math",
     "qualName": "math.frexp",
     "params": [
      {
@@ -380,6 +405,7 @@
    {
     "kind": "function",
     "name": "fsum",
+    "module": "math",
     "qualName": "math.fsum",
     "params": [
      {
@@ -394,6 +420,7 @@
    {
     "kind": "function",
     "name": "gamma",
+    "module": "math",
     "qualName": "math.gamma",
     "params": [
      {
@@ -408,6 +435,7 @@
    {
     "kind": "function",
     "name": "gcd",
+    "module": "math",
     "qualName": "math.gcd",
     "params": [
      {
@@ -421,7 +449,17 @@
    },
    {
     "kind": "function",
+    "name": "hypot",
+    "module": "math",
+    "qualName": "math.hypot",
+    "params": [],
+    "doc": "hypot(*coordinates) -> value",
+    "returns": true
+   },
+   {
+    "kind": "function",
     "name": "isclose",
+    "module": "math",
     "qualName": "math.isclose",
     "params": [
      {
@@ -451,6 +489,7 @@
    {
     "kind": "function",
     "name": "isfinite",
+    "module": "math",
     "qualName": "math.isfinite",
     "params": [
      {
@@ -465,6 +504,7 @@
    {
     "kind": "function",
     "name": "isinf",
+    "module": "math",
     "qualName": "math.isinf",
     "params": [
      {
@@ -479,6 +519,7 @@
    {
     "kind": "function",
     "name": "isnan",
+    "module": "math",
     "qualName": "math.isnan",
     "params": [
      {
@@ -493,6 +534,7 @@
    {
     "kind": "function",
     "name": "isqrt",
+    "module": "math",
     "qualName": "math.isqrt",
     "params": [
      {
@@ -507,6 +549,7 @@
    {
     "kind": "function",
     "name": "lcm",
+    "module": "math",
     "qualName": "math.lcm",
     "params": [
      {
@@ -521,6 +564,7 @@
    {
     "kind": "function",
     "name": "ldexp",
+    "module": "math",
     "qualName": "math.ldexp",
     "params": [
      {
@@ -540,6 +584,7 @@
    {
     "kind": "function",
     "name": "lgamma",
+    "module": "math",
     "qualName": "math.lgamma",
     "params": [
      {
@@ -553,7 +598,17 @@
    },
    {
     "kind": "function",
+    "name": "log",
+    "module": "math",
+    "qualName": "math.log",
+    "params": [],
+    "doc": "log(x, [base=math.e])",
+    "returns": true
+   },
+   {
+    "kind": "function",
     "name": "log10",
+    "module": "math",
     "qualName": "math.log10",
     "params": [
      {
@@ -568,6 +623,7 @@
    {
     "kind": "function",
     "name": "log1p",
+    "module": "math",
     "qualName": "math.log1p",
     "params": [
      {
@@ -582,6 +638,7 @@
    {
     "kind": "function",
     "name": "log2",
+    "module": "math",
     "qualName": "math.log2",
     "params": [
      {
@@ -596,6 +653,7 @@
    {
     "kind": "function",
     "name": "modf",
+    "module": "math",
     "qualName": "math.modf",
     "params": [
      {
@@ -610,6 +668,7 @@
    {
     "kind": "function",
     "name": "nextafter",
+    "module": "math",
     "qualName": "math.nextafter",
     "params": [
      {
@@ -634,6 +693,7 @@
    {
     "kind": "function",
     "name": "perm",
+    "module": "math",
     "qualName": "math.perm",
     "params": [
      {
@@ -653,6 +713,7 @@
    {
     "kind": "function",
     "name": "pow",
+    "module": "math",
     "qualName": "math.pow",
     "params": [
      {
@@ -672,6 +733,7 @@
    {
     "kind": "function",
     "name": "prod",
+    "module": "math",
     "qualName": "math.prod",
     "params": [
      {
@@ -691,6 +753,7 @@
    {
     "kind": "function",
     "name": "radians",
+    "module": "math",
     "qualName": "math.radians",
     "params": [
      {
@@ -705,6 +768,7 @@
    {
     "kind": "function",
     "name": "remainder",
+    "module": "math",
     "qualName": "math.remainder",
     "params": [
      {
@@ -724,6 +788,7 @@
    {
     "kind": "function",
     "name": "sin",
+    "module": "math",
     "qualName": "math.sin",
     "params": [
      {
@@ -738,6 +803,7 @@
    {
     "kind": "function",
     "name": "sinh",
+    "module": "math",
     "qualName": "math.sinh",
     "params": [
      {
@@ -752,6 +818,7 @@
    {
     "kind": "function",
     "name": "sqrt",
+    "module": "math",
     "qualName": "math.sqrt",
     "params": [
      {
@@ -766,6 +833,7 @@
    {
     "kind": "function",
     "name": "sumprod",
+    "module": "math",
     "qualName": "math.sumprod",
     "params": [
      {
@@ -785,6 +853,7 @@
    {
     "kind": "function",
     "name": "tan",
+    "module": "math",
     "qualName": "math.tan",
     "params": [
      {
@@ -799,6 +868,7 @@
    {
     "kind": "function",
     "name": "tanh",
+    "module": "math",
     "qualName": "math.tanh",
     "params": [
      {
@@ -813,6 +883,7 @@
    {
     "kind": "function",
     "name": "trunc",
+    "module": "math",
     "qualName": "math.trunc",
     "params": [
      {
@@ -827,6 +898,7 @@
    {
     "kind": "function",
     "name": "ulp",
+    "module": "math",
     "qualName": "math.ulp",
     "params": [
      {
@@ -837,6 +909,61 @@
     ],
     "doc": "Return the value of the least significant bit of the float x.",
     "returns": true
+   },
+   {
+    "kind": "constant",
+    "name": "e",
+    "module": "math",
+    "qualName": "math.e",
+    "valueType": "float",
+    "valueRepr": "2.718281828459045",
+    "prefix": "",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "constant",
+    "name": "inf",
+    "module": "math",
+    "qualName": "math.inf",
+    "valueType": "float",
+    "valueRepr": "inf",
+    "prefix": "",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "constant",
+    "name": "nan",
+    "module": "math",
+    "qualName": "math.nan",
+    "valueType": "float",
+    "valueRepr": "nan",
+    "prefix": "",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "constant",
+    "name": "pi",
+    "module": "math",
+    "qualName": "math.pi",
+    "valueType": "float",
+    "valueRepr": "3.141592653589793",
+    "prefix": "",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "constant",
+    "name": "tau",
+    "module": "math",
+    "qualName": "math.tau",
+    "valueType": "float",
+    "valueRepr": "6.283185307179586",
+    "prefix": "",
+    "params": [],
+    "returns": true
    }
   ]
  },
@@ -844,23 +971,9 @@
   "module": "statistics",
   "entries": [
    {
-    "kind": "method",
-    "owner": "NormalDist",
-    "name": "quantiles",
-    "qualName": "statistics.NormalDist.quantiles",
-    "params": [
-     {
-      "name": "n",
-      "kind": "positional",
-      "hasDefault": true
-     }
-    ],
-    "doc": "Divide into *n* continuous intervals with equal probability.",
-    "returns": true
-   },
-   {
     "kind": "function",
     "name": "fmean",
+    "module": "statistics",
     "qualName": "statistics.fmean",
     "params": [
      {
@@ -880,6 +993,7 @@
    {
     "kind": "function",
     "name": "geometric_mean",
+    "module": "statistics",
     "qualName": "statistics.geometric_mean",
     "params": [
      {
@@ -894,6 +1008,7 @@
    {
     "kind": "function",
     "name": "harmonic_mean",
+    "module": "statistics",
     "qualName": "statistics.harmonic_mean",
     "params": [
      {
@@ -913,6 +1028,7 @@
    {
     "kind": "function",
     "name": "mean",
+    "module": "statistics",
     "qualName": "statistics.mean",
     "params": [
      {
@@ -927,6 +1043,7 @@
    {
     "kind": "function",
     "name": "median",
+    "module": "statistics",
     "qualName": "statistics.median",
     "params": [
      {
@@ -941,6 +1058,7 @@
    {
     "kind": "function",
     "name": "median_high",
+    "module": "statistics",
     "qualName": "statistics.median_high",
     "params": [
      {
@@ -955,6 +1073,7 @@
    {
     "kind": "function",
     "name": "median_low",
+    "module": "statistics",
     "qualName": "statistics.median_low",
     "params": [
      {
@@ -969,6 +1088,7 @@
    {
     "kind": "function",
     "name": "mode",
+    "module": "statistics",
     "qualName": "statistics.mode",
     "params": [
      {
@@ -983,6 +1103,7 @@
    {
     "kind": "function",
     "name": "multimode",
+    "module": "statistics",
     "qualName": "statistics.multimode",
     "params": [
      {
@@ -997,6 +1118,7 @@
    {
     "kind": "function",
     "name": "pstdev",
+    "module": "statistics",
     "qualName": "statistics.pstdev",
     "params": [
      {
@@ -1016,6 +1138,7 @@
    {
     "kind": "function",
     "name": "pvariance",
+    "module": "statistics",
     "qualName": "statistics.pvariance",
     "params": [
      {
@@ -1035,6 +1158,7 @@
    {
     "kind": "function",
     "name": "quantiles",
+    "module": "statistics",
     "qualName": "statistics.quantiles",
     "params": [
      {
@@ -1059,6 +1183,7 @@
    {
     "kind": "function",
     "name": "stdev",
+    "module": "statistics",
     "qualName": "statistics.stdev",
     "params": [
      {
@@ -1078,6 +1203,7 @@
    {
     "kind": "function",
     "name": "variance",
+    "module": "statistics",
     "qualName": "statistics.variance",
     "params": [
      {
@@ -1093,6 +1219,67 @@
     ],
     "doc": "Return the sample variance of data.",
     "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "NormalDist",
+    "name": "stdev",
+    "module": "statistics",
+    "qualName": "statistics.NormalDist.stdev",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "NormalDist",
+    "name": "mode",
+    "module": "statistics",
+    "qualName": "statistics.NormalDist.mode",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "NormalDist",
+    "name": "variance",
+    "module": "statistics",
+    "qualName": "statistics.NormalDist.variance",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "NormalDist",
+    "name": "mean",
+    "module": "statistics",
+    "qualName": "statistics.NormalDist.mean",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "NormalDist",
+    "name": "median",
+    "module": "statistics",
+    "qualName": "statistics.NormalDist.median",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "NormalDist",
+    "name": "quantiles",
+    "module": "statistics",
+    "qualName": "statistics.NormalDist.quantiles",
+    "params": [
+     {
+      "name": "n",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Divide into *n* continuous intervals with equal probability.",
+    "returns": true
    }
   ]
  },
@@ -1102,6 +1289,7 @@
    {
     "kind": "function",
     "name": "dump",
+    "module": "json",
     "qualName": "json.dump",
     "params": [
      {
@@ -1166,6 +1354,7 @@
    {
     "kind": "function",
     "name": "dumps",
+    "module": "json",
     "qualName": "json.dumps",
     "params": [
      {
@@ -1225,6 +1414,7 @@
    {
     "kind": "function",
     "name": "load",
+    "module": "json",
     "qualName": "json.load",
     "params": [
      {
@@ -1269,6 +1459,7 @@
    {
     "kind": "function",
     "name": "loads",
+    "module": "json",
     "qualName": "json.loads",
     "params": [
      {
@@ -1318,6 +1509,7 @@
    {
     "kind": "function",
     "name": "cmp_to_key",
+    "module": "functools",
     "qualName": "functools.cmp_to_key",
     "params": [
      {
@@ -1332,6 +1524,7 @@
    {
     "kind": "function",
     "name": "lru_cache",
+    "module": "functools",
     "qualName": "functools.lru_cache",
     "params": [
      {
@@ -1351,25 +1544,25 @@
    {
     "kind": "class",
     "name": "partial",
+    "module": "functools",
     "qualName": "functools.partial",
-    "params": [
-     {
-      "name": "args",
-      "kind": "vararg",
-      "hasDefault": false
-     },
-     {
-      "name": "kwargs",
-      "kind": "kwarg",
-      "hasDefault": false
-     }
-    ],
+    "params": [],
     "doc": "partial(func, *args, **keywords) - new function with partial application",
     "returns": true
    },
    {
     "kind": "function",
+    "name": "reduce",
+    "module": "functools",
+    "qualName": "functools.reduce",
+    "params": [],
+    "doc": "reduce(function, iterable[, initial]) -> value",
+    "returns": true
+   },
+   {
+    "kind": "function",
     "name": "wraps",
+    "module": "functools",
     "qualName": "functools.wraps",
     "params": [
      {
@@ -1399,6 +1592,7 @@
    {
     "kind": "function",
     "name": "compile",
+    "module": "re",
     "qualName": "re.compile",
     "params": [
      {
@@ -1418,6 +1612,7 @@
    {
     "kind": "function",
     "name": "escape",
+    "module": "re",
     "qualName": "re.escape",
     "params": [
      {
@@ -1432,6 +1627,7 @@
    {
     "kind": "function",
     "name": "findall",
+    "module": "re",
     "qualName": "re.findall",
     "params": [
      {
@@ -1456,6 +1652,7 @@
    {
     "kind": "function",
     "name": "finditer",
+    "module": "re",
     "qualName": "re.finditer",
     "params": [
      {
@@ -1480,6 +1677,7 @@
    {
     "kind": "function",
     "name": "fullmatch",
+    "module": "re",
     "qualName": "re.fullmatch",
     "params": [
      {
@@ -1504,6 +1702,7 @@
    {
     "kind": "function",
     "name": "match",
+    "module": "re",
     "qualName": "re.match",
     "params": [
      {
@@ -1528,6 +1727,7 @@
    {
     "kind": "function",
     "name": "search",
+    "module": "re",
     "qualName": "re.search",
     "params": [
      {
@@ -1552,6 +1752,7 @@
    {
     "kind": "function",
     "name": "split",
+    "module": "re",
     "qualName": "re.split",
     "params": [
      {
@@ -1581,6 +1782,7 @@
    {
     "kind": "function",
     "name": "sub",
+    "module": "re",
     "qualName": "re.sub",
     "params": [
      {
@@ -1615,6 +1817,7 @@
    {
     "kind": "function",
     "name": "subn",
+    "module": "re",
     "qualName": "re.subn",
     "params": [
      {
@@ -1645,6 +1848,209 @@
     ],
     "doc": "Return a 2-tuple containing (new_string, number).",
     "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "Pattern",
+    "name": "findall",
+    "module": "re",
+    "qualName": "re.Pattern.findall",
+    "params": [
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "pos",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "endpos",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return a list of all non-overlapping matches of pattern in string.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "Pattern",
+    "name": "finditer",
+    "module": "re",
+    "qualName": "re.Pattern.finditer",
+    "params": [
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "pos",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "endpos",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return an iterator over all non-overlapping matches for the RE pattern in string.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "Pattern",
+    "name": "fullmatch",
+    "module": "re",
+    "qualName": "re.Pattern.fullmatch",
+    "params": [
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "pos",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "endpos",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Matches against all of the string.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "Pattern",
+    "name": "match",
+    "module": "re",
+    "qualName": "re.Pattern.match",
+    "params": [
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "pos",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "endpos",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Matches zero or more characters at the beginning of the string.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "Pattern",
+    "name": "search",
+    "module": "re",
+    "qualName": "re.Pattern.search",
+    "params": [
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "pos",
+      "kind": "positional",
+      "hasDefault": true
+     },
+     {
+      "name": "endpos",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Scan through string looking for a match, and return a corresponding match object instance.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "Pattern",
+    "name": "split",
+    "module": "re",
+    "qualName": "re.Pattern.split",
+    "params": [
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "maxsplit",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Split string by the occurrences of pattern.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "Pattern",
+    "name": "sub",
+    "module": "re",
+    "qualName": "re.Pattern.sub",
+    "params": [
+     {
+      "name": "repl",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "count",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return the string obtained by replacing the leftmost non-overlapping occurrences of pattern in string by the replacement repl.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "Pattern",
+    "name": "subn",
+    "module": "re",
+    "qualName": "re.Pattern.subn",
+    "params": [
+     {
+      "name": "repl",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "string",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "count",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Return the tuple (new_string, number_of_subs_made) found by replacing the leftmost non-overlapping occurrences of pattern with the replacement repl.",
+    "returns": true
    }
   ]
  },
@@ -1654,115 +2060,858 @@
    {
     "kind": "class",
     "name": "date",
+    "module": "datetime",
     "qualName": "datetime.date",
-    "params": [
-     {
-      "name": "args",
-      "kind": "vararg",
-      "hasDefault": false
-     },
-     {
-      "name": "kwargs",
-      "kind": "kwarg",
-      "hasDefault": false
-     }
-    ],
+    "params": [],
     "doc": "date(year, month, day) --> date object",
     "returns": true
    },
    {
     "kind": "class",
     "name": "datetime",
+    "module": "datetime",
     "qualName": "datetime.datetime",
-    "params": [
-     {
-      "name": "args",
-      "kind": "vararg",
-      "hasDefault": false
-     },
-     {
-      "name": "kwargs",
-      "kind": "kwarg",
-      "hasDefault": false
-     }
-    ],
+    "params": [],
     "doc": "datetime(year, month, day[, hour[, minute[, second[, microsecond[,tzinfo]]]]])",
     "returns": true
    },
    {
     "kind": "class",
     "name": "time",
+    "module": "datetime",
     "qualName": "datetime.time",
-    "params": [
-     {
-      "name": "args",
-      "kind": "vararg",
-      "hasDefault": false
-     },
-     {
-      "name": "kwargs",
-      "kind": "kwarg",
-      "hasDefault": false
-     }
-    ],
+    "params": [],
     "doc": "time([hour[, minute[, second[, microsecond[, tzinfo]]]]]) --> a time object",
     "returns": true
    },
    {
     "kind": "class",
     "name": "timedelta",
+    "module": "datetime",
     "qualName": "datetime.timedelta",
-    "params": [
-     {
-      "name": "args",
-      "kind": "vararg",
-      "hasDefault": false
-     },
-     {
-      "name": "kwargs",
-      "kind": "kwarg",
-      "hasDefault": false
-     }
-    ],
+    "params": [],
     "doc": "Difference between two datetime values.",
     "returns": true
    },
    {
     "kind": "class",
     "name": "timezone",
+    "module": "datetime",
     "qualName": "datetime.timezone",
-    "params": [
-     {
-      "name": "args",
-      "kind": "vararg",
-      "hasDefault": false
-     },
-     {
-      "name": "kwargs",
-      "kind": "kwarg",
-      "hasDefault": false
-     }
-    ],
+    "params": [],
     "doc": "Fixed offset from UTC implementation of tzinfo.",
     "returns": true
    },
    {
     "kind": "class",
     "name": "tzinfo",
+    "module": "datetime",
     "qualName": "datetime.tzinfo",
+    "params": [],
+    "doc": "Abstract base class for time zone info objects.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "ctime",
+    "module": "datetime",
+    "qualName": "datetime.date.ctime",
+    "params": [],
+    "doc": "Return ctime() style string.",
+    "returns": true
+   },
+   {
+    "kind": "constant",
+    "name": "MAXYEAR",
+    "module": "datetime",
+    "qualName": "datetime.MAXYEAR",
+    "valueType": "int",
+    "valueRepr": "9999",
+    "prefix": "",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "date",
+    "name": "year",
+    "module": "datetime",
+    "qualName": "datetime.date.year",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "fromisocalendar",
+    "module": "datetime",
+    "qualName": "datetime.date.fromisocalendar",
+    "params": [],
+    "doc": "int, int, int -> Construct a date from the ISO year, week number and weekday.",
+    "returns": true
+   },
+   {
+    "kind": "constant",
+    "name": "MINYEAR",
+    "module": "datetime",
+    "qualName": "datetime.MINYEAR",
+    "valueType": "int",
+    "valueRepr": "1",
+    "prefix": "",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "date",
+    "name": "day",
+    "module": "datetime",
+    "qualName": "datetime.date.day",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "fromisoformat",
+    "module": "datetime",
+    "qualName": "datetime.date.fromisoformat",
+    "params": [],
+    "doc": "str -> Construct a date from a string in ISO 8601 format.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "date",
+    "name": "month",
+    "module": "datetime",
+    "qualName": "datetime.date.month",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "fromordinal",
+    "module": "datetime",
+    "qualName": "datetime.date.fromordinal",
+    "params": [],
+    "doc": "int -> date corresponding to a proleptic Gregorian ordinal.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "datetime",
+    "name": "day",
+    "module": "datetime",
+    "qualName": "datetime.datetime.day",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "fromtimestamp",
+    "module": "datetime",
+    "qualName": "datetime.date.fromtimestamp",
     "params": [
      {
-      "name": "args",
-      "kind": "vararg",
-      "hasDefault": false
-     },
-     {
-      "name": "kwargs",
-      "kind": "kwarg",
+      "name": "timestamp",
+      "kind": "positional",
       "hasDefault": false
      }
     ],
-    "doc": "Abstract base class for time zone info objects.",
+    "doc": "Create a date from a POSIX timestamp.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "datetime",
+    "name": "second",
+    "module": "datetime",
+    "qualName": "datetime.datetime.second",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "isocalendar",
+    "module": "datetime",
+    "qualName": "datetime.date.isocalendar",
+    "params": [],
+    "doc": "Return a named tuple containing ISO year, week number, and weekday.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "datetime",
+    "name": "tzinfo",
+    "module": "datetime",
+    "qualName": "datetime.datetime.tzinfo",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "isoformat",
+    "module": "datetime",
+    "qualName": "datetime.date.isoformat",
+    "params": [],
+    "doc": "Return string in ISO 8601 format, YYYY-MM-DD.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "datetime",
+    "name": "hour",
+    "module": "datetime",
+    "qualName": "datetime.datetime.hour",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "isoweekday",
+    "module": "datetime",
+    "qualName": "datetime.date.isoweekday",
+    "params": [],
+    "doc": "Return the day of the week represented by the date.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "datetime",
+    "name": "minute",
+    "module": "datetime",
+    "qualName": "datetime.datetime.minute",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "replace",
+    "module": "datetime",
+    "qualName": "datetime.date.replace",
+    "params": [],
+    "doc": "Return date with new specified fields.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "datetime",
+    "name": "year",
+    "module": "datetime",
+    "qualName": "datetime.datetime.year",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "strftime",
+    "module": "datetime",
+    "qualName": "datetime.date.strftime",
+    "params": [],
+    "doc": "format -> strftime() style string.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "datetime",
+    "name": "month",
+    "module": "datetime",
+    "qualName": "datetime.datetime.month",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "timetuple",
+    "module": "datetime",
+    "qualName": "datetime.date.timetuple",
+    "params": [],
+    "doc": "Return time tuple, compatible with time.localtime().",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "datetime",
+    "name": "fold",
+    "module": "datetime",
+    "qualName": "datetime.datetime.fold",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "today",
+    "module": "datetime",
+    "qualName": "datetime.date.today",
+    "params": [],
+    "doc": "Current date or datetime:  same as self.__class__.fromtimestamp(time.time()).",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "datetime",
+    "name": "microsecond",
+    "module": "datetime",
+    "qualName": "datetime.datetime.microsecond",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "toordinal",
+    "module": "datetime",
+    "qualName": "datetime.date.toordinal",
+    "params": [],
+    "doc": "Return proleptic Gregorian ordinal.  January 1 of year 1 is day 1.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "time",
+    "name": "second",
+    "module": "datetime",
+    "qualName": "datetime.time.second",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "date",
+    "name": "weekday",
+    "module": "datetime",
+    "qualName": "datetime.date.weekday",
+    "params": [],
+    "doc": "Return the day of the week represented by the date.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "time",
+    "name": "tzinfo",
+    "module": "datetime",
+    "qualName": "datetime.time.tzinfo",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "astimezone",
+    "module": "datetime",
+    "qualName": "datetime.datetime.astimezone",
+    "params": [],
+    "doc": "tz -> convert to local time in new timezone tz",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "time",
+    "name": "hour",
+    "module": "datetime",
+    "qualName": "datetime.time.hour",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "combine",
+    "module": "datetime",
+    "qualName": "datetime.datetime.combine",
+    "params": [],
+    "doc": "date, time -> datetime with same date and time fields",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "time",
+    "name": "minute",
+    "module": "datetime",
+    "qualName": "datetime.time.minute",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "ctime",
+    "module": "datetime",
+    "qualName": "datetime.datetime.ctime",
+    "params": [],
+    "doc": "Return ctime() style string.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "time",
+    "name": "fold",
+    "module": "datetime",
+    "qualName": "datetime.time.fold",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "date",
+    "module": "datetime",
+    "qualName": "datetime.datetime.date",
+    "params": [],
+    "doc": "Return date object with same year, month and day.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "time",
+    "name": "microsecond",
+    "module": "datetime",
+    "qualName": "datetime.time.microsecond",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "dst",
+    "module": "datetime",
+    "qualName": "datetime.datetime.dst",
+    "params": [],
+    "doc": "Return self.tzinfo.dst(self).",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "timedelta",
+    "name": "days",
+    "module": "datetime",
+    "qualName": "datetime.timedelta.days",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "fromisocalendar",
+    "module": "datetime",
+    "qualName": "datetime.datetime.fromisocalendar",
+    "params": [],
+    "doc": "int, int, int -> Construct a date from the ISO year, week number and weekday.",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "timedelta",
+    "name": "seconds",
+    "module": "datetime",
+    "qualName": "datetime.timedelta.seconds",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "fromisoformat",
+    "module": "datetime",
+    "qualName": "datetime.datetime.fromisoformat",
+    "params": [],
+    "doc": "string -> datetime from a string in most ISO 8601 formats",
+    "returns": true
+   },
+   {
+    "kind": "property",
+    "owner": "timedelta",
+    "name": "microseconds",
+    "module": "datetime",
+    "qualName": "datetime.timedelta.microseconds",
+    "params": [],
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "fromordinal",
+    "module": "datetime",
+    "qualName": "datetime.datetime.fromordinal",
+    "params": [],
+    "doc": "int -> date corresponding to a proleptic Gregorian ordinal.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "fromtimestamp",
+    "module": "datetime",
+    "qualName": "datetime.datetime.fromtimestamp",
+    "params": [],
+    "doc": "timestamp[, tz] -> tz's local time from POSIX timestamp.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "isocalendar",
+    "module": "datetime",
+    "qualName": "datetime.datetime.isocalendar",
+    "params": [],
+    "doc": "Return a named tuple containing ISO year, week number, and weekday.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "isoformat",
+    "module": "datetime",
+    "qualName": "datetime.datetime.isoformat",
+    "params": [],
+    "doc": "[sep] -> string in ISO 8601 format, YYYY-MM-DDT[HH[:MM[:SS[.mmm[uuu]]]]][+HH:MM].",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "isoweekday",
+    "module": "datetime",
+    "qualName": "datetime.datetime.isoweekday",
+    "params": [],
+    "doc": "Return the day of the week represented by the date.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "now",
+    "module": "datetime",
+    "qualName": "datetime.datetime.now",
+    "params": [
+     {
+      "name": "tz",
+      "kind": "positional",
+      "hasDefault": true
+     }
+    ],
+    "doc": "Returns new datetime object representing current time local to tz.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "replace",
+    "module": "datetime",
+    "qualName": "datetime.datetime.replace",
+    "params": [],
+    "doc": "Return datetime with new specified fields.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "strftime",
+    "module": "datetime",
+    "qualName": "datetime.datetime.strftime",
+    "params": [],
+    "doc": "format -> strftime() style string.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "strptime",
+    "module": "datetime",
+    "qualName": "datetime.datetime.strptime",
+    "params": [],
+    "doc": "string, format -> new datetime parsed from a string (like time.strptime()).",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "time",
+    "module": "datetime",
+    "qualName": "datetime.datetime.time",
+    "params": [],
+    "doc": "Return time object with same time but with tzinfo=None.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "timestamp",
+    "module": "datetime",
+    "qualName": "datetime.datetime.timestamp",
+    "params": [],
+    "doc": "Return POSIX timestamp as float.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "timetuple",
+    "module": "datetime",
+    "qualName": "datetime.datetime.timetuple",
+    "params": [],
+    "doc": "Return time tuple, compatible with time.localtime().",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "timetz",
+    "module": "datetime",
+    "qualName": "datetime.datetime.timetz",
+    "params": [],
+    "doc": "Return time object with same time and tzinfo.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "today",
+    "module": "datetime",
+    "qualName": "datetime.datetime.today",
+    "params": [],
+    "doc": "Current date or datetime:  same as self.__class__.fromtimestamp(time.time()).",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "toordinal",
+    "module": "datetime",
+    "qualName": "datetime.datetime.toordinal",
+    "params": [],
+    "doc": "Return proleptic Gregorian ordinal.  January 1 of year 1 is day 1.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "tzname",
+    "module": "datetime",
+    "qualName": "datetime.datetime.tzname",
+    "params": [],
+    "doc": "Return self.tzinfo.tzname(self).",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "utcfromtimestamp",
+    "module": "datetime",
+    "qualName": "datetime.datetime.utcfromtimestamp",
+    "params": [],
+    "doc": "Construct a naive UTC datetime from a POSIX timestamp.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "utcnow",
+    "module": "datetime",
+    "qualName": "datetime.datetime.utcnow",
+    "params": [],
+    "doc": "Return a new datetime representing UTC day and time.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "utcoffset",
+    "module": "datetime",
+    "qualName": "datetime.datetime.utcoffset",
+    "params": [],
+    "doc": "Return self.tzinfo.utcoffset(self).",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "utctimetuple",
+    "module": "datetime",
+    "qualName": "datetime.datetime.utctimetuple",
+    "params": [],
+    "doc": "Return UTC time tuple, compatible with time.localtime().",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "datetime",
+    "name": "weekday",
+    "module": "datetime",
+    "qualName": "datetime.datetime.weekday",
+    "params": [],
+    "doc": "Return the day of the week represented by the date.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "time",
+    "name": "dst",
+    "module": "datetime",
+    "qualName": "datetime.time.dst",
+    "params": [],
+    "doc": "Return self.tzinfo.dst(self).",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "time",
+    "name": "fromisoformat",
+    "module": "datetime",
+    "qualName": "datetime.time.fromisoformat",
+    "params": [],
+    "doc": "string -> time from a string in ISO 8601 format",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "time",
+    "name": "isoformat",
+    "module": "datetime",
+    "qualName": "datetime.time.isoformat",
+    "params": [],
+    "doc": "Return string in ISO 8601 format, [HH[:MM[:SS[.mmm[uuu]]]]][+HH:MM].",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "time",
+    "name": "replace",
+    "module": "datetime",
+    "qualName": "datetime.time.replace",
+    "params": [],
+    "doc": "Return time with new specified fields.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "time",
+    "name": "strftime",
+    "module": "datetime",
+    "qualName": "datetime.time.strftime",
+    "params": [],
+    "doc": "format -> strftime() style string.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "time",
+    "name": "tzname",
+    "module": "datetime",
+    "qualName": "datetime.time.tzname",
+    "params": [],
+    "doc": "Return self.tzinfo.tzname(self).",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "time",
+    "name": "utcoffset",
+    "module": "datetime",
+    "qualName": "datetime.time.utcoffset",
+    "params": [],
+    "doc": "Return self.tzinfo.utcoffset(self).",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "timedelta",
+    "name": "total_seconds",
+    "module": "datetime",
+    "qualName": "datetime.timedelta.total_seconds",
+    "params": [],
+    "doc": "Total seconds in the duration.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "timezone",
+    "name": "dst",
+    "module": "datetime",
+    "qualName": "datetime.timezone.dst",
+    "params": [],
+    "doc": "Return None.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "timezone",
+    "name": "fromutc",
+    "module": "datetime",
+    "qualName": "datetime.timezone.fromutc",
+    "params": [],
+    "doc": "datetime in UTC -> datetime in local time.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "timezone",
+    "name": "tzname",
+    "module": "datetime",
+    "qualName": "datetime.timezone.tzname",
+    "params": [],
+    "doc": "If name is specified when timezone is created, returns the name.  Otherwise returns offset as 'UTC(+|-)HH:MM'.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "timezone",
+    "name": "utcoffset",
+    "module": "datetime",
+    "qualName": "datetime.timezone.utcoffset",
+    "params": [],
+    "doc": "Return fixed offset.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "tzinfo",
+    "name": "dst",
+    "module": "datetime",
+    "qualName": "datetime.tzinfo.dst",
+    "params": [],
+    "doc": "datetime -> DST offset as timedelta positive east of UTC.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "tzinfo",
+    "name": "fromutc",
+    "module": "datetime",
+    "qualName": "datetime.tzinfo.fromutc",
+    "params": [],
+    "doc": "datetime in UTC -> datetime in local time.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "tzinfo",
+    "name": "tzname",
+    "module": "datetime",
+    "qualName": "datetime.tzinfo.tzname",
+    "params": [],
+    "doc": "datetime -> string name of time zone.",
+    "returns": true
+   },
+   {
+    "kind": "method",
+    "owner": "tzinfo",
+    "name": "utcoffset",
+    "module": "datetime",
+    "qualName": "datetime.tzinfo.utcoffset",
+    "params": [],
+    "doc": "datetime -> timedelta showing offset from UTC, negative values indicating West of UTC",
     "returns": true
    }
   ]
@@ -1985,6 +3134,75 @@
      }
     ],
     "returns": true
+   }
+  ]
+ },
+ {
+  "module": "cv2",
+  "entries": [
+   {
+    "kind": "function",
+    "name": "imread",
+    "qualName": "cv2.imread",
+    "params": [
+     {
+      "name": "filename",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "imshow",
+    "qualName": "cv2.imshow",
+    "params": [
+     {
+      "name": "winname",
+      "kind": "positional",
+      "hasDefault": false
+     },
+     {
+      "name": "mat",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": false
+   },
+   {
+    "kind": "class",
+    "name": "VideoCapture",
+    "qualName": "cv2.VideoCapture",
+    "returns": true,
+    "params": [
+     {
+      "name": "device_index",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ]
+   },
+   {
+    "kind": "function",
+    "name": "waitKey",
+    "qualName": "cv2.waitKey",
+    "params": [
+     {
+      "name": "delay",
+      "kind": "positional",
+      "hasDefault": false
+     }
+    ],
+    "returns": true
+   },
+   {
+    "kind": "function",
+    "name": "destroyAllWindows",
+    "qualName": "cv2.destroyAllWindows",
+    "params": [],
+    "returns": false
    }
   ]
  }
