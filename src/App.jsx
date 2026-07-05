@@ -6,7 +6,7 @@ import ConsoleLogs from './components/ConsoleLogs';
 import VariableWatch from './components/VariableWatch';
 import ASTTreeView from './components/ASTTreeView';
 import LibraryManager from './components/LibraryManager';
-import { runCode, initPyodide, interruptPyodide, writeImageToFS, prewarmEnvironment, isEnvironmentReady } from './utils/pyodideRunner';
+import { interruptPyodide, prewarmEnvironment, writeImageToFS } from './utils/pyodideRunner';
 import stdlibSpecs from './data/stdlibSpecs.json';
 
 // A pip PACKAGE name is not always the IMPORT name (opencv-python→cv2, pillow→PIL, …). Map the
@@ -475,92 +475,6 @@ export default function App() {
     }
   };
 
-  // cv2 popup window manager
-  const cv2WindowsRef = useRef({});
-
-  const openCv2Window = (title) => {
-    if (cv2WindowsRef.current[title] && !cv2WindowsRef.current[title].closed) {
-      return cv2WindowsRef.current[title];
-    }
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>cv2 — ${title}</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #000; display: flex; flex-direction: column; font-family: monospace; }
-    #bar { background: #1a1a1a; color: #4ade80; padding: 4px 10px; font-size: 11px;
-           border-bottom: 1px solid #333; display: flex; align-items: center; gap: 8px; }
-    #bar span { color: #94a3b8; }
-    canvas { display: block; width: 100%; }
-    #err { color: #f87171; padding: 16px; font-size: 13px; display: none; }
-  </style>
-</head>
-<body>
-  <div id="bar">cv2.imshow <span>"${title}"</span></div>
-  <video id="v" autoplay playsinline muted style="display:none"></video>
-  <canvas id="c"></canvas>
-  <div id="err"></div>
-  <script>
-    const v = document.getElementById('v');
-    const c = document.getElementById('c');
-    const ctx = c.getContext('2d');
-    const err = document.getElementById('err');
-
-    navigator.mediaDevices.getUserMedia({ video: { width:640, height:480 }, audio: false })
-      .then(stream => {
-        v.srcObject = stream;
-        v.onloadedmetadata = () => {
-          c.width = v.videoWidth || 640;
-          c.height = v.videoHeight || 480;
-          (function draw() {
-            ctx.drawImage(v, 0, 0, c.width, c.height);
-            requestAnimationFrame(draw);
-          })();
-        };
-      })
-      .catch(e => {
-        c.width = 640; c.height = 360;
-        ctx.fillStyle = '#111'; ctx.fillRect(0,0,640,360);
-        ctx.fillStyle = '#4ade80'; ctx.font = 'bold 18px monospace';
-        ctx.fillText('Camera: ' + e.message, 20, 180);
-        ctx.fillStyle = '#94a3b8'; ctx.font = '13px monospace';
-        ctx.fillText('(Allow camera permission and reload)', 20, 210);
-      });
-  </script>
-</body>
-</html>`;
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, `cv2_${title}`, 'width=660,height=520,toolbar=no,menubar=no,resizable=yes');
-    cv2WindowsRef.current[title] = win;
-    return win;
-  };
-
-  const handleCv2Action = (action, payload) => {
-    switch (action) {
-      case 'open':
-        openCv2Window(payload.title || `Camera ${payload.deviceId}`);
-        break;
-      case 'imshow':
-        openCv2Window(payload.title || 'cv2');
-        break;
-      case 'destroyAll':
-        Object.values(cv2WindowsRef.current).forEach(w => { if (w && !w.closed) w.close(); });
-        cv2WindowsRef.current = {};
-        break;
-      case 'destroy':
-        if (cv2WindowsRef.current[payload.title]) {
-          cv2WindowsRef.current[payload.title].close();
-          delete cv2WindowsRef.current[payload.title];
-        }
-        break;
-      default:
-        break;
-    }
-  };
-
   // Register the built-in cv2 palette and restore any user-generated libraries — both through the
   // Phase 5 registry (BlockPyLibRegistry), the single source of truth, so they appear in the Library
   // toolbox category and lower correctly. The cv2 preload is in-memory only (re-registered each
@@ -985,89 +899,7 @@ for i in range(4):
     return () => window.removeEventListener('keydown', onKey);
   }, [activeFile, code]);
 
-  // [1.2 live] After a run, introspect each imported module in the live Pyodide runtime and
-  // register enriched blocks (real arg names + constant dropdown). Best-effort, capped so a
-  // huge library API can't flood the palette — that's exactly the case the AI purpose-prompt
-  // (1.3) is for. Logs counts so the user can verify introspection actually fired.
-  const introspectImportedModules = async (src) => {
-    const engine = abstractionEngineRef.current || window.__blockpyEngine;
-    const py = (typeof window !== 'undefined') ? window.__pyodide : null;
-    if (!engine || !py || typeof engine.introspectModule !== 'function') return;
-    const mods = new Set();
-    let m;
-    const reImport = /^\s*import\s+([a-zA-Z_]\w*)/gm;
-    const reFrom = /^\s*from\s+([a-zA-Z_]\w*)\s+import/gm;
-    while ((m = reImport.exec(src))) mods.add(m[1]);
-    while ((m = reFrom.exec(src))) mods.add(m[1]);
-    const CAP = 60;
-    for (const mod of mods) {
-      try {
-        const facts = await engine.introspectModule(mod, py);
-        const total = (facts.functions || []).length + (facts.classes || []).length;
-        if (total > CAP) {
-          setLogs(prev => [...prev, `[Introspect] ${mod}: large API (${total} members) — skipped auto-registration. Use the AI purpose-prompt to pick a subset.`]);
-          continue;
-        }
-        const res = engine.registerFromFacts(facts);
-        setLogs(prev => [...prev, `[Introspect] ${mod}: ${res.functions.length} functions, ${res.constants} constants → blocks enriched.`]);
-        if (engine.activeBlocks && engine.activeBlocks.length) {
-          setInstalledBlocks(prev => {
-            const known = new Set(prev.map(b => b.type));
-            const added = engine.activeBlocks.filter(b => !known.has(b.type));
-            return added.length ? [...prev, ...added] : prev;
-          });
-        }
-      } catch (e) {
-        setLogs(prev => [...prev, `[Introspect] ${mod}: skipped (${String(e.message || e).slice(0, 60)})`]);
-      }
-    }
-  };
-
-  // ── Run: Pyodide real Python execution ────────────────────────────────────────
-  // In-browser Pyodide run (no system Python needed). Kept as a fallback engine; the primary
-  // desktop Run is handleRunShell (real local Python). Sprite/turtle drawing was removed.
-  const handleRunExecution = async () => {
-    setHighlightedLine(null);
-    setVariables({});
-    setCv2Images([]);
-    setIsRunning(true);
-    setPyodideLoading(!pyodideReady);
-
-    setLogs([
-      '[Python] Starting real Python (Pyodide)...',
-      `[Python] Code:\n${code}`
-    ]);
-
-    await runCode(code, {
-      onLog: (msg) => {
-        setPyodideLoading(false);
-        setPyodideReady(true);
-        setLogs(prev => [...prev, msg]);
-      },
-      onCv2Action: handleCv2Action,
-      onCv2Image: (title, dataUrl) => {
-        setCv2Images((prev) => {
-          const rest = prev.filter((im) => im.title !== title);
-          return [...rest, { title, dataUrl }];
-        });
-      },
-      onComplete: (err) => {
-        setPyodideLoading(false);
-        setPyodideReady(true);
-        setIsRunning(false);
-        setHighlightedLine(null);
-        if (!err) {
-          setLogs(prev => [...prev, '[Python] Execution completed.']);
-          // [1.2 live] After a successful run, introspect each imported module in the live
-          // Pyodide runtime and enrich its generated blocks (real arg names + constant
-          // dropdown). Best-effort + non-blocking; logs results so the user can verify.
-          introspectImportedModules(code);
-        }
-      }
-    });
-  };
-
-  // ── Stop: interrupt Pyodide execution ─────────────────────────────────────────
+  // ── Stop: interrupt any running program (shell run; also a no-op Pyodide interrupt) ──────────
   const handleStopExecution = () => {
     interruptPyodide();
     if (shellAbortRef.current) { try { shellAbortRef.current.abort(); } catch (_) {} }
