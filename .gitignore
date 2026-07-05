@@ -26,3 +26,6 @@ python-embed/
 
 # Per-machine AI key config saved by the in-app Settings (never commit secrets)
 blockpy-config.json
+
+# session artifacts (chat screenshots, bug-report images)
+KakaoTalk_*
