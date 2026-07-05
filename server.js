@@ -6,8 +6,6 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
-const BlockPyDesugarer = require('./src/utils/desugarer');
-const BlockPyAbstraction = require('./src/utils/libraryAbstraction');
 
 const app = express();
 // This server exposes LOCAL-ONLY, unauthenticated, powerful endpoints (run arbitrary Python, pip,
@@ -246,13 +244,6 @@ async function callMiniMax(systemPrompt, userContent, opts = {}) {
   return { thinkingText, responseText };
 }
 
-// ─── 1. AST Desugar (heuristic – no AI cost) ─────────────────────────────────
-app.post('/api/desugar', (req, res) => {
-  const { code } = req.body;
-  if (!code) return res.status(400).json({ error: 'code is required' });
-  const result = BlockPyDesugarer.desugarPythonCode(code);
-  res.json(result);
-});
 
 // ─── AI key config (in-app Settings) ─────────────────────────────────────────
 // Local-only (the server binds 127.0.0.1). GET returns STATUS ONLY — raw keys never leave the box,
@@ -283,144 +274,7 @@ app.post('/api/ai-config', (req, res) => {
   res.json({ success: true, configured: MINIMAX_KEYS.length > 0, count: MINIMAX_KEYS.length, configPath: p });
 });
 
-// ─── 2. AI Normalize: MiniMax rewrites Python into block-friendly form ────────
-app.post('/api/ai-normalize', async (req, res) => {
-  const { code } = req.body;
-  if (!code) return res.status(400).json({ error: 'code is required' });
 
-  // Fast heuristic first pass
-  const heuristic = BlockPyDesugarer.desugarPythonCode(code);
-
-  if (MINIMAX_KEYS.length === 0) {
-    // Fallback to heuristic only
-    return res.json({
-      success: heuristic.success,
-      desugaredPython: heuristic.desugaredPython || code,
-      explanation: '[Heuristic] AI key unavailable – heuristic desugaring applied.',
-      ast: heuristic.desugaredAST,
-      thoughts: []
-    });
-  }
-
-  try {
-    const systemPrompt = `You are a Python code normalizer for a visual block programming system.
-Your task: rewrite Python code into the simplest, most "block-friendly" equivalent.
-
-Rules (strict):
-1. Unroll ALL list comprehensions into a standard for-loop with .append().
-2. Expand ALL ternary expressions (x if cond else y) into full if/else blocks.
-3. Split ALL chained comparisons (a < b < c) into (a < b and b < c).
-4. Keep all other logic identical – never change semantics.
-5. Never add imports, comments, or explanations in the code output.
-6. Output ONLY the transformed Python code, nothing else.`;
-
-    const { thinkingText, responseText } = await callMiniMax(systemPrompt, code, { maxTokens: 2048 });
-
-    const thoughts = thinkingText
-      ? thinkingText.split('\n').filter(l => l.trim()).slice(0, 8)
-      : ['AI normalizer applied. Code is now block-friendly.'];
-
-    res.json({
-      success: true,
-      desugaredPython: responseText.trim() || heuristic.desugaredPython || code,
-      explanation: 'MiniMax-M2.7 rewrote the code into block-safe canonical form.',
-      ast: heuristic.desugaredAST,
-      thoughts
-    });
-  } catch (err) {
-    console.error('[/api/ai-normalize] MiniMax error:', err.message);
-    // Graceful fallback
-    res.json({
-      success: heuristic.success,
-      desugaredPython: heuristic.desugaredPython || code,
-      explanation: `[Fallback] MiniMax error (${err.message}). Heuristic applied.`,
-      ast: heuristic.desugaredAST,
-      thoughts: [`Error: ${err.message}`]
-    });
-  }
-});
-
-// ─── 3. AI Library Abstraction: MiniMax designs visual blocks for a library ───
-app.post('/api/ai-abstract', async (req, res) => {
-  const { libName, customCode, facts, purpose } = req.body;
-  if (!libName) return res.status(400).json({ error: 'libName is required' });
-
-  // Check built-in presets first (no AI cost). Skip when the caller supplies introspection
-  // facts or a purpose — those drive a grounded, purpose-specific subset via the AI.
-  if (libName !== 'custom' && !facts && !purpose) {
-    const preset = BlockPyAbstraction.AI_PRESETS[libName];
-    if (preset) {
-      return res.json({ success: true, libName, thoughts: preset.thoughts, blocks: preset.blocks });
-    }
-  }
-
-  // Custom or unknown library → ask MiniMax
-  if (MINIMAX_KEYS.length === 0) {
-    return res.status(503).json({ error: 'No MiniMax API keys configured.' });
-  }
-
-  try {
-    const systemPrompt = `You are a Python library block designer for a visual programming system.
-Given a library name and/or sample usage code, design a minimal, complete set of Blockly-style visual blocks that covers its essential operations.
-
-Respond in strict JSON only – no markdown, no extra text. Use this exact schema:
-{
-  "thoughts": ["reasoning step 1", "reasoning step 2", "...up to 6 steps"],
-  "blocks": [
-    {
-      "func": "function_name",
-      "args": ["arg1", "arg2"],
-      "hasOutput": true,
-      "colour": "#hexcolor",
-      "title": "lib.function_name"
-    }
-  ]
-}
-
-Rules:
-- Keep block names as Python identifiers (snake_case).
-- hasOutput = true if the call returns a value, false if it's a statement.
-- Choose distinct, pleasant hex colours for visual variety.
-- Limit to the 6-10 most important operations.
-- Never include function definition blocks or comment blocks.
-- GROUNDING: when an "Actual public API" list is provided, use ONLY function names and argument names that appear in it — never invent signatures. Prefer the real argument names.
-- PURPOSE: when a purpose is provided, select ONLY the subset of operations relevant to that purpose.`;
-
-    // [1.3] Ground the prompt with the library's real API (from Pyodide introspection) and
-    // the user's stated purpose, so the AI selects a correct, purpose-specific subset.
-    const factsBlock = facts
-      ? `\n\nActual public API (use ONLY these — do not invent):\nFunctions: ${(facts.functions || []).map(f => `${f.name}(${(f.params || []).join(', ')})`).join(', ') || '(none)'}\nConstants: ${(facts.constants || []).join(', ') || '(none)'}`
-      : '';
-    const purposeBlock = purpose ? `\n\nThe user wants to use this library for: ${purpose}` : '';
-    const userContent = `Library: ${libName}${customCode ? `\nSample usage:\n${customCode}` : ''}${factsBlock}${purposeBlock}`;
-
-    const { thinkingText, responseText } = await callMiniMax(systemPrompt, userContent, { maxTokens: 1500 });
-
-    let parsed;
-    try {
-      // Strip possible markdown code fence if model wraps in ```json
-      const jsonStr = responseText.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-      parsed = JSON.parse(jsonStr);
-    } catch {
-      throw new Error('MiniMax returned invalid JSON: ' + responseText.slice(0, 200));
-    }
-
-    const thoughts = [
-      ...(thinkingText ? thinkingText.split('\n').filter(l => l.trim()).slice(0, 4) : []),
-      ...(parsed.thoughts || [])
-    ].slice(0, 8);
-
-    res.json({
-      success: true,
-      libName,
-      thoughts,
-      blocks: parsed.blocks || []
-    });
-  } catch (err) {
-    console.error('[/api/ai-abstract] MiniMax error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 // ─── 3.5 Blockify: introspection-based library blocks (no AI cost) ────────────
 // Real-API ground truth: imports the module in a python subprocess and returns a LibrarySpec

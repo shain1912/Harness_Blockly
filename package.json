@@ -19,7 +19,6 @@
     "test:e2e": "playwright test tests/e2e.spec.js",
     "test:p0p1": "playwright test tests/test_p0_p1.spec.js",
     "test:p2p4": "playwright test tests/test_p2_p4.spec.js",
-    "test:validity": "playwright test tests/random_roundtrip.spec.js tests/realistic_roundtrip.spec.js tests/method_def.spec.js tests/macro_block.spec.js tests/validity_harness.spec.js tests/method_call_coverage.spec.js tests/lambda_block.spec.js",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed",
     "test:debug": "playwright test --debug",

@@ -9,9 +9,8 @@
 #     backend is started for ir_blockify_app.spec.js (/api/blockify, keyless).
 #   * gen-tests — blockpy-gen introspection engine (node --test; spawns a local python).
 #
-# NON-GATING:
-#   * legacy-validity — the pre-IR hand-written parser corpora. That path is FROZEN
-#     (retired from conversion); the job is informational only (continue-on-error).
+# (The pre-IR hand-written parser + its corpora were removed — the IR pipeline is the only
+#  conversion path now, so there is no separate legacy job.)
 name: validity
 
 on:
@@ -63,20 +62,3 @@ jobs:
       - run: npm ci
       - name: blockpy-gen unit tests (node --test)
         run: npm run test:gen
-
-  # Legacy parser corpora — pins the FROZEN pre-IR path (src/utils/parser.js et al.),
-  # which is loaded for side effects only and retired from conversion. Informational,
-  # NOT a merge gate: continue-on-error keeps it from blocking merges.
-  legacy-validity:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - name: Legacy 1:1 validity corpora (frozen path, non-gating)
-        run: npm run test:validity -- --reporter=line --workers=4

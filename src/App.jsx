@@ -79,7 +79,6 @@ export default function App() {
   const convertBindingsRef = useRef(new Map());     // dotted module -> the LOCAL name this program binds it to (np)
   const latestCodeRef = useRef('');                 // mirrors `code` for async callbacks (startup-load clobber guard)
   const associatedPythonRef = useRef('');
-  const abstractionEngineRef = useRef(null);
   const shellAbortRef = useRef(null);
   const desugarToggleMountRef = useRef(true);   // skip the toggle re-Convert on initial mount
 
@@ -481,11 +480,6 @@ export default function App() {
   // mount); localStorage/hydrate is reserved for user-generated libraries. A single setInstalledBlocks
   // here (union, deduped by type) avoids the two-effects clobber.
   useEffect(() => {
-    // Persistent abstraction engine — kept on window for the legacy parser handle (window.__blockpyEngine).
-    const engine = new window.BlockPyAbstraction.LibraryAbstractionEngine(null);
-    abstractionEngineRef.current = engine;
-    window.__blockpyEngine = engine;
-
     const reg = window.BlockPyLibRegistry;
     const installed = [];
     if (reg) {

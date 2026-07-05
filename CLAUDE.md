@@ -72,9 +72,9 @@ The Run button → `App.jsx:handleRunShell` → POST `/api/run-python`: the back
 ### Electron desktop
 `electron/main.cjs` `require()`s the **same** `server.js` (port 0 → free port), which serves the built `dist/` itself with COOP/COEP headers; the BrowserWindow loads `http://127.0.0.1:<port>`. Bundled `python-embed` is preferred over system python. `npm run dist` packages it (blockpy-gen is `asarUnpack`'d; `python-embed` ships as an extraResource).
 
-## Legacy (frozen — do not extend)
+## Legacy (removed)
 
-`src/utils/parser.js` (`window.BlockPyParser`), `desugarer.js`, and `libraryAbstraction.js` are still imported in `main.jsx` for side effects (legacy specs / presets) but are **retired from conversion**. Adding a Blockly block or `Blockly.Python` generator there does nothing in the live app: the toolbox is built from `irToolbox.js`, and `blocklyToIr` **throws** on any non-`ir_*` block. `src/utils/interpreter.js` (the old Step/Pause JS interpreter) no longer exists. A set of legacy Playwright specs (~20, including the 7 in `npm run test:validity`) pins the frozen path — keep them green, but never build new features on it. Docs under `papers/` and older `DOCS/` notes describe pre-IR designs; trust `src/`.
+The pre-IR hand-written compiler is **gone**: `src/utils/parser.js` (`window.BlockPyParser`, ~6.8k lines), `desugarer.js`, the old `interpreter.js` (Step/Pause), the in-browser Pyodide Run engine (sprite/cv2 mocks), and ~25 Playwright specs that tested them were deleted — the CPython-ast IR path is the only conversion pipeline. `src/utils/libraryAbstraction.js` survives **only** for the built-in cv2 `AI_PRESETS` demo table registered at mount (a hardcoded table slated to move to build-time introspection); do not extend it. `blocklyToIr` **throws** on any non-`ir_*` block. Docs under `papers/` / older `DOCS/` notes describe pre-IR designs; trust `src/`.
 
 ## Conventions when extending
 
