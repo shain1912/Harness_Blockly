@@ -11,6 +11,9 @@ verifies the three things a lesson depends on, with a screenshot at each step:
   2. CONVERT — a real pyserial program (list the ports, open one, read a line) converts to blocks that
      are recognized (emerald library calls), have a toolbox home, and round-trip AST-lossless.
   3. EDIT — change a block's literal; the Python regenerates to match (block->code live sync).
+  4. DRAG-AUTHORING — pull a block OUT of the toolbox (a library submodule call, a built-in call, and
+     a ★ curated block) and confirm each renders AND generates PARSEABLE, correct Python. This is the
+     reverse of convert: a student building a program by dragging, not by typing.
 
 USAGE (build the app first with `npm run dist`):
   python tests/e2e_golden_path.py
@@ -148,6 +151,51 @@ def edit_and_check(cdp):
     return bool(changed), bool(ok)
 
 
+# Author from the toolbox: OPEN a category (by a name substring, nesting-aware), take a block from its
+# real flyout, and DROP a copy onto the canvas — exactly what a drag does (Blockly copies the flyout
+# block's serialized state). Then generate Python from it. Returns { ok, rendered, code, blockType }.
+DRAG = r"""async (catSub, blockSub)=>{
+  const ws=window.__blocklyWorkspace; ws.clear();
+  const tb=ws.getToolbox && ws.getToolbox(); if(!tb) return {ok:false, why:'no toolbox'};
+  // Find the first LEAF category that is (or is nested under) a category whose name matches catSub.
+  // A ★ curated tab holds its blocks in group sub-categories, so we descend to a leaf under it.
+  let target=null;
+  (function find(items, underMatch){ for(const it of (items||[])){ if(target)return; try{
+    const nm = it.getName ? it.getName() : '';
+    const matched = underMatch || (nm && nm.indexOf(catSub)>=0);
+    const kids = it.getChildToolboxItems ? it.getChildToolboxItems() : null;
+    if(kids && kids.length){ if(it.setExpanded)it.setExpanded(true); find(kids, matched); }
+    else if(matched && it.showFlyout_!==false){ target=it; }
+  }catch(e){} } })(tb.getToolboxItems(), false);
+  if(!target) return {ok:false, why:'category not found: '+catSub};
+  tb.setSelectedItem(target); await new Promise(r=>setTimeout(r,250));
+  const fl=ws.getFlyout && ws.getFlyout(); const fw=fl && fl.getWorkspace && fl.getWorkspace();
+  const flyBlocks = fw ? fw.getTopBlocks(false) : [];
+  let pick=null;
+  for(const b of flyBlocks){ const id=(b.funcName_)||(b.method_?('.'+b.method_):(b.dotted_||(b.attr_?('.'+b.attr_):b.type)));
+    if(!blockSub || String(id).indexOf(blockSub)>=0){ pick=b; break; } }
+  pick = pick || flyBlocks[0];
+  if(!pick) return {ok:false, why:'flyout empty for '+catSub};
+  const state = window.Blockly.serialization.blocks.save(pick);
+  const newBlk = window.Blockly.serialization.blocks.append(state, ws);   // the "drop"
+  try{ tb.clearSelection(); }catch(e){}
+  const rendered = !!(newBlk && newBlk.getSvgRoot && newBlk.getSvgRoot());
+  const snap = window.Blockly.serialization.workspaces.save(ws);
+  const ir = window.BlockPyIR.blocklyToIr(snap);
+  const py = await window.BlockPyAstBridge.getPyodide();
+  const code = await window.BlockPyAstBridge.irToPython(py, ir);
+  return {ok:true, rendered, code, blockType:newBlk?newBlk.type:null};
+}"""
+
+
+def drag_and_run(cdp, cat_sub, block_sub):
+    r = ev(cdp, "(" + DRAG + ")(%s, %s)" % (json.dumps(cat_sub), json.dumps(block_sub)), aw=True)
+    if isinstance(r, str):
+        try: r = json.loads(r)
+        except Exception: r = {"ok": False, "why": "bad result"}
+    return r or {"ok": False, "why": "null"}
+
+
 def main():
     if not os.path.exists(EXE):
         print("ERROR: BlockPy.exe not found at", EXE, "\n(set BLOCKPY_EXE, or run `npm run dist`)"); return 2
@@ -191,6 +239,36 @@ def main():
         print("  field edited:", did_edit, "| Python regenerated (count = 7):", regen_ok)
         if not did_edit: fails.append("could not edit the const block")
         if not regen_ok: fails.append("block edit did NOT regenerate the Python")
+
+        print("=== Step 4: Drag blocks FROM the toolbox → valid Python ===")
+        # A student builds a program by dragging blocks out of the toolbox. Each must render and
+        # generate PARSEABLE Python. Cover distinct tabs: a library submodule call, a built-in call,
+        # and (dynamically) the ★ curated tab created in Step 1.
+        drags = [
+            ("serial submodule (tools.list_ports)", "tools.list_ports", "comports", "comports"),
+            ("built-in (math)", "math", "sqrt", "sqrt"),
+            ("built-in (cv2)", "cv2", "imread", "imread"),
+        ]
+        # add whichever ★ curated tab exists (its label is dynamic)
+        star_name = ev(cdp, "(()=>{const tb=window.BlockPyBuildIrToolbox();let n=null;const f=(cs)=>{for(const c of (cs||[])){if(c.kind==='category'&&c.name.indexOf('★')>=0&&!n)n=c.name;else if(c.contents)f(c.contents);}};f(tb.contents);return n;})()")
+        if star_name:
+            drags.append(("★ curated tab", "★", None, "("))
+        for label, cat_sub, block_sub, expect in drags:
+            r = drag_and_run(cdp, cat_sub, block_sub)
+            if not r.get("ok"):
+                fails.append(f"drag [{label}]: {r.get('why','failed')}"); print(f"  {label}: FAIL ({r.get('why')})"); continue
+            code = (r.get("code") or "").strip()
+            valid = False
+            try:
+                ast.parse(code); valid = True
+            except SyntaxError:
+                valid = False
+            has_expect = (expect in code)
+            print(f"  {label}: rendered={r.get('rendered')} valid_python={valid} code={code[:60]!r}")
+            if not r.get("rendered"): fails.append(f"drag [{label}]: block did not render")
+            if not valid: fails.append(f"drag [{label}]: generated INVALID Python: {code[:80]}")
+            if not has_expect: fails.append(f"drag [{label}]: Python missing '{expect}': {code[:80]}")
+        cdp.screenshot(os.path.join(SHOTS, "drag_authoring.png"))
     finally:
         try: cdp.close()
         except Exception: pass
