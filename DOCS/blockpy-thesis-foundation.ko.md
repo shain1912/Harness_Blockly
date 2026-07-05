@@ -19,7 +19,7 @@
 
 - **1. 컴파일러 용어와 개념** — 소스코드, 토큰/렉서, 파서, 문법, AST, 노드, IR, 코드 생성/unparse, lowering, 컴파일 vs 인터프리트, 왕복, 무손실, AST 동일성, 전수성(raw=0), fail-loud
 - **2. 블록코딩 용어와 개념** — 시각 프로그래밍, Blockly, 블록, 워크스페이스, 툴박스/카테고리, 플라이아웃, 연결(문장 블록 vs 값 블록), shadow 블록, 필드, 뮤테이터, 직렬화, 제너레이터, 교육적 이점, BlockPy의 세 가지 설계
-- **3. BlockPy 구현 상세** — 단일 IR, 무손실 계약과 증명, 상수 태깅·주석 보존, 파이썬→블록, 블록→파이썬, recognition⟂lowering, 임의 라이브러리 introspection, 큐레이션, 오프라인 패키징, 검증 방법
+- **3. BlockPy 구현 상세** — **한 프로그램의 여행 `x = 3 + 4`(실제 IR·블록 JSON 미리보기)**, 단일 IR, 무손실 계약·증명, 상수 태깅·주석 보존, 파이썬→블록/블록→파이썬(거울상 핸들러 코드), recognition⟂lowering, 임의 라이브러리 introspection, 큐레이션, 오프라인 패키징, 검증 — **각 절에 실제 코드 예시 + 비유**
 - **4. 연구/논문 프레이밍** — 문제 정의, 네 갈래 기여, 관련 연구 비교, 평가 방법론, 논문 제목·초록 초안
 - **부록. 핵심 용어 미니 사전(가나다)**
 
@@ -363,170 +363,292 @@ BlockPy는 위의 표준 블록 개념 위에 자기만의 세 가지 설계를 
 
 # 3. BlockPy 구현 상세
 
-앞의 두 장이 "무엇을·왜"였다면, 이 장은 "어떻게"다. 1·2장에서 익힌 용어(AST, IR, 무손실, 전수성, fail-loud, recognition ⟂ lowering)가 실제 파일과 함수 이름으로 어떻게 구현되는지 따라간다. 코드를 직접 보지 않는 독자는 각 절 앞의 **쉬운 설명** 회색 인용만 읽어도 흐름을 잡을 수 있다.
+앞의 두 장이 "무엇을·왜"였다면, 이 장은 "어떻게"다. 어렵게 느껴질 수 있으니, **딱 한 줄짜리 프로그램 `x = 3 + 4` 하나를 골라 처음부터 끝까지 따라간다.** 이 예시가 3.0에서 전체 그림을 보여주고, 이후 각 절이 그 여행의 한 구간씩을 확대해 실제 코드와 함께 설명한다. 코드를 건너뛰고 싶으면 각 절 앞의 **쉬운 설명** 회색 인용과 "예시" 상자만 읽어도 흐름을 잡을 수 있다.
 
-> **한눈 요약.** BlockPy의 심장은 "진짜 파이썬의 문법 트리(CPython 3.12의 `ast`)"를 **하나의 중간 표현(IR)**으로 삼는다는 결정이다. 파이썬 텍스트는 브라우저 안의 진짜 파이썬(Pyodide)이 파싱하고, 그 트리를 JSON으로 직렬화한 것이 IR이며, 블록은 이 IR을 시각적으로 그린 것에 지나지 않는다. 그래서 "블록 ↔ 파이썬"은 사실상 "IR ↔ IR"이고, 원본과 재생성본의 AST가 글자 단위가 아니라 **구조 단위로 동일(lossless)**함을 기계로 증명할 수 있다. 아래에서는 두 방향의 데이터 흐름을 실제 함수 이름과 함께 따라가고, 무손실이 왜 성립하는지, "인식(색칠)"과 "생성(lowering)"이 코드 수준에서 어떻게 분리되는지, 임의의 파이썬 라이브러리가 어떻게 블록이 되는지, 그리고 이 모든 것을 어떻게 오프라인에서 돌리고 검증하는지를 다룬다.
+---
+
+## 3.0 한 프로그램의 여행: `x = 3 + 4` (미리보기)
+
+> **비유.** 한국어를 아랍어로 오가는 통역소를 떠올리자(1장 IR). 한국어(파이썬 글자)를 곧장 아랍어(블록 그림)로 바꾸지 않고, 가운데 **영어(IR)**를 거친다. 아래는 `x = 3 + 4`라는 한 문장이 이 통역소를 한 바퀴 도는 모습이다. 각 단계의 **실제 데이터**를 그대로 보였으니, 세부는 몰라도 "글자 → 트리 → 블록 → 다시 트리 → 다시 글자"의 리듬만 느끼면 된다.
+
+**① 파이썬 글자 (사용자가 친 것)**
+
+```python
+x = 3 + 4
+```
+
+**② 파싱 → IR (진짜 파이썬 `ast.parse`가 만든 트리를 JSON으로)**
+
+`pythonToIR`을 거치면 위 한 줄이 이런 트리 모양 데이터가 된다. (읽는 법: `type`이 노드 종류, 나머지 칸이 그 자식이다.)
+
+```json
+{ "type": "Module", "body": [
+  { "type": "Assign",
+    "targets": [ { "type": "Name", "id": "x" } ],
+    "value": { "type": "BinOp",
+      "left":  { "type": "Constant", "value": 3 },
+      "op":    { "type": "Add" },
+      "right": { "type": "Constant", "value": 4 } } } ] }
+```
+
+말로 풀면 "**대입(Assign)**: 왼쪽은 변수 `x`, 오른쪽은 **덧셈(BinOp: Add)**인데 그 덧셈의 왼쪽은 **상수 3**, 오른쪽은 **상수 4**"다. 정확히 1장에서 그렸던 그 족보 트리다.
+
+**③ IR → 블록 JSON (`irToBlockly`) → 화면 블록**
+
+같은 트리를 이번엔 블록 조각으로 바꾼다. 실제로 나오는 데이터는 이렇다.
+
+```json
+{ "type": "ir_assign", "extraState": { "n": 1 },
+  "inputs": {
+    "TARGET0": { "block": { "type": "ir_name", "fields": { "ID": { "id": "x" } } } },
+    "VALUE":   { "block": { "type": "ir_binop", "fields": { "OP": "Add" },
+      "inputs": {
+        "LEFT":  { "block": { "type": "ir_const", "fields": { "VALUE": "3" } } },
+        "RIGHT": { "block": { "type": "ir_const", "fields": { "VALUE": "4" } } } } } } } }
+```
+
+`Assign` 노드가 `ir_assign` 블록으로, `BinOp`가 `ir_binop` 블록으로, `Constant 3/4`가 `ir_const` 블록으로 **하나씩 짝지어졌다**(2장의 `ir_*` 블록). 화면에서는 이렇게 보인다.
+
+```
+┌────────────────────────────────────────┐
+│ [x ▾]  =  ( [3]  ➕ Add ▾  [4] )        │  ← ir_assign 안에 ir_binop, 그 안에 ir_const 둘
+└────────────────────────────────────────┘
+```
+
+**④ 블록을 다시 파이썬으로 (`blocklyToIr` → `irToPython`)**
+
+학생이 블록을 만지면 역방향이 돈다. 블록 JSON을 다시 IR(②와 **글자 하나 안 틀리고 같은 트리**)로 낮추고(lowering), 진짜 파이썬의 `ast.unparse`가 텍스트로 되돌린다.
+
+```python
+x = 3 + 4
+```
+
+출발점(①)과 도착점(④)이 같다. 이 "한 바퀴가 안 깨지는 것"이 BlockPy의 존재 이유이며(1장 왕복·무손실), 아래 절들이 이 여행의 각 구간을 실제 코드로 확대한다.
+
+---
 
 ## 3.1 단일 IR의 선택: 왜 CPython `ast`인가
 
-> **쉬운 설명.** 예전 BlockPy는 파이썬을 직접 파싱하는 손으로 짠 컴파일러를 썼다. 그런데 파이썬 문법 전체를 사람이 다시 구현하면, 진짜 파이썬과 미묘하게 어긋나는 지점이 반드시 생긴다. 그래서 "우리가 파이썬을 흉내 내지 말고, 진짜 파이썬에게 파싱을 시키자"로 방향을 틀었다.
+> **쉬운 설명.** 예전 BlockPy는 파이썬을 직접 파싱하는 손으로 짠 컴파일러를 썼다. 그런데 파이썬 문법 전체를 사람이 다시 구현하면 진짜 파이썬과 미묘하게 어긋나는 지점이 반드시 생긴다(예: `match`문, walrus `:=`). 그래서 "우리가 파이썬을 흉내 내지 말고, **진짜 파이썬에게 파싱을 시키자**"로 방향을 틀었다.
 
-IR의 정의는 `src/utils/pyAstBridge.js`에 있다. 파이썬 텍스트는 손으로 짠 렉서/파서가 아니라 **Pyodide 안에서 도는 진짜 `ast.parse()`**가 파싱한다. 직렬화 규칙(`_to_ir`)은 극도로 단순하다. 모든 `ast.AST` 노드를 `{ "type": <노드클래스명>, <각 _fields...> }` 형태의 dict로 바꾸고, 리스트는 리스트로, 원시값은 원시값으로 매핑한다.
+> **비유.** 프랑스 요리책을 쓸 때 프랑스어를 어설프게 아는 사람이 옮기면 틀린다. 아예 **프랑스인 셰프 본인**에게 레시피를 받아 적으면 원본과 어긋날 일이 없다. BlockPy는 "파이썬 셰프 본인"(CPython)에게 파싱과 코드 생성을 맡긴다.
+
+IR의 정의는 `src/utils/pyAstBridge.js`에 있다. 직렬화 규칙(`_to_ir`)은 극도로 단순하다 — 모든 `ast.AST` 노드를 `{ "type": <노드클래스명>, <각 _fields...> }` dict로 바꾸는 게 전부다.
 
 ```python
 def _to_ir(node):
     if isinstance(node, ast.AST):
         d = {"type": type(node).__name__}
-        for f in node._fields:
-            d[_key(f)] = _to_ir(getattr(node, f, None))
+        for f in node._fields:                            # 노드가 가진 모든 자식 칸을
+            d[_key(f)] = _to_ir(getattr(node, f, None))   # 재귀적으로 변환
         ...
 ```
 
-이 선택이 주는 것은 **전수성(totality)**이다. 손으로 짠 파서는 "지원하는 문법의 집합"이 곧 구현 범위인 반면, `node._fields`를 전부 순회하는 이 방식은 파이썬 3.12 문법 전체를 이미 커버한다. `irToBlockly.js`의 `NODE_POLICY` 테이블은 CPython 3.12의 **모든** ast 노드 클래스를 하나도 빠짐없이 분류(DB=전용 블록 / SUGAR / HELPER / FIELD / ROOT / SKIP)하며, `ir_coverage.spec.js`가 "Pyodide가 노출하는 모든 노드가 이 표에 있는가, 그리고 DB/SUGAR로 표시된 노드는 실제로 핸들러가 있는가"를 기계 검증한다. 워크리스트에 `PENDING`이 하나도 남지 않은 상태가 `raw=0`(미처리 노드 0)이다.
+**예시.** 위 `Assign` 노드의 `_fields`는 `("targets", "value", "type_comment")`이다. 그래서 3.0의 ②에 `targets`와 `value`가 그대로 나타났다. 파이썬에 새 문법이 추가돼 노드에 칸이 늘어도, `node._fields`를 통째로 도는 이 코드는 **자동으로** 그 칸을 실어 나른다.
 
-핵심적으로, 역방향(`_from_ir` → `ast.unparse`)이 텍스트를 만든다. 즉 **파이썬을 생성하는 유일한 주체가 진짜 CPython의 `ast.unparse`**이므로, 우리가 만든 IR이 유효한 ast 트리이기만 하면 결과는 항상 문법적으로 올바른 파이썬이다.
+이 선택이 주는 결정적 성질이 **전수성(totality, 1장)**이다. 손으로 짠 파서는 "지원 문법 = 구현한 만큼"이지만, `node._fields`를 전부 도는 방식은 3.12 문법 전체를 이미 덮는다. `irToBlockly.js`의 `NODE_POLICY` 표가 모든 ast 노드 클래스를 빠짐없이 분류하고, `ir_coverage.spec.js`가 "빠진 노드/핸들러 없는 노드"를 기계로 잡는다. 미처리 노드 0 = **`raw=0`**. 그리고 텍스트를 만드는 유일한 주체가 진짜 `ast.unparse`이므로, 우리 IR이 올바른 트리이기만 하면 결과는 **항상 문법적으로 올바른 파이썬**이다.
+
+---
 
 ## 3.2 무손실 계약과 그 증명
 
-> **쉬운 설명.** "무손실"은 "블록으로 바꿨다가 다시 파이썬으로 돌려도 뜻이 안 바뀐다"는 뜻이다. 우리는 이걸 "글자가 똑같다"가 아니라 "문법 트리가 똑같다"로 정의한다(1장의 AST 동일성). 들여쓰기나 따옴표 스타일 같은 겉모습은 재생성되지만, 프로그램의 의미는 보존된다.
+> **쉬운 설명.** "무손실"은 "블록으로 바꿨다 다시 파이썬으로 돌려도 뜻이 안 바뀐다"는 뜻이다(1장). 이걸 "글자가 똑같다"가 아니라 "**문법 트리가 똑같다**"로 정의한다. 들여쓰기·따옴표 스타일 같은 겉모습은 재생성되지만 의미는 보존된다.
 
-무손실 계약은 `ast.dump(parse(원본)) == ast.dump(parse(재생성))` — 즉 **AST 동일성 왕복**이다. `_unparse`가 `ast.unparse`로 포맷(빈 줄, 따옴표)을 재생성하므로 바이트 단위로는 다를 수 있지만, 재파싱한 트리는 동일하다. `blocklyToIr.js`가 의도적으로 **버리는** 정보들도 이 정의 위에서 안전하다: 이름의 `ctx`(Load/Store/Del)는 위치로 완전히 결정되고, `_loc`·`type_comment`는 의미가 아니라 위치/포맷이므로 `ast.unparse`가 무시한다. 반대로 `ast.dump` 수준에서 **의미가 있는** 것(예: `u''` 문자열의 `kind='u'` 접두)은 `ir_str` 블록이 `extraState`에 실어 보존한다.
+> **비유.** 사진을 압축했다 푸는 것과 같다. 파일 크기(글자 배열)는 달라져도 그림(의미)이 하나도 안 흐려지면 "무손실"이다.
 
-검증 자산(사용자 메모리 및 `tests/`):
-- **IR 게이트 ~186 테스트**: `ir_roundtrip.spec.js`(Pyodide 실왕복), `ir_coverage.spec.js`(전수성), `ir_unit.spec.js` 등.
-- **퍼즈**: `tests/e2e_convert_fuzz.py` — 무작위 신규 프로그램을 넣고 AST 동일성을 확인.
-- **코퍼스**: node + CPython 실제 소스 187 케이스 왕복.
-- **골든패스 E2E**: `tests/e2e_golden_path.py` — 실제 제품 UI 흐름.
+무손실 계약을 한 줄로: **`ast.dump(parse(원본)) == ast.dump(parse(재생성))`**.
+
+**예시.** 사용자가 `3+4`(붙여 씀)를 넣었는데 BlockPy가 `3 + 4`(띄어 씀)로 되돌렸다고 하자. 글자는 다르다. 하지만 둘을 각각 다시 파싱하면 **똑같은 트리**(`BinOp(3, Add, 4)`)가 나오므로 `ast.dump`가 같고, 계약은 지켜진다. 반대로 `3 + 4`를 `3 - 4`로 되돌리면 트리가 달라지므로(`Add`≠`Sub`) 즉시 위반으로 잡힌다.
+
+이 정의 위에서 `blocklyToIr.js`가 의도적으로 **버리는** 것들이 안전해진다:
+- 이름의 `ctx`(Load/Store/Del)는 위치로 완전히 결정된다(대입 왼쪽=Store, 오른쪽=Load) → 안 실어도 재파싱하면 복원.
+- `_loc`(줄·칸 위치)·`type_comment`는 의미가 아니라 위치/포맷이라 `ast.unparse`가 무시.
+
+반대로 `ast.dump` 수준에서 **의미가 있는** 것(예: `u'abc'`의 `kind='u'` 접두)은 버리면 트리가 달라지므로, `ir_str`이 `extraState`에 실어 보존한다.
+
+---
 
 ## 3.3 무손실을 완성하는 두 축: 상수 태깅과 주석 보존
 
-> **쉬운 설명.** JSON은 파이썬의 모든 값을 그대로 담지 못한다(예: `1.0`은 JSON으로 오가면 정수 `1`이 돼 버린다). 또 주석은 ast 트리에 원래 없다. 이 두 구멍을 메우는 장치가 있어야 진짜로 무손실이 된다(1장 무손실 항목에서 예고한 `{__py__: ...}` 꼬리표가 여기 나온다).
+> **쉬운 설명.** JSON은 파이썬의 모든 값을 그대로 담지 못하고, 주석은 트리에 원래 없다. 이 두 구멍을 메워야 진짜 무손실이 된다.
 
-**(a) 상수 태깅.** `_enc_prim`/`_enc_float`는 JSON으로 안전하지 않은 CPython 3.12 상수를 `{"__py__": ...}` 리프로 태깅한다:
-- `bytes` → base64, `complex` → real/imag 분해, `Ellipsis` → 태그.
-- `inf`/`nan`은 JSON 토큰이 아니므로 태깅.
-- **정수값 float**(`1.0`, `-0.0`, `1e10`)도 태깅한다. `x.is_integer()`인 float는 JSON을 통과하면 int로 붕괴하기 때문(무손실 파괴). `repr(x)`를 실어 역방향 `_dec_prim`이 정확히 복원한다.
-- `2^53-1`을 넘는 큰 int는 JS `JSON.parse`가 반올림하므로 문자열로 태깅.
+**(a) 상수 태깅 — `{"__py__": ...}` 꼬리표.**
 
-원시값은 절대 평범한 dict가 아니고 ast 노드는 항상 `"type"`을 가지므로, `"__py__"` dict는 모호함 없이 식별된다. JS 쪽 블록 면(face) 표현은 `irToBlockly.pyConstText`가, 역파싱은 `blocklyToIr.pyConstValue`가 담당하며 서로 정확한 역함수다(`None`/`True`/`False`를 파이썬 표기로 표시·복원).
+> **비유.** 택배로 유리컵(까다로운 값)을 보낼 때 그냥 상자(JSON)에 넣으면 깨진다. "취급주의" 스티커를 붙이고 뽁뽁이로 싸는 것이 태깅이다.
 
-**(b) 주석 보존.** 주석은 ast에 없으므로 stdlib `tokenize`로 별도 추출한다(`_collect_comments`). `_attach_comments`가 각 주석을 가장 가까운 **문(statement) 노드**에 `_comments {leading[], trailing, after[]}`로 귀속시킨다(인라인 주석은 span 안의 문에 trailing, 독립 주석은 다음 문의 leading 또는 앞 문의 after). 역방향은 `ast._Unparser`를 상속한 `_CommentUnparser`가 재삽입하는데, `elif` 붕괴(`visit_If`)나 docstring처럼 `traverse`를 우회하는 경로까지 명시적으로 처리해 이중 방출·누락을 막는다. 포맷은 재생성하되 **주석 텍스트는 무손실**이라는 것이 "Option 3"이다. 문에 anchor할 수 없는 주석만 있는 파일은 `Module` 노드 자체에 실어, `irToBlockly`가 워크스페이스 JSON의 `blockpyModule` 키로 나른다(`irBlocks.js`의 직렬화 플러그인이 실제 Blockly load/save를 넘어 이 키를 살려두고, `blocklyToIr`가 복원).
+가장 놀라운 예시가 **`1.0`**이다. 파이썬에서 `1.0`(실수)과 `1`(정수)은 다른 값인데, JSON을 통과하면 `1.0`이 정수 `1`로 **붕괴**해 버린다 — 무손실이 깨진다. 그래서 `_enc_float`는 정수값 실수를 꼬리표로 감싼다.
 
-## 3.4 방향 1: 파이썬 → 블록
+```python
+def _enc_float(x):
+    if x != x or x in (float('inf'), float('-inf')) or x.is_integer():
+        return {"__py__": "float", "repr": repr(x)}   # 1.0 → {"__py__":"float","repr":"1.0"}
+    return x
+```
 
-> **쉬운 설명.** 사용자가 파이썬을 치고 "변환"을 누르면 이 경로가 돈다. 진짜 파이썬으로 파싱 → IR → 블록 JSON → 화면. 1장 그림의 오른쪽 절반(`irToBlockly`)이다.
+같은 방식으로 `bytes`→base64, `complex`→실수·허수 분해, `inf`/`nan`(JSON 토큰이 아님), `2^53`을 넘는 큰 정수(JS `JSON.parse`가 반올림)를 태깅한다. 원시값은 절대 평범한 dict가 아니고 ast 노드는 항상 `"type"`을 가지므로, `"__py__"` dict는 헷갈릴 일 없이 식별된다. 블록 면 표시는 `pyConstText`가, 역파싱은 `pyConstValue`가 맡아 **서로 정확한 역함수**다.
 
-전 과정은 `src/App.jsx`의 `syncCodeToBlocks(currentCode)`가 오케스트레이션한다(async — 파싱이 Pyodide에서 돈다).
+**(b) 주석 보존 — "Option 3".**
 
-1. **스냅샷 복구(빠른 길).** 직전 블록 편집 이후 파이썬 텍스트가 **바이트 동일**하면(`currentCode === associatedPythonRef.current`) 저장된 워크스페이스 JSON을 그대로 `serialization.workspaces.load`로 복원한다. 재파싱 없음 → 블록 드리프트/레이아웃 손실 없음(2.11 직렬화의 실제 쓰임).
+> **비유.** 트리(족보)에는 "이 사람 착함" 같은 **메모** 칸이 없다. 그래서 메모를 따로 옮겨 적고(추출), 각 메모가 누구 옆에 있었는지 기록했다가(귀속), 족보를 다시 글로 풀 때 제자리에 붙인다(재삽입).
 
-2. **스냅샷 복구(느린 길).** 텍스트는 바뀌었지만 `pythonToIR` 결과가 이전과 **IR 동일**(`JSON.stringify(prevIr) === JSON.stringify(ir)`, `_comments` 채널 포함)이면 포맷·주석만의 편집이므로 레이아웃을 유지한다. 과거의 정규식 문자열 비교는 재들여쓰기(파이썬에서 의미 있음!)·문자열 리터럴 내부 편집·주석 변경을 "변화 없음"으로 오판했는데, AST 동일성은 이런 의미/주석 편집을 절대 놓치지 않는다.
+주석은 ast에 없으므로 stdlib `tokenize`로 별도 추출하고(`_collect_comments`), `_attach_comments`가 각 주석을 가장 가까운 **문 노드**에 `_comments {leading[], trailing, after[]}`로 붙인다.
 
-3. **파싱.** `window.BlockPyAstBridge.pythonToIR(pyodide, code)` — Pyodide에서 `ast.parse` → `_parse` → JSON IR. `_parse`는 PyProxy이므로 사용 후 `destroy()`로 WASM 리소스 누수를 막는다.
+**예시.**
 
-4. **(선택) 디슈가.** `shouldDesugar`가 켜져 있으면 `BlockPyIrDesugar.desugarIr(ir)`가 안전한 위치의 컴프리헨션/삼항/체인 비교를 기초 루프·조건·불리언 IR로 재작성한다. **기존 IR 노드만** 방출하므로 `irToBlockly`가 그대로 소비한다.
+```python
+x = 3   # 시작값     ← 인라인 주석: x=3 문의 trailing
+# 결과 출력          ← 독립 주석: 다음 문의 leading
+print(x)
+```
 
-5. **인식 오라클(표시 전용, 시간 예산 15초).** `autoBlockifyRefs`가 참조된 라이브러리 심볼을 툴박스에 물려두고, `inferTypes`(Jedi)로 수신자 타입을 해석해 `annotateOwnerTypes`가 `Attribute` 노드에 `_ownerType`을 태깅한다. **이 전부는 색칠용**이고(2.14 recognition), 예산을 넘기면 제네릭 스타일로 즉시 진행한 뒤 오라클이 늦게 도착하면 자가 치유(`refreshToolboxNow` + `recolorLibBlocks`)한다. 왕복 파이썬은 영향받지 않는다(§3.6).
+역방향은 `ast._Unparser`를 상속한 `_CommentUnparser`가 재삽입하되, `elif` 붕괴나 docstring처럼 우회 경로까지 명시적으로 처리해 이중 방출·누락을 막는다. 포맷은 재생성하되 **주석 텍스트는 무손실**이라는 것이 "Option 3"이다.
 
-6. **IR → 블록 JSON.** `window.BlockPyIR.irToBlockly(ir)` (`irToBlockly.js`). `stmtToBlock`/`exprToBlock`이 `STMT_HANDLERS`/`EXPR_HANDLERS` 맵으로 각 노드를 블록으로 매핑한다. 가변 인자(리스트 길이, 함수 시그니처, 핸들러 수 등)는 **`fields`가 아니라 `extraState`**에 저장하는데(2.10 뮤테이터가 만든 구조), 이는 진짜 Blockly load가 `loadExtraState`로 입력 슬롯을 먼저 재구성한 뒤 연결을 복원하도록 하기 위함이다. 변수는 워크스페이스 `variables` 맵으로 방출하고(이름=id), 임포트된 모듈 루트(`collectModules`)를 알아 `cv2.imread` 같은 모듈 루트 dotted 체인은 **편집 불가 고정 라벨**로, 변수의 메서드(`img.resize`)는 수신자 드롭다운+라벨로 접는다(2.14 고정 블록 UX). 핸들러가 없는 노드는 `noHandler`가 **fail-loud**(조용히 틀리지 않고 예외)로 던진다.
+---
 
-7. **로드 & 스냅샷.** `Blockly.serialization.workspaces.load(blocklyJson, ws)` → `svgResize`+`scrollCenter`(숨겨진 워크스페이스 렌더 이슈 회피) → 새 스냅샷을 `blocklySnapshotRef`에 저장, `associatedPythonRef`를 갱신. `myGen !== syncGenRef.current` 가드로 더 최신 sync가 시작됐으면 낡은 결과를 버린다.
+## 3.4 방향 1: 파이썬 → 블록 (`syncCodeToBlocks`)
 
-## 3.5 방향 2: 블록 → 파이썬
+> **쉬운 설명.** 사용자가 파이썬을 치고 "변환"을 누르면 이 경로가 돈다: 파싱 → IR → 블록 JSON → 화면. 3.0의 ①→②→③ 구간이다.
 
-> **쉬운 설명.** 사용자가 블록을 만지면 이 경로가 돈다. 블록 JSON → IR → 진짜 파이썬 텍스트. 이쪽이 "생성된 파이썬의 유일한 진실 원본"이다(1장 lowering).
+전 과정은 `src/App.jsx`의 `syncCodeToBlocks(currentCode)`가 지휘한다(async — 파싱이 Pyodide에서 돈다). 핵심은 **핸들러 표**다. `irToBlockly.js`의 `EXPR_HANDLERS`/`STMT_HANDLERS`가 "노드 종류 → 블록 만드는 법"을 한 줄씩 적어 둔 사전이고, `exprToBlock`/`stmtToBlock`이 이 표를 보고 재귀적으로 내려간다.
 
-`BlocklyEditor.jsx`의 변경 리스너가 워크스페이스를 직렬화하고, `blocklyToIr.js`의 `blocklyToIr(ws)`가 IR을 만든 뒤 `pyAstBridge.irToPython(pyodide, ir)`이 텍스트를 뽑는다.
+**예시 — 실제 핸들러 세 줄.** 3.0의 `BinOp`·`Name`·`Constant`가 블록이 된 근거다.
 
-- **진입.** `blocklyToIr`는 먼저 `variables`로 id→이름 맵(`_varMap`)을 세우고, 스냅샷을 **깊은 복제**한다. `normInputs`와 핸들러들이 shadow 기본값을 in-place로 붕괴시키기 때문에, 복제하지 않으면 스냅샷 복구 사이클에서 shadow 기본값이 실제 블록으로 굳어버린다(2.8 shadow 블록의 함정).
-- **여러 스택.** 워크스페이스에 떨어진 모든 최상위 스택을 `blocks.blocks` 전체에 대해 순회한다(`blocks[0]`만 보면 나머지를 잃음). 각 최상위 블록은 `topToStmt`로 문으로 변환하되, 표현식 출력 블록(`ir_name`, `ir_binop`, 호출 등)이 홀로 캔버스에 놓이면 파이썬의 bare-expression 규칙대로 `Expr` 문으로 감싼다. `ir_slice`/`ir_starred`처럼 부모 안에서만 유효한 조각(`CONTEXT_ONLY_BLOCKS`)은 연결 전까지 건너뛴다 — 여기서 throw하면 워크스페이스 **전체** 코드 생성이 멎기 때문.
-- **디스패치.** `blockToStmt`/`blockToExpr`이 `BLOCK_TO_STMT`/`BLOCK_TO_EXPR` 맵으로 각 `ir_*` 블록을 ast 노드로 lower한다. 비-`ir_*` 블록은 `lowerLibBlock`(§3.6)을 시도하고, 그마저 없으면 **fail-loud** throw.
-- **fail-loud 검증자(교육용 필수).** 자유 텍스트가 구조를 주입하지 못하도록 곳곳에서 방어한다: `checkName`(def/class/type 이름이 식별자인지), `fieldToNames`/`fieldToAliases`(global/import 필드), `ir_call`의 키워드 이름 중복·비식별자, `raise ... from`에 예외 없음, bare `except*`, `try` 없는 else 등 **문법적으로 불가능한 조합**을 verbatim으로 내보내지 않고 명시적 에러로 막는다(2.9 필드의 "이상하면 즉시 거부").
-- **필수 본문.** 파이썬은 빈 블록 본문을 허용하지 않으므로 `stmtListOrPass`가 빈 suite에 `pass`를 합성한다(멱등 — `pass`로 다시 왕복).
+```js
+// irToBlockly.js — 노드를 블록 JSON으로 "쓴다"
+BinOp:    (n) => blk('ir_binop', { OP: n.op.type },
+            { LEFT: { block: exprToBlock(n.left) }, RIGHT: { block: exprToBlock(n.right) } }),
+Name:     (n) => blk('ir_name', { ID: { id: n.id } }),
+Constant: (n) => (typeof n.value === 'string'
+            ? blk('ir_str', { TEXT: n.value })
+            : blk('ir_const', { VALUE: pyConstText(n.value) })),   // 3 → "3"
+```
+
+읽는 법: `BinOp` 노드가 오면 `ir_binop` 블록을 만들고, 연산자 종류(`Add`)를 `OP` 필드에 넣고, 왼쪽·오른쪽 자식을 **다시 `exprToBlock`으로** 블록화해 `LEFT`/`RIGHT`에 끼운다. 이 재귀가 3.0 ③의 중첩 구조를 그대로 만든다.
+
+`syncCodeToBlocks`가 변환 앞뒤로 챙기는 실무:
+- **스냅샷 복구(빠른 길).** 텍스트가 직전 블록 편집과 **바이트 동일**하면 저장해 둔 워크스페이스 JSON을 그대로 복원한다 — 재파싱 없음, 블록 위치 안 흔들림(2.11).
+- **스냅샷 복구(느린 길).** 텍스트는 바뀌었어도 `pythonToIR` 결과가 이전과 **IR 동일**(`_comments` 포함)이면 포맷·주석만의 편집이므로 레이아웃을 유지한다. (과거 정규식 문자열 비교는 "재들여쓰기"—파이썬에선 의미가 있음!—를 "변화 없음"으로 오판했는데, AST 동일성은 그런 의미 편집을 절대 놓치지 않는다.)
+- **인식 오라클(표시 전용, 15초 예산).** `autoBlockifyRefs`(라이브러리 심볼을 툴박스에 물림)+`inferTypes`(Jedi 수신자 타입)로 블록을 **색칠**한다. 예산 초과 시 제네릭 색으로 즉시 진행하고, 오라클이 늦게 오면 `recolorLibBlocks`로 자가 치유한다. **왕복 파이썬은 불변**(§3.6).
+- **fail-loud.** 핸들러 없는 노드는 `noHandler`가 조용히 틀리지 않고 예외를 던진다(1장).
+
+---
+
+## 3.5 방향 2: 블록 → 파이썬 (`blocklyToIr`) — 3.4의 거울상
+
+> **쉬운 설명.** 사용자가 블록을 만지면 이 경로가 돈다: 블록 JSON → IR → 진짜 파이썬 텍스트. **이쪽이 "생성된 파이썬의 유일한 진실 원본"이다**(1장 lowering).
+
+가장 아름다운 점은 이 방향이 3.4의 **정확한 거울상**이라는 것이다. 3.4가 "노드→블록을 **쓰는**" 핸들러였다면, 여기 `BLOCK_TO_EXPR`/`BLOCK_TO_STMT`는 "블록→노드를 **읽는**" 핸들러다.
+
+**예시 — 아까 그 세 줄의 거울상.**
+
+```js
+// blocklyToIr.js — 블록을 노드로 "읽는다" (3.4의 반대)
+ir_binop: (b) => ({ type: 'BinOp', left: blockToExpr(b.inputs.LEFT.block),
+             op: { type: b.fields.OP }, right: blockToExpr(b.inputs.RIGHT.block) }),
+ir_name:  (b) => ({ type: 'Name', id: /* b.fields.ID → 변수 이름 */ }),
+ir_const: (b) => ({ type: 'Constant', value: pyConstValue(b.fields.VALUE) }),   // "3" → 3
+```
+
+3.4의 `BinOp` 핸들러와 나란히 놓으면 `OP` 필드, `LEFT`/`RIGHT` 입력이 **정확히 대칭**이다. `pyConstText`(3→"3")와 `pyConstValue`("3"→3)가 역함수인 것도 여기서 드러난다. 이 대칭이 무손실(3.2)을 코드 구조로 보장한다.
+
+블록→파이썬에서 챙기는 실무:
+- **깊은 복제.** `blocklyToIr`는 스냅샷을 **깊게 복제**한 뒤 작업한다. shadow 기본값을 in-place로 붕괴시키므로, 복제 안 하면 스냅샷 복구 사이클에서 기본값이 실제 블록으로 굳는다(2.8 shadow의 함정).
+- **여러 스택·bare 표현식.** 캔버스의 모든 최상위 스택을 순회한다. 값 블록(`ir_binop` 등)이 홀로 놓이면 파이썬 규칙대로 `Expr` 문으로 감싼다.
+- **fail-loud 검증자(교육용 필수).** 함수 이름칸에 `내 함수`(공백)를 넣으면 `checkName`이, `import a; import b`처럼 세미콜론을 넣으면 `fieldToAliases`가 verbatim 방출을 막고 명시적 에러를 낸다(2.9).
+- **필수 본문.** 파이썬은 빈 본문을 허용하지 않으므로 `stmtListOrPass`가 빈 `if`/`for` 본문에 `pass`를 합성한다.
+
+---
 
 ## 3.6 recognition ⟂ lowering: 코드 수준의 분리 (건전성 정리)
 
-> **쉬운 설명.** 블록의 "색"과 블록이 만드는 "코드"는 완전히 다른 데서 나온다(2.14에서 예고한 핵심). 색은 "이 호출이 알려진 라이브러리인가" 같은 추측(introspection, Jedi, AI)에서 나오고, 코드는 오직 블록의 구조와 `extraState`에서만 나온다. 그래서 추측이 틀려도 **색만 틀릴 뿐 코드는 절대 안 바뀐다.** 이게 이 시스템의 안전성 핵심이자 4장의 논문 기여 ②다.
+> **쉬운 설명.** 블록의 "색"과 블록이 만드는 "코드"는 **완전히 다른 데서** 나온다. 색은 "이 호출이 알려진 라이브러리인가" 같은 추측(introspection, Jedi, AI)에서 나오고, 코드는 오직 블록 구조(`extraState`)에서만 나온다. 그래서 추측이 틀려도 **색만 틀릴 뿐 코드는 절대 안 바뀐다.** 안전성의 핵심이자 4장 기여 ②다.
 
-**생성(lowering)은 어디서 나오나.** `blocklyToIr.js`의 핸들러들만 파이썬을 결정한다. 예를 들어 `ir_call`은 오직 `b.extraState`(`funcName`, `method`, `nargs`, `kw`)와 입력 블록에서 Call IR을 만든다:
+> **비유.** 형광펜으로 교과서에 밑줄을 긋는다고 문장 **내용**이 바뀌지 않는다. 밑줄(색=인식)을 엉뚱한 데 그어도 글자(코드=lowering)는 그대로다. BlockPy의 인식 오라클은 "밑줄 긋는 사람"일 뿐 "글을 고치는 사람"이 아니다.
+
+**예시로 대비.** 사용자가 `image.resize(100, 100)`을 변환했다고 하자.
+- **오라클이 맞힐 때**: "아, `image`는 PIL 이미지구나" 하고 블록을 에메랄드색으로 칠하고 파라미터 이름표(`size`)를 붙인다.
+- **오라클이 틀릴 때**: 라이브러리를 몰라 블록을 회색으로 둔다.
+- **두 경우 모두** 블록을 다시 파이썬으로 내리면 결과는 **똑같이** `image.resize(100, 100)`. 색·이름표는 달랐지만 코드는 한 글자도 안 변했다.
+
+**코드 수준에서 왜 그런가.** 생성(lowering)은 `blocklyToIr.js` 핸들러만 결정하고, 오직 `extraState`와 입력 블록에서만 파이썬을 만든다:
 
 ```js
-const fn = b.extraState && b.extraState.funcName;   // 구조/extraState에서만
-...
+// ir_call: 색·라벨·인식여부는 여기 "일절 등장하지 않는다"
+const fn = b.extraState && b.extraState.funcName;                 // 구조에서만
 func = String(fn).includes('.') ? dottedToExpr(fn) : { type: 'Name', id: fn };
 return { type: 'Call', func, args, keywords };
 ```
 
-색·라벨·인식 여부는 이 계산에 **일절 등장하지 않는다.**
+반면 색칠은 `libRegistry.js`의 `findLibCall`/`findConst`/`findAttr`가 하는데, **표시용 조회일 뿐** 위 계산에 끼어들지 않는다. 특정 라이브러리용 "스킨 블록"조차 `lowerLibBlock`이 **일반 `ir_call`과 동일한 Call IR**로 내린다. 따라서 인식은 표시를 승격할 뿐 코드를 못 바꾼다 — 이것이 **건전성(soundness) 정리**다.
 
-**색칠(recognition)은 어디서 나오나.** `libRegistry.js`의 `findLibCall`/`findConst`/`findAttr`는 순전히 표시용 조회다. 주석이 명시하듯 "colour is derived only, never persisted or part of lowering." `annotateOwnerTypes`가 붙이는 `_ownerType`도 `irToBlockly`가 "display-only"로만 나른다. Jedi 타입추론(`/api/infer-types`)은 정적이며 코드를 실행하지 않고, 오직 속성 색칠 정밀도만 높인다.
+---
 
-**Tier-A = ir_call 위의 스킨.** 등록된 라이브러리 블록(`lib_<module>_<func>`)조차 `lowerLibBlock`이 **일반 `ir_call`과 동일한 Call IR**로 lower한다:
+## 3.7 임의 라이브러리 introspection → 블록 (하드코딩 이름표 없음)
 
-```js
-function lowerLibBlock(b) {
-  const spec = reg.getLibSpec(b.type);
-  ...
-  const func = spec.module
-    ? { type: 'Attribute', value: { type: 'Name', id: spec.module }, attr: spec.func }
-    : { type: 'Name', id: spec.func };
-  return { type: 'Call', func, args, keywords: [] };
-}
+> **쉬운 설명.** "cv2는 이렇게, numpy는 저렇게"라고 손으로 적은 표는 **없다**(프로젝트 강제 원칙). 대신 진짜 파이썬 프로세스가 그 라이브러리를 `inspect`로 들여다보고, 무엇이 함수·클래스·메서드·상수·속성인지 스스로 알아낸다.
+
+> **비유.** 새 가전이 오면 설명서를 미리 외우는 게 아니라 제품을 **직접 열어 보고** 버튼이 몇 개인지 센다. `_inspect.py`가 라이브러리를 "열어 보는" 일을 한다.
+
+**예시 — pyserial 블록화 과정.**
+
+**(a) `_inspect.py` → LibrarySpec.** 별도 python 서브프로세스가 `serial.tools.list_ports`를 임포트해 `inspect`로 순회하며 이런 스펙을 만든다.
+
+```json
+{ "module": "serial.tools.list_ports",
+  "entries": [
+    { "kind": "function", "name": "comports",
+      "params": [ { "name": "include_links", "kind": "positional", "hasDefault": true } ],
+      "returns": true, "qualName": "serial.tools.list_ports.comports" },
+    { "kind": "function", "name": "grep" },
+    { "kind": "function", "name": "main" } ] }
 ```
 
-따라서 인식은 **표시를 승격**할 뿐 lowering을 바꾸지 않는다. 틀린 오라클은 블록을 **잘못 칠할(mis-color) 수만 있고 왕복된 파이썬을 바꿀 수 없다** — 이것이 건전성(soundness) 정리이며, `registerLibBlock`의 "block type collision" 거부와 `specFromDescriptor`의 exact-lowering 불변식(제목이 곧 lower될 호출과 일치)이 이를 코드로 강제한다.
+포착 범위가 넓다: `_is_call`은 `inspect.isfunction`이 놓치는 **C 루틴**(`method_descriptor` 등)까지 잡고, `_instance_attrs`는 **`__init__`의 `self.x =`를 (실행하지 않고) AST로 파싱**해 `ListPortInfo.device` 같은 인스턴스 속성까지 찾는다. **하드코딩이 없다** — `_dist_to_import`가 pip 배포명 `pyserial`을 `importlib.metadata`로 **런타임 해석**해 실제 임포트명 `serial`을 얻는다(표가 아니다).
 
-## 3.7 임의 라이브러리 introspection → 블록 파이프라인 (하드코딩 이름표 없음)
+**(b) 서버 노출.** `server.js`의 `POST /api/blockify`가 이 스크립트를 spawn(win32 트리 종료·60초 타임아웃·블로킹 임포트 방어)해 결과를 준다.
 
-> **쉬운 설명.** "cv2는 이렇게, numpy는 저렇게"라고 손으로 적은 표는 없다(프로젝트의 강제 원칙). 대신 진짜 파이썬 프로세스가 그 라이브러리를 `inspect`로 들여다보고, 무엇이 함수·클래스·메서드·상수·속성인지 스스로 알아낸다. 이것이 2.5 툴박스가 라이브러리마다 자동으로 채워지는 원리다.
+**(c) LibrarySpec → 레지스트리 스펙.** `libImport.js`의 `librarySpecToRegistrySpecs`가 번역한다.
+- **메서드 → 수신자 모델**: `Serial.write` → `serial.write`, 수신자 변수가 제목 접두이자 `argNames[0]` → `<recv>.write(...)`로 lower.
+- **바인딩 별칭**: `import numpy as np`면 `np.mean`으로 렌더(그냥 `numpy.mean`으로 렌더하면 드래그 시 NameError).
 
-**(a) `_inspect.py` → LibrarySpec.** `blockpy-gen/src/introspect/_inspect.py`가 별도 python 서브프로세스에서 실제 모듈을 임포트해 `inspect`로 순회(`_walk`)하며 `LibrarySpec { module, entries[...] }`를 만든다. 각 entry는 `{kind, name, owner, module, qualName, params[{name,kind,hasDefault}], returns, doc}`. 포착 범위가 넓다:
-- **C 루틴/호출 가능 객체**: `_is_call`은 `inspect.isfunction`이 놓치는 `builtin_function_or_method`·`method_descriptor`·numpy ufunc 같은 호출 가능 객체까지 잡는다(C 확장 라이브러리가 API를 거의 못 내놓던 원인 해결).
-- **속성**: `_property_names`가 `getattr_static`으로 클래스 레벨 디스크립터를, `_instance_attrs`가 **`__init__`의 `self.x =`를 AST로 파싱**(실행하지 않음)해 pyserial의 `ListPortInfo.device` 같은 인스턴스 속성까지 발견.
-- **상수**: `_const_type`이 스칼라/작은 튜플·frozenset/enum 멤버를 표면화하되 **정확 타입 검사**(isinstance 아님)로 numpy/pandas 래퍼를 리터럴로 오인하지 않는다.
-- **하드코딩 없음**: `_dist_to_import`가 pip 배포명(pyserial, opencv-python)을 `importlib.metadata`의 `top_level.txt`/`packages_distributions()`로 **런타임 해석**해 실제 임포트명(serial, cv2)을 얻는다. 표가 아니다.
-- 배너 출력이 JSON을 오염시키지 않도록 임포트 동안 fd 1을 stderr로 돌렸다가 마지막 JSON만 진짜 stdout으로 낸다. `_select`는 함수·클래스(헤드라인 API)를 모두 유지하고 나머지 예산을 method/constant/property에 라운드로빈으로 공평 분배한다.
+**(d) 레지스트리 & 툴박스.** `registerLibBlock`은 `staticCheck`(식별자·중복 검증)를 통과한 스펙만 받고, `irToolbox.js`가 이를 `categoryToolbox` JSON으로 합성한다(패키지별 탭, 카테고리 색). 각 필수 입력에는 **드래그 즉시 유효 파이썬**이 되도록 shadow 기본 자식을 단다(2.8) — 그래서 골든패스에서 `list_ports.comports()`를 툴박스에서 끌어내자마자 유효한 파이썬이 나왔다.
 
-**(b) 서버 노출.** `server.js`의 `POST /api/blockify`가 `introspect.js`의 `introspectModule`을 lazy-import해 위 스크립트를 spawn하고(win32 `taskkill` 트리 종료, 60초 타임아웃, 블로킹 임포트 방어), `validateSpec` 통과분만 반환한다. `/api/submodules`·`/api/deps`·`/api/infer-types`도 같은 introspect 디렉터리 스크립트를 쓴다.
-
-**(c) LibrarySpec → 레지스트리 스펙.** `libImport.js`의 `librarySpecToRegistrySpecs`가 blockpy-gen의 LibrarySpec을 앱 레지스트리(Tier-A) 방언으로 번역한다:
-- **dotted 모듈 → leaf 별칭**: `PIL.Image` → `Image`(그리고 `from PIL import Image` 임포트 문 표면화). `bindingAlias`는 **프로그램이 실제로 바인딩한 이름**으로 다시 써서 `import numpy as np`면 `np.mean`으로 렌더(드래그 시 NameError 방지).
-- **메서드 → 수신자 모델**: `Image.resize` → `image.resize`, 수신자 변수(owner 소문자)가 제목 접두이자 `argNames[0]`. `libRegistry.isMethodSpec`이 이를 감지해 `<recv>.resize(args[1:])`로 lower.
-- 값(command)/출력(reporter) 양면성: `-> None`은 command, 클래스 생성자는 reporter, 애매하면 둘 다 방출(`entryToSpec`).
-
-**(d) 레지스트리 & 툴박스.** `libRegistry.js`가 등록의 단일 진실원본(`SPECS`/`CONSTS`/`PROPS`/`MACROS`/`CURATIONS`, localStorage 지속). `registerLibBlock`은 `staticCheck`(식별자·중복·dotted 검증)를 통과한 스펙만 받고, dotted 모듈은 `lib_*` 캔버스 타입을 만들지 않고 **통합 `ir_call`**로 제공해 lowering을 정확히 유지한다. `findLibCall`/`findConst`/`findAttr`는 색칠 전용. 툴박스는 `irToolbox.js`가 `ir_*` 표를, 그리고 등록 라이브러리를 JS에서 `categoryToolbox` JSON으로 합성(패키지별 탭, 카테고리 색)하며, 각 필수 입력에는 **드래그 즉시 유효 파이썬**이 되도록 shadow 기본 자식을 단다(2.8 shadow 블록).
+---
 
 ## 3.8 Curate: 큐레이션(추상화/감축)
 
-> **쉬운 설명.** 수천 개 API를 가진 거대 라이브러리를 학생에게 다 보여주면 압도당한다. Curate는 초/중/고 수준별로 작은 교육용 블록셋을 골라 별도 ★ 탭으로 보여준다(2.13의 "낮은 바닥"을 라이브러리 층에서 실현). 이건 새 코드 생성 방식이 아니라 **기존 블록들 위의 "뷰"**다.
+> **쉬운 설명.** 수천 개 API를 가진 거대 라이브러리를 학생에게 다 보여주면 압도당한다(2.13 "낮은 바닥"). Curate는 초/중/고 수준별로 작은 교육용 블록셋만 골라 별도 ★ 탭으로 보여준다. 새 코드 생성 방식이 아니라 **기존 블록들 위의 "뷰"**다.
 
-- **AI 경로**: `server.js`의 `POST /api/abstract-library`가 introspected LibrarySpec(=ground truth)+목적을 MiniMax에 주고, 모델은 **인덱스 기반으로만** entry를 고른다. 서버가 환각 ref를 드롭하므로 시그니처는 항상 introspection에서 온다. 매크로는 arity 검증을 거친다.
-- **오프라인 휴리스틱**: `curateHeuristic.js`의 `curate`가 **AI 없이 동일한 응답 형태**(`{success, level, selected:[{ref,label,group,tier}], macros, thoughts}`)를 낸다. 신호는 전부 구조적/내성적이거나 사용자 목적 텍스트와의 키워드 겹침이다 — 인자 수 적음, 동사형 이름(`VERB_BUCKETS`는 라이브러리별 표가 아니라 범용 영어 API 동사 관례), 문서 존재, 목적어 일치(`scoreEntry`). **라이브러리별 이름표는 없다**(프로젝트 강제 제약).
-- **2단 점진 공개**: `tier: idx < cap ? 'core' : 'more'` — core 세트 + "더 보기".
-- **매크로**: `libImport.js`의 `macrosToRegistry`가 AI가 조합한 다단계 워크플로를 **평범한 `ir_*` 블록 트리**(assign/call/attribute/...)로 렌더한다. 새 블록 타입·특수 lowering이 없으므로 떨어진 프리미티브들이 일반 블록처럼 왕복한다. 휴리스틱 경로는 잘못된 arity 매크로가 깨진 파이썬을 낼 위험 때문에 매크로를 합성하지 않는다.
-- **★ 뷰**: `libRegistry.addCuration`은 이미 등록된 블록 타입들의 **목적별 부분집합**을 별도 탭으로 참조할 뿐, 스펙을 복제하지 않는다(블록 타입은 `SPECS`에서 유일). 즉 큐레이션은 등록 타입 위의 VIEW이지 새 lowering이 아니다 — 따라서 §3.6의 건전성이 그대로 유지된다.
+> **비유.** 백과사전 전체를 초등학생에게 던지지 않고, "오늘 수업에 필요한 5쪽"만 뽑아 스티커를 붙여 준다. 원본 백과사전(전체 라이브러리 탭)은 그대로 있다.
+
+- **AI 경로**: `POST /api/abstract-library`가 introspected 스펙(=진실)+목적을 MiniMax에 주되, 모델은 **정수 인덱스로만** entry를 고른다(이름을 지어내지 못하게). 서버가 환각 ref를 버리므로 시그니처는 항상 introspection에서 온다.
+- **오프라인 휴리스틱**: `curateHeuristic.js`가 **AI 없이 같은 응답 형태**를 낸다. 신호는 전부 구조적이다 — 인자 수 적음, 동사형 이름(범용 영어 동사 관례이지 라이브러리별 표가 아님), 문서 존재, 사용자 목적어와의 키워드 겹침.
+- **2단 점진 공개**: `tier: idx < cap ? 'core' : 'more'` — 핵심 세트를 앞에, 나머지는 접힌 "더 보기" 서랍에. **예시(골든패스 실측)**: `serial`을 같은 목적으로 큐레이트하면 초등 core=5개 < 고등 core=22개, 그리고 초등 core ⊆ 고등 core(레벨이 오르면 더 드러날 뿐 사라지지 않음).
+- **★ 뷰**: `addCuration`은 이미 등록된 블록 타입들의 부분집합을 **참조**할 뿐 스펙을 복제하지 않는다. 큐레이션은 등록 타입 위의 VIEW이지 새 lowering이 아니므로 §3.6의 건전성이 그대로 유지된다.
+
+---
 
 ## 3.9 오프라인 데스크톱 패키징
 
-> **쉬운 설명.** 인터넷 없이 도는 `.exe`가 대표 형태다. 브라우저 버전과 같은 백엔드·같은 파이썬을 통째로 넣는다.
+> **쉬운 설명.** 인터넷 없이 도는 `.exe`가 대표 형태다. 브라우저 버전과 **같은 백엔드·같은 파이썬**을 통째로 넣는다.
 
-Electron 앱(`electron/main.cjs`가 진입점, `package.json`의 `"main"`)이 **같은 `server.js`**를 loopback + Host-guard로 require해 Run과 introspection을 제공한다. `python-embed`(임베디드 파이썬)를 `asarUnpack`으로 풀어 실제 `python` 서브프로세스를 spawn하고, Blockly/Pyodide/Font Awesome는 벤더링(로컬)한다. SharedArrayBuffer 인터럽트를 위한 COOP/COEP 헤더도 임베디드 서버가 설정한다. 워크스페이스 파일 탐색기는 `/api/fs/*` 엔드포인트로 제공된다.
+Electron 앱(`electron/main.cjs`)이 **같은 `server.js`**를 loopback + Host-guard로 require해 Run과 introspection을 제공한다. `python-embed`(임베디드 파이썬, pyserial 등 포함)를 `asarUnpack`으로 풀어 실제 `python` 서브프로세스를 spawn하고, Blockly/Pyodide/Font Awesome는 로컬 벤더링한다. Pyodide 인터럽트(Stop)를 위한 COOP/COEP 헤더도 임베디드 서버가 설정한다.
+
+---
 
 ## 3.10 검증 방법 정리
 
-> **쉬운 설명.** "된다"를 말이 아니라 자동 테스트로 증명한다. 아래 표의 각 행이 1장에서 배운 성질(전수성·AST 동일성 등) 하나씩을 기계로 지킨다.
+> **쉬운 설명.** "된다"를 말이 아니라 자동 테스트로 증명한다. 각 행이 1장에서 배운 성질(전수성·AST 동일성 등)을 하나씩 기계로 지킨다.
 
 | 자산 | 무엇을 보장 | 위치 |
 |---|---|---|
-| 전수성 게이트 | CPython 3.12 모든 ast 노드가 분류되고 DB/SUGAR는 실제 핸들러 보유(raw=0) | `tests/ir_coverage.spec.js` (`NODE_POLICY`, `__handled`) |
-| 왕복 게이트(~186) | `python→IR→python` AST 동일성, 상수·주석·필드충돌(`_field_type`) 등 | `tests/ir_roundtrip.spec.js`, `ir_comments.spec.js`, `ir_unit.spec.js` |
+| 전수성 게이트 | 모든 ast 노드가 분류되고 DB/SUGAR는 실제 핸들러 보유(raw=0) | `tests/ir_coverage.spec.js` |
+| 왕복 게이트(~186) | `python→IR→python` AST 동일성, 상수·주석·필드충돌 | `ir_roundtrip`·`ir_comments`·`ir_unit`·`ir_curate` 등 |
 | 퍼즈 | 무작위 신규 프로그램의 AST 동일성 왕복 | `tests/e2e_convert_fuzz.py` |
-| 코퍼스(187) | node+CPython 실제 소스 왕복 | 왕복 스펙 |
-| 골든패스 E2E(제품) | 실제 UI 변환 흐름 | `tests/e2e_golden_path.py` |
-| gen(31) | introspection→스펙→codegen→툴박스, 생성 파이썬 문법 유효성 | `blockpy-gen/test/*.js` |
-| Tier-A 오라클 | 등록 스펙이 매칭 func+arity의 단일 `Expr(Call)`로 재파싱되는지(정적 `staticCheck` + 비동기 `validateSpecParse`) | `libRegistry.js` |
+| 골든패스 E2E(제품) | 실제 UI: 큐레이트 그래디언트+변환+편집+**툴박스 드래그→유효 파이썬** | `tests/e2e_golden_path.py` |
+| gen(31) | introspection→스펙→codegen, 생성 파이썬 문법 유효성 | `blockpy-gen/test/*.js` |
 
-이 층위들이 함께 "블록으로 표현 가능한 모든 파이썬 구문은, 색이 맞든 틀리든, 원본과 AST가 동일하게 왕복된다"는 제품의 핵심 계약을 기계적으로 뒷받침한다. 이 문장은 다음 장에서 학술 언어로 다시 쓰인다.
+이 층위들이 함께 "**블록으로 표현 가능한 모든 파이썬 구문은, 색이 맞든 틀리든, 원본과 AST가 동일하게 왕복된다**"는 제품의 핵심 계약을 기계로 뒷받침한다. 이 문장이 다음 장에서 학술 언어로 다시 쓰인다.
 
 ---
 
